@@ -66,65 +66,208 @@ O arquivo cai na pasta Downloads do tablet.
 
 ## 4. Descompactar
 
-De volta ao Termux:
+O arquivo que você baixou é um pacote fechado (ZIP). Este passo abre o pacote.
+
+Volte ao **Termux**.
+
+### 4.1 — Confira que o Termux está enxergando o download
+
+Digite:
+
+```bash
+ls ~/storage/downloads/
+```
+
+Deve aparecer uma lista dos seus downloads, e no meio dela um nome parecido
+com:
+
+```
+App-organizador--claude-tablet-notes-app-g0ho90.zip
+```
+
+> **Não apareceu nada, ou deu erro?** O `termux-setup-storage` do passo 2 não
+> foi autorizado. Rode ele de novo e toque em **Permitir**:
+> ```bash
+> termux-setup-storage
+> ```
+>
+> **Apareceu a lista mas sem nenhum `App-organizador`?** O download do passo 3
+> não completou. Refaça o passo 3.
+
+### 4.2 — Ir para a sua pasta pessoal
 
 ```bash
 cd ~
 ```
 
+O `~` é a sua pasta pessoal dentro do Termux. É onde o app vai morar.
+Este comando não mostra nada na tela — é normal.
+
+### 4.3 — Abrir o pacote
+
 ```bash
 unzip -o ~/storage/downloads/App-organizador*.zip -d organizador
 ```
 
-Vai passar um monte de linha na tela — é normal, é ele extraindo os arquivos.
+Lendo o comando: *"abra o pacote que começa com `App-organizador` que está nos
+meus downloads, e coloque o conteúdo numa pasta chamada `organizador`"*.
+
+O `*` existe para você não precisar digitar o nome comprido e exato.
+O `-o` significa "pode substituir arquivos antigos" — é o que faz as
+atualizações futuras funcionarem sem reclamação.
+
+**Vão passar umas 60 linhas na tela**, assim:
+
+```
+Archive:  /data/data/com.termux/files/home/storage/downloads/App-organizador--claude-...zip
+   creating: organizador/App-organizador--claude-tablet-notes-app-g0ho90/
+   creating: organizador/App-organizador--claude-tablet-notes-app-g0ho90/tablet/
+  inflating: organizador/App-organizador--claude-tablet-notes-app-g0ho90/tablet/index.html
+  inflating: organizador/App-organizador--claude-tablet-notes-app-g0ho90/tablet/manifest.json
+  ... (mais um monte de linhas assim)
+```
+
+Isso é o certo. `inflating` quer dizer "extraindo arquivo".
+
+### 4.4 — Confirmar que deu certo
+
+```bash
+ls ~/organizador/*/tablet/
+```
+
+Tem que aparecer exatamente esta lista:
+
+```
+assets  favicon.svg  icon-192.png  icon-512.png  index.html
+iniciar.sh  manifest.json  registerSW.js  sw.js  workbox-9c191d2f.js
+```
+
+Se apareceu isso, **o app está dentro do seu tablet**. Pode seguir.
+
+> Se der `No such file or directory`, o passo 4.3 não completou. Repita-o e
+> leia se apareceu alguma mensagem de erro no meio das linhas.
 
 ---
 
 ## 5. Ligar o app
 
+### 5.1 — O comando
+
 ```bash
 cd ~/organizador/*/tablet && bash iniciar.sh
 ```
 
-Deve aparecer:
+São duas coisas numa linha só: *"entre na pasta do app"* **e** *"ligue"*.
+
+### 5.2 — O que tem que aparecer
 
 ```
-  Organizador ligado.
+  ============================================
+    O Organizador está ligado.
 
-  Abra no Chrome do tablet:  http://localhost:8080
+    Abra no Chrome do tablet:
+    http://localhost:8080
+
+    Para desligar: Ctrl+C
+  ============================================
+
+  (as linhas abaixo são normais — é o app sendo aberto)
+
+Serving HTTP on 0.0.0.0 port 8080 (http://0.0.0.0:8080/) ...
 ```
 
-**Deixe o Termux aberto nesse estado.** Ele fica parado assim de propósito — é
-o app funcionando.
+### 5.3 — E agora ele trava. É proposital.
+
+Depois dessa última linha o Termux **para e não aceita mais comandos**. Isso
+não é travamento: é o app no ar. Enquanto essa tela estiver assim, o app
+funciona.
+
+**Deixe o Termux exatamente assim e vá para o passo 6.** Não feche, não aperte
+nada. Use o botão de trocar de app do Android para ir ao Chrome.
+
+Conforme você usar o app, vão aparecendo linhas novas aqui (`GET /index.html
+200`). São o Termux entregando os arquivos. É sinal de que está funcionando.
+
+### Se algo der errado no passo 5
+
+| O que apareceu | O que é | O que fazer |
+|---|---|---|
+| `ERRO: não achei os arquivos do app nesta pasta` | Você está na pasta errada | Rode o comando 5.1 inteiro, incluindo a parte do `cd` |
+| `ERRO: o Python não está instalado` | O passo 2 não completou | `pkg install python -y` |
+| `Address already in use` | O app já está ligado em outra aba | Não precisa fazer nada, vá para o passo 6 |
+| `No such file or directory` | O passo 4 não completou | Volte ao passo 4.4 e confira |
 
 ---
 
-## 6. Instalar na tela inicial
+## 6. Abrir e instalar na tela inicial
 
-1. Abra o **Chrome** no tablet
-2. Digite na barra de endereço: **localhost:8080**
-3. O Organizador abre
-4. Toque no menu do Chrome (os três pontinhos ⋮)
-5. Toque em **Instalar aplicativo** (ou "Adicionar à tela inicial")
+### 6.1 — Abrir
 
-Pronto. O ícone do Organizador aparece na sua tela inicial.
+1. Vá para o **Chrome** (deixe o Termux rodando atrás)
+2. Na barra de endereço, digite exatamente: **`localhost:8080`**
+3. Aperte Enter
 
-**Espere uns 10 segundos com o app aberto na primeira vez.** É o tempo dele
-guardar tudo dentro do tablet.
+O Organizador abre: barra escura à esquerda com "Bloco de Anotações", a folha
+com as zonas TÓPICOS / ANOTAÇÃO / DÚVIDAS, e as ferramentas à direita.
+
+> **Precisa ser `localhost`.** Se você usar o IP da rede, o Chrome trata o app
+> como site desconhecido: não oferece instalar e **não libera o microfone**
+> (a gravação de áudio para de funcionar).
+
+### 6.2 — Deixe aberto uns 10 segundos
+
+Nesse tempo o app copia a si mesmo para dentro do tablet. É o que faz ele
+funcionar depois sem o Termux. Não pule esta parte.
+
+### 6.3 — Instalar
+
+1. Toque no menu do Chrome (três pontinhos **⋮**, canto superior direito)
+2. Procure **Instalar aplicativo**
+   - Pode aparecer como **Adicionar à tela inicial** — é a mesma coisa
+3. Confirme
+
+O ícone do Organizador (roxo, com um traço branco) aparece na sua tela inicial.
+
+> **Não achou a opção no menu?** Quase sempre é o endereço: confira que está em
+> `localhost:8080` e não em outra coisa. Recarregue a página e tente de novo.
+
+### 6.4 — Testar de verdade
+
+O teste que mostra que deu tudo certo:
+
+1. Feche o Chrome
+2. **Feche o Termux** (deslize para fora dos apps recentes)
+3. Toque no ícone do Organizador na tela inicial
+
+Ele tem que abrir normalmente, em tela cheia, sem barra de navegador. Escreva
+alguma coisa com a caneta e feche. Abra de novo: sua anotação continua lá.
+
+**Se abriu, acabou.** O app é seu, roda offline, e o Termux só volta a ser
+necessário quando eu mandar uma versão nova.
 
 ---
 
-## Depois disso
+## Usando no dia a dia
 
-**Você não precisa mais do Termux para usar o app.** Ele fica guardado dentro
-do tablet e abre pelo ícone, offline, em qualquer lugar. Pode fechar o Termux.
+Abra pelo **ícone na tela inicial**. Só isso. Não precisa de Termux, nem de
+internet, nem de Wi-Fi.
 
-Se um dia o app não abrir pelo ícone (o Android às vezes limpa coisas guardadas),
-é só ligar o Termux de novo e abrir o app uma vez.
+Suas anotações ficam gravadas dentro do tablet, no armazenamento do próprio
+app.
 
-### Atalho para ligar o Termux mais rápido
+> **Cuidado:** não use "Limpar dados" do Chrome nem apps de limpeza que apagam
+> dados de navegador — eles apagam suas anotações junto. Exportar para arquivo
+> ainda não existe; é uma das próximas coisas a construir.
 
-Rode isto uma vez:
+### Se um dia o ícone não abrir
+
+O Android às vezes limpa apps guardados quando o armazenamento fica cheio.
+Solução: ligue o Termux, rode o comando do passo 5, abra `localhost:8080` uma
+vez no Chrome. Volta ao normal.
+
+### Atalho para não digitar o comando comprido
+
+Rode isto **uma única vez**:
 
 ```bash
 echo 'alias organizador="cd ~/organizador/*/tablet && bash iniciar.sh"' >> ~/.bashrc
@@ -138,10 +281,31 @@ organizador
 
 ---
 
-## Quando eu melhorar o app
+## Quando eu mandar uma versão nova
 
-Você repete só os passos **3, 4 e 5** (baixar o ZIP novo, descompactar, ligar).
-Depois abra o app pelo ícone e ele se atualiza sozinho.
+**Primeiro, no Termux, apague o ZIP antigo:**
+
+```bash
+rm -f ~/storage/downloads/App-organizador*.zip
+```
+
+Isso é importante. Se sobrarem dois ZIPs (o velho e o novo), o Chrome nomeia o
+novo com `(1)` no fim, o `*` do comando passa a encontrar dois arquivos, e o
+`unzip` não sabe qual usar — ele reclama e não extrai nada.
+
+**Depois:**
+
+1. Chrome → seu repositório → **Code** → **Download ZIP**
+2. Termux:
+   ```bash
+   cd ~
+   unzip -o ~/storage/downloads/App-organizador*.zip -d organizador
+   cd ~/organizador/*/tablet && bash iniciar.sh
+   ```
+3. Abra o app pelo ícone. Ele se atualiza sozinho.
+
+**Suas anotações não se perdem na atualização.** Elas ficam guardadas separadas
+dos arquivos do app.
 
 ---
 
