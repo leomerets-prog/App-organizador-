@@ -45,25 +45,27 @@ Feito para o Lenovo Idea Tab com caneta, mas roda em qualquer tablet.
 
 ---
 
-## Rodando no tablet
+## Instalando no tablet
+
+Passo a passo completo em **[GUIA-TABLET.md](GUIA-TABLET.md)** — roda tudo
+dentro do tablet, via Termux, sem computador e sem nuvem.
+
+A pasta **`tablet/`** já contém o app compilado e pronto. No tablet não se
+compila nada: basta servir essa pasta.
+
+## Desenvolvendo (no computador)
 
 ```bash
 npm install
-npm run dev
+npm run dev            # servidor de desenvolvimento
+npm run test:scribble  # teste do gesto do rabisco
+npm run build:tablet   # regenera a pasta tablet/ (commitar junto)
 ```
 
-O terminal mostra dois endereços. Use o **Network** (`http://192.168.x.x:5173`)
-no Chrome do tablet — o computador e o tablet precisam estar no mesmo Wi-Fi.
+`npm run dev` mostra dois endereços; o **Network** abre no tablet pelo Wi-Fi.
 
-Para instalar como app na tela inicial: menu do Chrome → **Instalar aplicativo**.
-Ele passa a abrir em tela cheia, com ícone próprio, e funciona offline.
-
-Para gerar a versão final:
-
-```bash
-npm run build      # gera dist/
-npm run preview    # serve dist/ para testar
-```
+> Ao mudar qualquer coisa em `src/`, rode `npm run build:tablet` e comite a
+> pasta `tablet/` junto — é dela que o tablet lê.
 
 ---
 

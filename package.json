@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host",
     "build": "tsc -b && vite build",
+    "build:tablet": "tsc -b && vite build --outDir tablet --emptyOutDir",
     "preview": "vite preview --host",
     "typecheck": "tsc -b --noEmit",
     "test:scribble": "esbuild tools/scribble-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/scribble-test.mjs --log-level=error && node node_modules/.cache/scribble-test.mjs"

@@ -8,6 +8,10 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg'],
+      // O servidor simples do Termux (python -m http.server) não conhece a
+      // extensão .webmanifest e a entrega com o tipo errado, o que faz o
+      // Chrome recusar a instalação. Com .json o tipo sai correto.
+      manifestFilename: 'manifest.json',
       manifest: {
         name: 'Organizador',
         short_name: 'Organizador',
@@ -24,7 +28,10 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,json,woff2}'],
+        // Depois da primeira abertura o app roda direto do cache: o ícone na
+        // tela inicial funciona mesmo com o servidor desligado.
+        navigateFallback: 'index.html',
       },
     }),
   ],
