@@ -16,8 +16,10 @@ import { buildZones } from '../domain/templates'
 import * as repo from '../db/repo'
 import { newId } from '../lib/id'
 import { boundsOf, unionBounds } from '../lib/geometry'
-import { PAGE_WIDTH, PAGE_MIN_HEIGHT, PAGE_GROWTH } from '../domain/constants'
+import { PAGE_WIDTH, PAGE_MIN_HEIGHT, PAGE_GROWTH, HIGHLIGHTER_WIDTH } from '../domain/constants'
 import { zoneAtPoint } from '../zones/hit'
+import { applyTheme, loadPrefs, savePrefs } from './prefs'
+import type { Theme } from './prefs'
 
 /**
  * Estado da aplicação e todas as ações que mudam dados.
@@ -47,6 +49,7 @@ export interface AppState {
   penColor: string
   penWidth: number
   showZones: boolean
+  theme: Theme
   selection: Set<Id>
 
   // Gravação em andamento
@@ -73,6 +76,8 @@ export interface AppState {
   setPenColor: (color: string) => void
   setPenWidth: (width: number) => void
   toggleZones: () => void
+  setTheme: (theme: Theme) => void
+  toggleTheme: () => void
 
   commitStroke: (points: InkPoint[], startedAt: number) => Promise<void>
   eraseStrokes: (ids: Id[]) => Promise<void>
@@ -94,6 +99,23 @@ export interface AppState {
 /** Guarda do arranque: garante uma única execução por carregamento do app. */
 let initOnce: Promise<void> | null = null
 
+/**
+ * Preferências lidas antes de a loja existir: assim a primeira pintura da tela
+ * já sai no tema certo, sem piscar do escuro pro claro.
+ */
+const initialPrefs = loadPrefs()
+applyTheme(initialPrefs.theme)
+
+function persist(get: () => AppState): void {
+  const s = get()
+  savePrefs({
+    theme: s.theme,
+    penColor: s.penColor,
+    penWidth: s.penWidth,
+    showZones: s.showZones,
+  })
+}
+
 export const useStore = create<AppState>((set, get) => ({
   notebooks: [],
   sections: [],
@@ -108,9 +130,10 @@ export const useStore = create<AppState>((set, get) => ({
   recordings: [],
 
   tool: 'pen',
-  penColor: '#f4f4f5',
-  penWidth: 3.2,
-  showZones: true,
+  penColor: initialPrefs.penColor,
+  penWidth: initialPrefs.penWidth,
+  showZones: initialPrefs.showZones,
+  theme: initialPrefs.theme,
   selection: new Set(),
 
   activeRecordingId: null,
@@ -259,9 +282,31 @@ export const useStore = create<AppState>((set, get) => ({
   // ─── Ferramentas ───────────────────────────────────────────────────────────
 
   setTool: (tool) => set({ tool, selection: tool === 'lasso' ? get().selection : new Set() }),
-  setPenColor: (penColor) => set({ penColor }),
-  setPenWidth: (penWidth) => set({ penWidth }),
-  toggleZones: () => set({ showZones: !get().showZones }),
+
+  setPenColor(penColor) {
+    set({ penColor })
+    persist(get)
+  },
+
+  setPenWidth(penWidth) {
+    set({ penWidth })
+    persist(get)
+  },
+
+  toggleZones() {
+    set({ showZones: !get().showZones })
+    persist(get)
+  },
+
+  setTheme(theme) {
+    applyTheme(theme)
+    set({ theme })
+    persist(get)
+  },
+
+  toggleTheme() {
+    get().setTheme(get().theme === 'dark' ? 'light' : 'dark')
+  },
 
   // ─── Tinta ─────────────────────────────────────────────────────────────────
 
@@ -277,7 +322,7 @@ export const useStore = create<AppState>((set, get) => ({
       pageId: activePageId,
       points,
       color: penColor,
-      width: penWidth,
+      width: tool === 'highlighter' ? HIGHLIGHTER_WIDTH : penWidth,
       tool: tool === 'highlighter' ? 'highlighter' : 'pen',
       zoneId: zoneAtPoint(zones, center)?.id ?? null,
       startedAt,

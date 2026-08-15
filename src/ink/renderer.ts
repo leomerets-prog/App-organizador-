@@ -1,6 +1,7 @@
 import type { Item, Stroke, Zone } from '../domain/types'
 import { ZONE_COLORS } from '../domain/templates'
 import { HIGHLIGHTER_ALPHA, pathForStroke, strokeToPath } from './stroke'
+import { INK_COLOR, LEGACY_INK_COLOR } from '../domain/constants'
 import type { StrokeStyle } from './stroke'
 import type { Pt } from '../lib/geometry'
 
@@ -58,9 +59,23 @@ export const DARK_THEME: Theme = {
 
 export const LIGHT_THEME: Theme = {
   paper: '#fbfaf7',
-  rule: '#e6e2d9',
+  rule: '#e8e4da',
   zoneLabel: '#a1a1aa',
-  ink: '#18181b',
+  ink: '#1c1c20',
+}
+
+export const THEMES = { dark: DARK_THEME, light: LIGHT_THEME }
+
+/**
+ * Cor com que o traço é realmente pintado.
+ *
+ * A cor padrão da caneta é guardada como símbolo, não como valor: assim a
+ * anotação escrita no tema escuro continua legível no tema claro, em vez de
+ * virar tinta branca em papel branco. Cores escolhidas de propósito (azul,
+ * vermelho...) são respeitadas como estão, porque funcionam nos dois papéis.
+ */
+export function resolveInk(color: string, theme: Theme): string {
+  return color === INK_COLOR || color === LEGACY_INK_COLOR ? theme.ink : color
 }
 
 const RULE_SPACING = 38
@@ -86,7 +101,7 @@ export function render(ctx: CanvasRenderingContext2D, input: RenderInput): void 
   drawRules(ctx, vp, theme, top, bottom)
   if (input.showZones) drawZones(ctx, input.zones, vp, theme)
   drawStrokes(ctx, input, top, bottom)
-  if (input.liveStroke) drawLiveStroke(ctx, input.liveStroke)
+  if (input.liveStroke) drawLiveStroke(ctx, input.liveStroke, theme)
   drawItemMarkers(ctx, input.items, vp)
   if (input.lassoPath) drawLasso(ctx, input.lassoPath)
 
@@ -160,15 +175,16 @@ function drawStrokes(
       ctx.globalAlpha = HIGHLIGHTER_ALPHA
       ctx.globalCompositeOperation = 'multiply'
     }
+    const ink = resolveInk(stroke.color, input.theme)
     if (input.pendingErase.has(stroke.id)) {
       ctx.globalAlpha = 0.25
       ctx.fillStyle = '#ef4444'
     } else if (input.selected.has(stroke.id)) {
-      ctx.fillStyle = stroke.color
+      ctx.fillStyle = ink
       ctx.shadowColor = '#3b82f6'
       ctx.shadowBlur = 12
     } else {
-      ctx.fillStyle = stroke.color
+      ctx.fillStyle = ink
     }
     ctx.fill(pathForStroke(stroke))
     ctx.restore()
@@ -178,6 +194,7 @@ function drawStrokes(
 function drawLiveStroke(
   ctx: CanvasRenderingContext2D,
   live: NonNullable<RenderInput['liveStroke']>,
+  theme: Theme,
 ): void {
   const d = strokeToPath(live.points, live.style)
   if (!d) return
@@ -186,7 +203,7 @@ function drawLiveStroke(
     ctx.globalAlpha = HIGHLIGHTER_ALPHA
     ctx.globalCompositeOperation = 'multiply'
   }
-  ctx.fillStyle = live.style.color
+  ctx.fillStyle = resolveInk(live.style.color, theme)
   ctx.fill(new Path2D(d))
   ctx.restore()
 }

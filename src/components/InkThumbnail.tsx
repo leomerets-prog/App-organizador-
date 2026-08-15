@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react'
 import { getDb } from '../db/database'
 import type { Bounds, Stroke } from '../domain/types'
 import { strokeToPath } from '../ink/stroke'
+import { THEMES, resolveInk } from '../ink/renderer'
+import { useStore } from '../state/store'
 
 /**
  * Recorte da letra do usuário.
@@ -11,6 +13,7 @@ import { strokeToPath } from '../ink/stroke'
  */
 export function InkThumbnail({ itemId, bounds }: { itemId: string; bounds: Bounds }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const theme = useStore((s) => s.theme)
 
   useEffect(() => {
     let cancelled = false
@@ -55,7 +58,7 @@ export function InkThumbnail({ itemId, bounds }: { itemId: string; bounds: Bound
           tool: stroke.tool,
         })
         if (!d) continue
-        ctx.fillStyle = stroke.color
+        ctx.fillStyle = resolveInk(stroke.color, THEMES[theme])
         ctx.globalAlpha = stroke.tool === 'highlighter' ? 0.35 : 1
         ctx.fill(new Path2D(d))
       }
@@ -65,7 +68,7 @@ export function InkThumbnail({ itemId, bounds }: { itemId: string; bounds: Bound
     return () => {
       cancelled = true
     }
-  }, [itemId, bounds])
+  }, [itemId, bounds, theme])
 
   return <canvas className="ink-thumb" ref={canvasRef} />
 }

@@ -18,10 +18,18 @@ Feito para o Lenovo Idea Tab com caneta, mas roda em qualquer tablet.
 - Quatro modelos de folha: Reunião, Levantamento, Estudo, Livre
 - Marca-texto, laço e borracha
 
-**Rabisco apaga** — para caneta sem botão de borracha
-- Rabisque **três voltas** por cima do que quer apagar, ou faça um **vaivém**
-- O app reconhece o gesto pelo formato e apaga só o que foi rabiscado
+**Rabisco liga a borracha** — para caneta sem botão de borracha
+- Rabisque **três voltas** em qualquer lugar da folha, ou faça um **vaivém**
+- A borracha liga. O rabisco não apaga nada sozinho: quem escolhe o que
+  apagar é a mão, arrastando depois
+- Uma faixa avisa que a borracha está ligada; toque nela para voltar à caneta
 - Escrever normalmente nunca dispara o gesto (ver "O gesto do rabisco" abaixo)
+
+**Espessura e tema**
+- Barra contínua de espessura, de 0,3 a 14 — o traço fino é fino de verdade
+- Tema claro e escuro. Segue o tema do Android na primeira abertura
+- A cor padrão da caneta acompanha o tema: o que você escreveu no escuro
+  continua legível no claro
 
 **Carimbos**
 - Pegue o laço, cerque uma anotação, escolha: Tarefa, Dúvida, Tópico,
@@ -119,13 +127,15 @@ grava no banco em seguida. É isso que mantém a escrita fluida.
 
 ## Próximas etapas
 
-1. **Transcrição da letra** (OCR) — a peça está desenhada no modelo de dados
+1. **Exportar as anotações** para arquivo — hoje elas só existem dentro do
+   tablet, e limpar os dados do navegador as apaga
+2. **Transcrição da letra** (OCR) — a peça está desenhada no modelo de dados
    (`Item.ocr`) mas ainda não ligada. Na fase PWA usa um serviço de visão com
    internet; quando o app virar Android nativo, passa a usar ML Kit, que roda
    offline e sem custo.
-2. **Áudio ligado à tinta** — tocar num traço e ouvir o trecho da gravação
+3. **Áudio ligado à tinta** — tocar num traço e ouvir o trecho da gravação
    daquele momento. Os dados necessários já estão sendo guardados.
-3. **Zonas editáveis na folha** — arrastar as bordas, criar zona nova à mão.
-4. **Ícones personalizados** — você cria os seus carimbos, com os seus
+4. **Zonas editáveis na folha** — arrastar as bordas, criar zona nova à mão.
+5. **Ícones personalizados** — você cria os seus carimbos, com os seus
    significados.
-5. **Empacotar como app Android**.
+6. **Empacotar como app Android**.

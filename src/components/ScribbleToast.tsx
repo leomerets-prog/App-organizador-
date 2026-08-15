@@ -1,24 +1,28 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 
 /**
- * Aviso rápido de que o rabisco apagou.
+ * Confirmação de que o rabisco foi reconhecido.
  *
- * Sem isso o traço some e fica a dúvida: foi o gesto ou foi bug? O aviso é a
- * confirmação de que o app entendeu o gesto — e some sozinho.
+ * Sem isso o gesto ligaria a borracha em silêncio e o próximo traço sumiria
+ * sem explicação. O aviso some sozinho; quem fica na tela avisando que a
+ * borracha está ligada é a faixa fixa, não este aviso.
  */
-export function ScribbleToast({ count, onDone }: { count: number; onDone: () => void }) {
-  useEffect(() => {
-    if (count === 0) return
-    const timer = setTimeout(onDone, 1600)
-    return () => clearTimeout(timer)
-  }, [count, onDone])
+export function ScribbleToast({ trigger }: { trigger: number }) {
+  const [visible, setVisible] = useState(false)
 
-  if (count === 0) return null
+  useEffect(() => {
+    if (trigger === 0) return
+    setVisible(true)
+    const timer = setTimeout(() => setVisible(false), 1800)
+    return () => clearTimeout(timer)
+  }, [trigger])
+
+  if (!visible) return null
 
   return (
     <div className="scribble-toast" role="status">
-      <span className="scribble-toast-icon">✎</span>
-      {count === 1 ? 'Rabisco apagou 1 traço' : `Rabisco apagou ${count} traços`}
+      <span className="scribble-toast-icon">⌫</span>
+      Rabisco reconhecido — borracha ligada
     </div>
   )
 }

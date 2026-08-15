@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../state/store'
-import { DARK_THEME, render } from '../ink/renderer'
+import { THEMES, render } from '../ink/renderer'
 import type { Viewport } from '../ink/renderer'
 import { PenTracker, StrokeBuilder, pressureFrom, strokesHitByPath, strokesInsideLasso } from '../ink/input'
 import { analyzeScribble } from '../ink/scribble'
@@ -39,16 +39,18 @@ export function PageCanvas() {
   const penWidth = useStore((s) => s.penWidth)
   const showZones = useStore((s) => s.showZones)
   const selection = useStore((s) => s.selection)
+  const theme = useStore((s) => s.theme)
 
   const commitStroke = useStore((s) => s.commitStroke)
   const eraseStrokes = useStore((s) => s.eraseStrokes)
   const setSelection = useStore((s) => s.setSelection)
   const toggleItemStatus = useStore((s) => s.toggleItemStatus)
+  const setTool = useStore((s) => s.setTool)
 
   const page = pages.find((p) => p.id === activePageId) ?? null
 
   const [scrollY, setScrollY] = useState(0)
-  const [scribbleFeedback, setScribbleFeedback] = useState(0)
+  const [gestureNotice, setGestureNotice] = useState(0)
 
   // Referências mutáveis: mudam a cada evento de ponteiro e não devem
   // provocar re-render do React.
@@ -62,14 +64,14 @@ export function PageCanvas() {
   scrollRef.current = scrollY
 
   // Espelhos do estado pro laço de desenho, que roda fora do ciclo do React.
-  const stateRef = useRef({ strokes, zones, items, tool, penColor, penWidth, showZones, selection })
-  stateRef.current = { strokes, zones, items, tool, penColor, penWidth, showZones, selection }
+  const stateRef = useRef({ strokes, zones, items, tool, penColor, penWidth, showZones, selection, theme })
+  stateRef.current = { strokes, zones, items, tool, penColor, penWidth, showZones, selection, theme }
 
   const markDirty = useCallback(() => {
     dirty.current = true
   }, [])
 
-  useEffect(markDirty, [strokes, zones, items, showZones, selection, scrollY, markDirty])
+  useEffect(markDirty, [strokes, zones, items, showZones, selection, scrollY, theme, markDirty])
 
   // ─── Escala e tamanho ──────────────────────────────────────────────────────
 
@@ -159,7 +161,7 @@ export function PageCanvas() {
         pendingErase: pendingErase.current,
         selected: st.selection,
         showZones: st.showZones,
-        theme: DARK_THEME,
+        theme: THEMES[st.theme],
       })
 
       dirty.current = false
@@ -299,18 +301,17 @@ export function PageCanvas() {
     if (gesture.kind === 'draw' && gesture.builder && gesture.builder.length > 0) {
       const points = gesture.builder.points
 
-      // AQUI mora o gesto que substitui a borracha que a caneta não tem:
-      // o traço acabou de sair da caneta e é analisado antes de virar tinta.
-      const analysis = analyzeScribble(points)
-      if (analysis.isScribble) {
-        const hit = strokesHitByPath(stateRef.current.strokes, points)
-        if (hit.length > 0) {
-          setScribbleFeedback(hit.length)
-          await eraseStrokes(hit)
-          dirty.current = true
-          return
-        }
-        // Rabiscou no vazio: não apagou nada, então vira tinta normal.
+      // AQUI mora o gesto que substitui a borracha que a caneta não tem.
+      //
+      // O rabisco LIGA A BORRACHA — não apaga nada por conta própria. Quem
+      // escolhe o que apagar é a mão, arrastando depois. Assim o gesto nunca
+      // destrói o que estava embaixo dele, e reconhecer errado custa só um
+      // toque pra voltar à caneta.
+      if (analyzeScribble(points).isScribble) {
+        setGestureNotice((n) => n + 1)
+        setTool('eraser')
+        dirty.current = true
+        return
       }
 
       await commitStroke(points, Date.now())
@@ -323,7 +324,7 @@ export function PageCanvas() {
     }
 
     dirty.current = true
-  }, [commitStroke, eraseStrokes, setSelection])
+  }, [commitStroke, eraseStrokes, setSelection, setTool])
 
   const onPointerUp = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -375,7 +376,14 @@ export function PageCanvas() {
         onContextMenu={(e) => e.preventDefault()}
       />
       <ScrollHint scrollY={scrollY} height={page.height} viewHeight={sizeRef.current.h / scaleRef.current} />
-      <ScribbleToast count={scribbleFeedback} onDone={() => setScribbleFeedback(0)} />
+      <ScribbleToast trigger={gestureNotice} />
+      {tool === 'eraser' && (
+        <button className="eraser-banner" onClick={() => setTool('pen')}>
+          <span className="eraser-banner-dot" />
+          Borracha ligada — arraste pra apagar
+          <strong>Voltar à caneta</strong>
+        </button>
+      )}
     </div>
   )
 }

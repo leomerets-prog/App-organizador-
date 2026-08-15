@@ -12,14 +12,28 @@ export const PAGE_MIN_HEIGHT = 1754
 /** Quanto a folha ganha de altura quando a escrita chega perto do fim. */
 export const PAGE_GROWTH = 900
 
+/**
+ * Cor padrão da caneta. Não é uma cor fixa: é um símbolo que o desenho resolve
+ * conforme o tema — escuro no papel claro, claro no papel escuro. Sem isso, a
+ * anotação feita no tema escuro sumiria ao trocar pro claro.
+ */
+export const INK_COLOR = 'ink'
+
+/**
+ * Cor branca usada como padrão antes de existir o tema claro.
+ * Anotações antigas ficam com ela gravada; o desenho a trata como INK_COLOR
+ * pra que não sumam no papel branco.
+ */
+export const LEGACY_INK_COLOR = '#f4f4f5'
+
 /** Cores da caneta na barra de ferramentas. */
 export const PEN_COLORS = [
-  '#f4f4f5',
-  '#60a5fa',
-  '#34d399',
-  '#fbbf24',
-  '#f87171',
-  '#c084fc',
+  INK_COLOR,
+  '#3b82f6',
+  '#10b981',
+  '#f59e0b',
+  '#ef4444',
+  '#a855f7',
 ] as const
 
 /** Cores disponíveis pras lombadas de blocos e seções. */
@@ -34,4 +48,19 @@ export const NOTEBOOK_COLORS = [
   '#ef4444',
 ] as const
 
-export const PEN_WIDTHS = [1.8, 3.2, 5.5, 9] as const
+/**
+ * Faixa da espessura da caneta, em px de página.
+ *
+ * O mínimo é bem fino de propósito: a espessura vira traço de verdade depois
+ * de multiplicada pela escala da tela, e num tablet grande a folha aparece
+ * ampliada — o que era fino no papel engrossa na tela.
+ */
+export const PEN_WIDTH_MIN = 0.3
+export const PEN_WIDTH_MAX = 14
+export const PEN_WIDTH_DEFAULT = 2.4
+
+/** Espessuras de atalho, pra não precisar mirar na barra toda hora. */
+export const PEN_WIDTH_PRESETS = [0.6, 1.2, 2.4, 5, 9] as const
+
+/** O marca-texto é sempre grosso; a barra da caneta não vale pra ele. */
+export const HIGHLIGHTER_WIDTH = 22
