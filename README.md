@@ -25,6 +25,14 @@ Feito para o Lenovo Idea Tab com caneta, mas roda em qualquer tablet.
 - Uma faixa avisa que a borracha está ligada; toque nela para voltar à caneta
 - Escrever normalmente nunca dispara o gesto (ver "O gesto do rabisco" abaixo)
 
+**Zoom**
+- Pinça com dois dedos aproxima e afasta a folha
+- Botões − / % / + no canto inferior esquerdo; tocar na porcentagem volta ao
+  tamanho da folha
+- Aproximar faz sua letra ocupar menos espaço da página, então cabe mais
+- Com zoom, arrastar um dedo move a folha nas duas direções
+- A aproximação escolhida fica guardada entre aberturas
+
 **Espessura e tema**
 - Barra contínua de espessura, de 0,3 a 14 — o traço fino é fino de verdade
 - Tema claro e escuro. Segue o tema do Android na primeira abertura
@@ -109,7 +117,7 @@ Cada pasta tem um trabalho só:
 ```
 src/
   domain/      modelo de dados, modelos de folha, medidas da página
-  ink/         captura da caneta, desenho do traço, gesto do rabisco
+  ink/         captura da caneta, desenho do traço, gesto do rabisco, zoom
   zones/       em que zona um ponto caiu
   db/          persistência local (IndexedDB)
   state/       estado do app e todas as ações que mudam dados

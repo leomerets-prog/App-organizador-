@@ -2,27 +2,51 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import { THEMES, render } from '../ink/renderer'
 import type { Viewport } from '../ink/renderer'
-import { PenTracker, StrokeBuilder, pressureFrom, strokesHitByPath, strokesInsideLasso } from '../ink/input'
+import {
+  PenTracker,
+  StrokeBuilder,
+  pressureFrom,
+  strokesHitByPath,
+  strokesInsideLasso,
+} from '../ink/input'
 import { analyzeScribble } from '../ink/scribble'
 import { PAGE_WIDTH } from '../domain/constants'
 import type { Pt } from '../lib/geometry'
+import {
+  INITIAL_VIEW,
+  ZOOM_STEP,
+  clampView,
+  clampZoom,
+  computeMetrics,
+  formatZoom,
+  midpoint,
+  pinchDistance,
+  resetZoom,
+  screenToPage,
+  stepZoom,
+} from '../ink/viewport'
+import type { Layout, ViewState } from '../ink/viewport'
 import { ScribbleToast } from './ScribbleToast'
 
 /**
  * A folha.
  *
  * Um canvas só, redesenhado por requestAnimationFrame quando algo muda. O
- * traço em andamento é desenhado direto do buffer de pontos, sem passar pelo
- * estado do React — é isso que segura a escrita fluida na velocidade da caneta.
+ * traço em andamento e o estado da janela (zoom e rolagem) vivem em refs, fora
+ * do ciclo do React — é isso que segura a escrita e a pinça na velocidade da
+ * mão, sem re-renderizar a árvore a cada quadro.
  */
 
 interface Gesture {
-  kind: 'draw' | 'erase' | 'lasso' | 'pan'
+  kind: 'draw' | 'erase' | 'lasso' | 'pan' | 'pinch'
   pointerId: number
   builder?: StrokeBuilder
   lasso?: Pt[]
-  panStartY?: number
-  panStartScroll?: number
+  /** Ponto da tela onde o arrasto começou, e a janela naquele instante. */
+  fromScreen?: Pt
+  fromView?: ViewState
+  /** Distância inicial entre os dedos, na pinça. */
+  fromDistance?: number
 }
 
 export function PageCanvas() {
@@ -40,42 +64,55 @@ export function PageCanvas() {
   const showZones = useStore((s) => s.showZones)
   const selection = useStore((s) => s.selection)
   const theme = useStore((s) => s.theme)
+  const savedZoom = useStore((s) => s.zoom)
 
   const commitStroke = useStore((s) => s.commitStroke)
   const eraseStrokes = useStore((s) => s.eraseStrokes)
   const setSelection = useStore((s) => s.setSelection)
   const toggleItemStatus = useStore((s) => s.toggleItemStatus)
   const setTool = useStore((s) => s.setTool)
+  const setZoom = useStore((s) => s.setZoom)
 
   const page = pages.find((p) => p.id === activePageId) ?? null
 
-  const [scrollY, setScrollY] = useState(0)
   const [gestureNotice, setGestureNotice] = useState(0)
+  const [zoomLabel, setZoomLabel] = useState(() => formatZoom(savedZoom))
 
-  // Referências mutáveis: mudam a cada evento de ponteiro e não devem
-  // provocar re-render do React.
+  // ─── Estado quente, fora do React ──────────────────────────────────────────
+
+  const viewRef = useRef<ViewState>({ ...INITIAL_VIEW, zoom: savedZoom })
+  const layoutRef = useRef<Layout>({
+    fitScale: 1,
+    pageWidth: PAGE_WIDTH,
+    pageHeight: page?.height ?? 1754,
+    viewWidth: 0,
+    viewHeight: 0,
+  })
   const gestureRef = useRef<Gesture | null>(null)
+  const touchesRef = useRef(new Map<number, Pt>())
   const penTracker = useRef(new PenTracker())
   const pendingErase = useRef<Set<string>>(new Set())
+  const pinchingRef = useRef(false)
   const dirty = useRef(true)
-  const scrollRef = useRef(0)
-  const sizeRef = useRef({ w: 0, h: 0 })
 
-  scrollRef.current = scrollY
-
-  // Espelhos do estado pro laço de desenho, que roda fora do ciclo do React.
   const stateRef = useRef({ strokes, zones, items, tool, penColor, penWidth, showZones, selection, theme })
   stateRef.current = { strokes, zones, items, tool, penColor, penWidth, showZones, selection, theme }
+
+  layoutRef.current.pageHeight = page?.height ?? layoutRef.current.pageHeight
 
   const markDirty = useCallback(() => {
     dirty.current = true
   }, [])
 
-  useEffect(markDirty, [strokes, zones, items, showZones, selection, scrollY, theme, markDirty])
+  useEffect(markDirty, [strokes, zones, items, showZones, selection, theme, markDirty])
 
-  // ─── Escala e tamanho ──────────────────────────────────────────────────────
+  /** Muda a janela e agenda o redesenho. Todo caminho de zoom/rolagem passa aqui. */
+  const applyView = useCallback((next: ViewState) => {
+    viewRef.current = clampView(next, layoutRef.current)
+    dirty.current = true
+  }, [])
 
-  const scaleRef = useRef(1)
+  // ─── Tamanho e escala ──────────────────────────────────────────────────────
 
   const resize = useCallback(() => {
     const canvas = canvasRef.current
@@ -89,10 +126,14 @@ export function PageCanvas() {
     canvas.style.width = `${rect.width}px`
     canvas.style.height = `${rect.height}px`
 
-    sizeRef.current = { w: rect.width, h: rect.height }
-    // A folha ocupa a largura toda: a escrita fica do mesmo tamanho relativo
-    // em qualquer tablet.
-    scaleRef.current = rect.width / PAGE_WIDTH
+    layoutRef.current = {
+      ...layoutRef.current,
+      viewWidth: rect.width,
+      viewHeight: rect.height,
+      // Zoom 1 significa "folha inteira na largura da tela", em qualquer tablet.
+      fitScale: rect.width / PAGE_WIDTH,
+    }
+    viewRef.current = clampView(viewRef.current, layoutRef.current)
     dirty.current = true
   }, [])
 
@@ -131,14 +172,18 @@ export function PageCanvas() {
 
       const gesture = gestureRef.current
       const st = stateRef.current
+      const layout = layoutRef.current
+      const m = computeMetrics(viewRef.current, layout)
 
       const viewport: Viewport = {
-        scrollY: scrollRef.current,
-        pageWidth: PAGE_WIDTH,
-        pageHeight: page.height,
-        scale: scaleRef.current,
-        viewWidth: sizeRef.current.w,
-        viewHeight: sizeRef.current.h,
+        scrollX: m.scrollX,
+        scrollY: m.scrollY,
+        pageWidth: layout.pageWidth,
+        pageHeight: layout.pageHeight,
+        scale: m.scale,
+        offsetX: m.offsetX,
+        viewWidth: layout.viewWidth,
+        viewHeight: layout.viewHeight,
       }
 
       render(ctx, {
@@ -162,6 +207,7 @@ export function PageCanvas() {
         selected: st.selection,
         showZones: st.showZones,
         theme: THEMES[st.theme],
+        zoomBadge: pinchingRef.current ? formatZoom(viewRef.current.zoom) : null,
       })
 
       dirty.current = false
@@ -170,33 +216,99 @@ export function PageCanvas() {
     return () => cancelAnimationFrame(frame)
   }, [page])
 
-  // ─── Conversão de coordenadas ──────────────────────────────────────────────
+  // ─── Coordenadas ───────────────────────────────────────────────────────────
 
-  const toPage = useCallback((event: PointerEvent | React.PointerEvent): Pt => {
-    const canvas = canvasRef.current!
-    const rect = canvas.getBoundingClientRect()
-    return {
-      x: (event.clientX - rect.left) / scaleRef.current,
-      y: (event.clientY - rect.top) / scaleRef.current + scrollRef.current,
-    }
+  /** Posição do evento em px de tela, relativa ao canvas. */
+  const toScreen = useCallback((event: { clientX: number; clientY: number }): Pt => {
+    const rect = canvasRef.current!.getBoundingClientRect()
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top }
   }, [])
 
-  const maxScroll = page ? Math.max(0, page.height - sizeRef.current.h / scaleRef.current) : 0
-
-  const clampScroll = useCallback(
-    (value: number) => Math.max(0, Math.min(value, maxScroll)),
-    [maxScroll],
+  /** Posição do evento em coordenadas da folha, já considerando zoom e rolagem. */
+  const toPage = useCallback(
+    (event: { clientX: number; clientY: number }): Pt => {
+      const s = toScreen(event)
+      return screenToPage(s.x, s.y, computeMetrics(viewRef.current, layoutRef.current))
+    },
+    [toScreen],
   )
 
-  // ─── Toque no carimbo de item (marcar tarefa como feita) ───────────────────
+  // ─── Controles de zoom ─────────────────────────────────────────────────────
+
+  const commitZoom = useCallback(() => {
+    setZoomLabel(formatZoom(viewRef.current.zoom))
+    setZoom(viewRef.current.zoom)
+  }, [setZoom])
+
+  const zoomIn = useCallback(() => {
+    applyView(stepZoom(viewRef.current, layoutRef.current, ZOOM_STEP))
+    commitZoom()
+  }, [applyView, commitZoom])
+
+  const zoomOut = useCallback(() => {
+    applyView(stepZoom(viewRef.current, layoutRef.current, 1 / ZOOM_STEP))
+    commitZoom()
+  }, [applyView, commitZoom])
+
+  const zoomReset = useCallback(() => {
+    applyView(resetZoom(viewRef.current, layoutRef.current))
+    commitZoom()
+  }, [applyView, commitZoom])
+
+  // ─── Carimbo de item ───────────────────────────────────────────────────────
 
   const hitItemMarker = useCallback((pt: Pt): string | null => {
     for (const item of stateRef.current.items) {
       const cy = item.bounds.minY + (item.bounds.maxY - item.bounds.minY) / 2
-      if (Math.hypot(pt.x - 18, pt.y - cy) <= 16) return item.id
+      // A tolerância acompanha o zoom: ampliado, o alvo não precisa crescer junto.
+      const reach = 16 / Math.max(0.5, viewRef.current.zoom)
+      if (Math.hypot(pt.x - 18, pt.y - cy) <= reach) return item.id
     }
     return null
   }, [])
+
+  // ─── Pinça ─────────────────────────────────────────────────────────────────
+
+  const beginPinch = useCallback(() => {
+    const [a, b] = [...touchesRef.current.values()]
+    if (!a || !b) return
+    pinchingRef.current = true
+    gestureRef.current = {
+      kind: 'pinch',
+      pointerId: -1,
+      fromDistance: pinchDistance(a, b),
+      fromView: { ...viewRef.current },
+      fromScreen: midpoint(a, b),
+    }
+    dirty.current = true
+  }, [])
+
+  const updatePinch = useCallback(() => {
+    const gesture = gestureRef.current
+    if (gesture?.kind !== 'pinch' || !gesture.fromDistance || !gesture.fromView) return
+    const [a, b] = [...touchesRef.current.values()]
+    if (!a || !b) return
+
+    const distance = pinchDistance(a, b)
+    if (distance < 1) return
+
+    const nextZoom = clampZoom(gesture.fromView.zoom * (distance / gesture.fromDistance))
+    const center = midpoint(a, b)
+
+    // Âncora: o ponto da folha que estava entre os dedos quando a pinça começou
+    // continua entre os dedos agora. É isso que faz o gesto não escorregar.
+    const from = computeMetrics(gesture.fromView, layoutRef.current)
+    const anchorPage = screenToPage(gesture.fromScreen!.x, gesture.fromScreen!.y, from)
+
+    const zoomed: ViewState = { ...viewRef.current, zoom: nextZoom }
+    const after = computeMetrics(zoomed, layoutRef.current)
+
+    applyView({
+      zoom: nextZoom,
+      scrollX: anchorPage.x - (center.x - after.offsetX) / after.scale,
+      scrollY: anchorPage.y - center.y / after.scale,
+    })
+  }, [applyView])
 
   // ─── Eventos de ponteiro ───────────────────────────────────────────────────
 
@@ -208,25 +320,31 @@ export function PageCanvas() {
 
       if (isPen) penTracker.current.notePen()
 
-      // A mão apoiada não escreve nem rola enquanto a caneta está em uso.
-      if (isTouch && penTracker.current.shouldRejectTouch()) return
+      if (isTouch) {
+        touchesRef.current.set(event.pointerId, toScreen(event))
 
-      // Já existe um gesto em andamento: ignora o segundo ponteiro.
+        // Dois dedos: pinça, mesmo que um arrasto já tivesse começado.
+        if (touchesRef.current.size === 2) {
+          beginPinch()
+          return
+        }
+        // A mão apoiada não rola a folha enquanto a caneta está em uso.
+        if (penTracker.current.shouldRejectTouch()) return
+        if (gestureRef.current) return
+
+        gestureRef.current = {
+          kind: 'pan',
+          pointerId: event.pointerId,
+          fromScreen: toScreen(event),
+          fromView: { ...viewRef.current },
+        }
+        return
+      }
+
       if (gestureRef.current) return
 
       const pt = toPage(event)
       const st = stateRef.current
-
-      // O dedo rola a folha; a caneta escreve. Separação clara e previsível.
-      if (isTouch) {
-        gestureRef.current = {
-          kind: 'pan',
-          pointerId: event.pointerId,
-          panStartY: event.clientY,
-          panStartScroll: scrollRef.current,
-        }
-        return
-      }
 
       const marker = hitItemMarker(pt)
       if (marker) {
@@ -250,18 +368,34 @@ export function PageCanvas() {
       }
       dirty.current = true
     },
-    [page, toPage, hitItemMarker, toggleItemStatus],
+    [page, toPage, toScreen, hitItemMarker, toggleItemStatus, beginPinch],
   )
 
   const onPointerMove = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
-      const gesture = gestureRef.current
-      if (!gesture || gesture.pointerId !== event.pointerId) return
       if (event.pointerType === 'pen') penTracker.current.notePen()
 
+      if (event.pointerType === 'touch') {
+        if (!touchesRef.current.has(event.pointerId)) return
+        touchesRef.current.set(event.pointerId, toScreen(event))
+        if (gestureRef.current?.kind === 'pinch') {
+          updatePinch()
+          return
+        }
+      }
+
+      const gesture = gestureRef.current
+      if (!gesture || gesture.pointerId !== event.pointerId) return
+
       if (gesture.kind === 'pan') {
-        const dy = (gesture.panStartY! - event.clientY) / scaleRef.current
-        setScrollY(clampScroll(gesture.panStartScroll! + dy))
+        // Com zoom, o arrasto passa a valer nos dois eixos.
+        const now = toScreen(event)
+        const m = computeMetrics(gesture.fromView!, layoutRef.current)
+        applyView({
+          zoom: gesture.fromView!.zoom,
+          scrollX: gesture.fromView!.scrollX + (gesture.fromScreen!.x - now.x) / m.scale,
+          scrollY: gesture.fromView!.scrollY + (gesture.fromScreen!.y - now.y) / m.scale,
+        })
         return
       }
 
@@ -281,6 +415,7 @@ export function PageCanvas() {
         }
       } else if (gesture.kind === 'erase') {
         gesture.lasso!.push(pt)
+        // O raio da borracha é em px de página, então acompanha o zoom sozinho.
         for (const id of strokesHitByPath(stateRef.current.strokes, [pt], 14)) {
           pendingErase.current.add(id)
         }
@@ -290,7 +425,7 @@ export function PageCanvas() {
 
       dirty.current = true
     },
-    [toPage, clampScroll],
+    [toPage, toScreen, applyView, updatePinch],
   )
 
   const finishGesture = useCallback(async () => {
@@ -328,32 +463,71 @@ export function PageCanvas() {
 
   const onPointerUp = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
+      if (event.pointerType === 'touch') {
+        touchesRef.current.delete(event.pointerId)
+
+        if (gestureRef.current?.kind === 'pinch') {
+          // Só encerra a pinça quando o segundo dedo sai; com um dedo ainda na
+          // tela, sair direto pro arrasto daria um solavanco na folha.
+          if (touchesRef.current.size < 2) {
+            gestureRef.current = null
+            pinchingRef.current = false
+            commitZoom()
+            dirty.current = true
+          }
+          return
+        }
+      }
+
       if (gestureRef.current?.pointerId !== event.pointerId) return
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId)
       }
       void finishGesture()
     },
-    [finishGesture],
+    [finishGesture, commitZoom],
   )
 
-  // ─── Rolagem por roda do mouse / trackpad ──────────────────────────────────
+  // ─── Roda do mouse: rolar, e com Ctrl, aproximar ───────────────────────────
 
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
-      setScrollY((prev) => clampScroll(prev + event.deltaY / scaleRef.current))
+      const m = computeMetrics(viewRef.current, layoutRef.current)
+
+      if (event.ctrlKey) {
+        const rect = canvas.getBoundingClientRect()
+        const anchor = { x: event.clientX - rect.left, y: event.clientY - rect.top }
+        const factor = Math.exp(-event.deltaY / 300)
+        const before = viewRef.current
+        const pagePoint = screenToPage(anchor.x, anchor.y, m)
+        const zoom = clampZoom(before.zoom * factor)
+        const after = computeMetrics({ ...before, zoom }, layoutRef.current)
+        applyView({
+          zoom,
+          scrollX: pagePoint.x - (anchor.x - after.offsetX) / after.scale,
+          scrollY: pagePoint.y - anchor.y / after.scale,
+        })
+        setZoomLabel(formatZoom(viewRef.current.zoom))
+        return
+      }
+
+      applyView({
+        ...viewRef.current,
+        scrollX: viewRef.current.scrollX + event.deltaX / m.scale,
+        scrollY: viewRef.current.scrollY + event.deltaY / m.scale,
+      })
     }
     canvas.addEventListener('wheel', onWheel, { passive: false })
     return () => canvas.removeEventListener('wheel', onWheel)
-  }, [clampScroll])
+  }, [applyView])
 
-  // Volta ao topo ao trocar de página.
+  // Volta ao topo ao trocar de página, mantendo o zoom escolhido.
   useEffect(() => {
-    setScrollY(0)
-  }, [activePageId])
+    applyView({ ...viewRef.current, scrollX: 0, scrollY: 0 })
+  }, [activePageId, applyView])
 
   if (!page) {
     return (
@@ -375,8 +549,21 @@ export function PageCanvas() {
         onPointerCancel={onPointerUp}
         onContextMenu={(e) => e.preventDefault()}
       />
-      <ScrollHint scrollY={scrollY} height={page.height} viewHeight={sizeRef.current.h / scaleRef.current} />
+
+      <div className="zoom-control">
+        <button onClick={zoomOut} aria-label="Afastar">
+          −
+        </button>
+        <button className="zoom-value" onClick={zoomReset} aria-label="Voltar ao tamanho da folha">
+          {zoomLabel}
+        </button>
+        <button onClick={zoomIn} aria-label="Aproximar">
+          +
+        </button>
+      </div>
+
       <ScribbleToast trigger={gestureNotice} />
+
       {tool === 'eraser' && (
         <button className="eraser-banner" onClick={() => setTool('pen')}>
           <span className="eraser-banner-dot" />
@@ -384,26 +571,6 @@ export function PageCanvas() {
           <strong>Voltar à caneta</strong>
         </button>
       )}
-    </div>
-  )
-}
-
-/** Barrinha lateral discreta mostrando onde você está na folha. */
-function ScrollHint({
-  scrollY,
-  height,
-  viewHeight,
-}: {
-  scrollY: number
-  height: number
-  viewHeight: number
-}) {
-  if (viewHeight >= height) return null
-  const ratio = viewHeight / height
-  const top = (scrollY / height) * 100
-  return (
-    <div className="scroll-hint">
-      <div className="scroll-hint-thumb" style={{ top: `${top}%`, height: `${ratio * 100}%` }} />
     </div>
   )
 }

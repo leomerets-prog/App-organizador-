@@ -13,14 +13,17 @@ import type { Pt } from '../lib/geometry'
  */
 
 export interface Viewport {
-  /** Deslocamento vertical da folha, em px de página. */
+  /** Canto visível da folha, em px de página. */
+  scrollX: number
   scrollY: number
   /** Largura da folha em px de página (a folha tem largura fixa lógica). */
   pageWidth: number
   /** Altura da folha em px de página. */
   pageHeight: number
-  /** Escala de página → tela. */
+  /** Escala de página → tela, já com o zoom aplicado. */
   scale: number
+  /** Centralização em px de tela, quando a folha fica menor que a tela. */
+  offsetX: number
   /** Tamanho da área visível em px de tela. */
   viewWidth: number
   viewHeight: number
@@ -41,6 +44,8 @@ export interface RenderInput {
   selected: Set<string>
   showZones: boolean
   theme: Theme
+  /** Rótulo do zoom durante a pinça; nulo quando não há pinça em curso. */
+  zoomBadge: string | null
 }
 
 export interface Theme {
@@ -92,8 +97,9 @@ export function render(ctx: CanvasRenderingContext2D, input: RenderInput): void 
   ctx.fillRect(0, 0, vp.viewWidth, vp.viewHeight)
 
   // A partir daqui trabalhamos em coordenadas de página.
+  ctx.translate(vp.offsetX, 0)
   ctx.scale(vp.scale, vp.scale)
-  ctx.translate(0, -vp.scrollY)
+  ctx.translate(-vp.scrollX, -vp.scrollY)
 
   const top = vp.scrollY
   const bottom = vp.scrollY + vp.viewHeight / vp.scale
@@ -106,6 +112,85 @@ export function render(ctx: CanvasRenderingContext2D, input: RenderInput): void 
   if (input.lassoPath) drawLasso(ctx, input.lassoPath)
 
   ctx.restore()
+
+  // Sobreposições em coordenadas de tela, fora da transformação da folha.
+  ctx.save()
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  drawScrollHint(ctx, vp, theme)
+  if (input.zoomBadge) drawZoomBadge(ctx, vp, theme, input.zoomBadge)
+  ctx.restore()
+}
+
+/**
+ * Indicador de posição na folha.
+ *
+ * Fica no canvas, e não no HTML, porque durante a pinça a rolagem muda a cada
+ * quadro: mantê-lo no HTML obrigaria o React a re-renderizar junto do gesto.
+ */
+function drawScrollHint(ctx: CanvasRenderingContext2D, vp: Viewport, theme: Theme): void {
+  const visibleH = vp.viewHeight / vp.scale
+  if (visibleH >= vp.pageHeight) return
+
+  const trackTop = 6
+  const trackH = vp.viewHeight - 12
+  const thumbH = Math.max(28, (visibleH / vp.pageHeight) * trackH)
+  const maxScrollY = Math.max(1, vp.pageHeight - visibleH)
+  const thumbY = trackTop + (vp.scrollY / maxScrollY) * (trackH - thumbH)
+
+  ctx.save()
+  ctx.fillStyle = theme.ink
+  ctx.globalAlpha = 0.18
+  roundRect(ctx, vp.viewWidth - 6, thumbY, 3, thumbH, 1.5)
+  ctx.fill()
+  ctx.restore()
+}
+
+/** Porcentagem do zoom, mostrada só enquanto os dedos estão na tela. */
+function drawZoomBadge(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  theme: Theme,
+  label: string,
+): void {
+  ctx.save()
+  ctx.font = '600 15px ui-sans-serif, system-ui, sans-serif'
+  const w = ctx.measureText(label).width + 26
+  const h = 34
+  const x = (vp.viewWidth - w) / 2
+  const y = 16
+
+  ctx.globalAlpha = 0.9
+  ctx.fillStyle = theme.paper
+  roundRect(ctx, x, y, w, h, 17)
+  ctx.fill()
+  ctx.globalAlpha = 0.25
+  ctx.strokeStyle = theme.ink
+  ctx.lineWidth = 1
+  ctx.stroke()
+
+  ctx.globalAlpha = 1
+  ctx.fillStyle = theme.ink
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(label, vp.viewWidth / 2, y + h / 2 + 0.5)
+  ctx.restore()
+}
+
+function roundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+): void {
+  ctx.beginPath()
+  ctx.moveTo(x + r, y)
+  ctx.arcTo(x + w, y, x + w, y + h, r)
+  ctx.arcTo(x + w, y + h, x, y + h, r)
+  ctx.arcTo(x, y + h, x, y, r)
+  ctx.arcTo(x, y, x + w, y, r)
+  ctx.closePath()
 }
 
 function drawRules(

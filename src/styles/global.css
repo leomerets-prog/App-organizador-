@@ -472,23 +472,40 @@ input {
   color: var(--text-dim);
 }
 
-.scroll-hint {
+/* Controle de zoom: canto inferior esquerdo, longe da faixa da borracha
+   (centro) e do indicador de rolagem (direita). */
+.zoom-control {
   position: absolute;
-  top: 6px;
-  right: 4px;
-  bottom: 6px;
-  width: 3px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.04);
-  pointer-events: none;
+  left: 12px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
 }
 
-.scroll-hint-thumb {
-  position: absolute;
-  left: 0;
-  width: 100%;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.22);
+.zoom-control button {
+  min-width: 40px;
+  height: 40px;
+  font-size: 19px;
+  line-height: 1;
+  color: var(--text-dim);
+}
+
+.zoom-control button:active {
+  background: var(--accent-soft);
+}
+
+.zoom-control .zoom-value {
+  min-width: 62px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
 }
 
 /* Aviso do gesto de rabisco */

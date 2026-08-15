@@ -50,6 +50,8 @@ export interface AppState {
   penWidth: number
   showZones: boolean
   theme: Theme
+  /** Aproximação da folha, guardada entre aberturas. */
+  zoom: number
   selection: Set<Id>
 
   // Gravação em andamento
@@ -78,6 +80,7 @@ export interface AppState {
   toggleZones: () => void
   setTheme: (theme: Theme) => void
   toggleTheme: () => void
+  setZoom: (zoom: number) => void
 
   commitStroke: (points: InkPoint[], startedAt: number) => Promise<void>
   eraseStrokes: (ids: Id[]) => Promise<void>
@@ -113,6 +116,7 @@ function persist(get: () => AppState): void {
     penColor: s.penColor,
     penWidth: s.penWidth,
     showZones: s.showZones,
+    zoom: s.zoom,
   })
 }
 
@@ -134,6 +138,7 @@ export const useStore = create<AppState>((set, get) => ({
   penWidth: initialPrefs.penWidth,
   showZones: initialPrefs.showZones,
   theme: initialPrefs.theme,
+  zoom: initialPrefs.zoom,
   selection: new Set(),
 
   activeRecordingId: null,
@@ -306,6 +311,16 @@ export const useStore = create<AppState>((set, get) => ({
 
   toggleTheme() {
     get().setTheme(get().theme === 'dark' ? 'light' : 'dark')
+  },
+
+  /**
+   * Guarda a aproximação escolhida. Chamada só ao fim do gesto, nunca durante:
+   * a pinça muda o zoom a cada quadro e gravar isso tudo seria desperdício.
+   */
+  setZoom(zoom) {
+    if (Math.abs(get().zoom - zoom) < 0.001) return
+    set({ zoom })
+    persist(get)
   },
 
   // ─── Tinta ─────────────────────────────────────────────────────────────────

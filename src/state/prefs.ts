@@ -1,4 +1,5 @@
 import { INK_COLOR, PEN_WIDTH_DEFAULT } from '../domain/constants'
+import { ZOOM_FIT, clampZoom } from '../ink/viewport'
 
 /**
  * Preferências da ferramenta e do tema.
@@ -15,6 +16,8 @@ export interface Prefs {
   penColor: string
   penWidth: number
   showZones: boolean
+  /** Aproximação preferida da folha. 1 = folha inteira na largura da tela. */
+  zoom: number
 }
 
 const KEY = 'organizador.prefs.v1'
@@ -24,6 +27,7 @@ const DEFAULTS: Prefs = {
   penColor: INK_COLOR,
   penWidth: PEN_WIDTH_DEFAULT,
   showZones: true,
+  zoom: ZOOM_FIT,
 }
 
 export function loadPrefs(): Prefs {
@@ -36,6 +40,7 @@ export function loadPrefs(): Prefs {
       penColor: typeof saved.penColor === 'string' ? saved.penColor : DEFAULTS.penColor,
       penWidth: typeof saved.penWidth === 'number' ? saved.penWidth : DEFAULTS.penWidth,
       showZones: typeof saved.showZones === 'boolean' ? saved.showZones : DEFAULTS.showZones,
+      zoom: typeof saved.zoom === 'number' ? clampZoom(saved.zoom) : DEFAULTS.zoom,
     }
   } catch {
     // Navegador com armazenamento bloqueado: segue nos padrões.
