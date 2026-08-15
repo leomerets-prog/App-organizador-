@@ -5,8 +5,30 @@ Tudo dentro do tablet. Sem computador, sem nuvem, sem conta em lugar nenhum.
 São 6 passos. Você faz isso **uma vez**. Depois, o app abre pelo ícone na tela
 inicial como qualquer outro aplicativo.
 
-> Os comandos abaixo são digitados no Termux. Pode copiar e colar: segure o
-> dedo na tela do Termux para aparecer "Colar".
+### Como ler este guia — leia isto antes
+
+Há dois tipos de bloco cinza aqui. Confundir os dois gera erro:
+
+**1. COMANDO** — vem logo depois de "digite", "rode" ou de um título de passo.
+Esses você copia e cola no Termux.
+
+```bash
+exemplo de comando
+```
+
+**2. TELA** — vem sempre com o aviso `📺 O QUE APARECE (não digite)`. É só o
+resultado esperado, para você conferir se deu certo.
+
+`📺 O QUE APARECE (não digite):`
+```
+exemplo de resultado na tela
+```
+
+> Se você colar um bloco de TELA no Termux, ele responde
+> `command not found`. **Isso é inofensivo** — nada é alterado, nada quebra.
+> É só ignorar e seguir com o comando certo.
+
+Para colar no Termux: segure o dedo na tela até aparecer "Colar".
 
 ---
 
@@ -81,6 +103,7 @@ ls ~/storage/downloads/
 Deve aparecer uma lista dos seus downloads, e no meio dela um nome parecido
 com:
 
+`📺 O QUE APARECE (não digite):`
 ```
 App-organizador--claude-tablet-notes-app-g0ho90.zip
 ```
@@ -116,8 +139,10 @@ O `*` existe para você não precisar digitar o nome comprido e exato.
 O `-o` significa "pode substituir arquivos antigos" — é o que faz as
 atualizações futuras funcionarem sem reclamação.
 
-**Vão passar umas 60 linhas na tela**, assim:
+**Vão passar umas 60 linhas na tela.** Você NÃO digita nada disso — é o
+Termux trabalhando:
 
+`📺 O QUE APARECE (não digite):`
 ```
 Archive:  /data/data/com.termux/files/home/storage/downloads/App-organizador--claude-...zip
    creating: organizador/App-organizador--claude-tablet-notes-app-g0ho90/
@@ -137,6 +162,7 @@ ls ~/organizador/*/tablet/
 
 Tem que aparecer exatamente esta lista:
 
+`📺 O QUE APARECE (não digite):`
 ```
 assets  favicon.svg  icon-192.png  icon-512.png  index.html
 iniciar.sh  manifest.json  registerSW.js  sw.js  workbox-9c191d2f.js
@@ -161,6 +187,7 @@ São duas coisas numa linha só: *"entre na pasta do app"* **e** *"ligue"*.
 
 ### 5.2 — O que tem que aparecer
 
+`📺 O QUE APARECE (não digite):`
 ```
   ============================================
     O Organizador está ligado.
