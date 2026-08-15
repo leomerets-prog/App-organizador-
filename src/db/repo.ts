@@ -4,6 +4,7 @@ import type {
   Item,
   Notebook,
   Page,
+  PageImage,
   Recording,
   Section,
   Stroke,
@@ -77,13 +78,21 @@ export async function putPage(page: Page): Promise<void> {
 
 export async function deletePage(id: Id): Promise<void> {
   const db = await getDb()
-  const kill = async (store: 'strokes' | 'zones' | 'items' | 'recordings') => {
+  const kill = async (store: 'strokes' | 'zones' | 'items' | 'recordings' | 'images') => {
     const keys = await db.getAllKeysFromIndex(store, 'byPage', id)
     await Promise.all(keys.map((k) => db.delete(store, k)))
   }
   const recordings = await db.getAllFromIndex('recordings', 'byPage', id)
   await Promise.all(recordings.map((r) => db.delete('recordingBlobs', r.id)))
-  await Promise.all([kill('strokes'), kill('zones'), kill('items'), kill('recordings')])
+  const images = await db.getAllFromIndex('images', 'byPage', id)
+  await Promise.all(images.map((i) => db.delete('imageBlobs', i.id)))
+  await Promise.all([
+    kill('strokes'),
+    kill('zones'),
+    kill('items'),
+    kill('recordings'),
+    kill('images'),
+  ])
   await db.delete('pages', id)
 }
 
@@ -94,18 +103,21 @@ export interface PageContent {
   zones: Zone[]
   items: Item[]
   recordings: Recording[]
+  images: PageImage[]
 }
 
 export async function loadPageContent(pageId: Id): Promise<PageContent> {
   const db = await getDb()
-  const [strokes, zones, items, recordings] = await Promise.all([
+  const [strokes, zones, items, recordings, images] = await Promise.all([
     db.getAllFromIndex('strokes', 'byPage', pageId),
     db.getAllFromIndex('zones', 'byPage', pageId),
     db.getAllFromIndex('items', 'byPage', pageId),
     db.getAllFromIndex('recordings', 'byPage', pageId),
+    db.getAllFromIndex('images', 'byPage', pageId),
   ])
   strokes.sort((a, b) => a.startedAt - b.startedAt)
-  return { strokes, zones, items, recordings }
+  images.sort((a, b) => a.createdAt - b.createdAt)
+  return { strokes, zones, items, recordings, images }
 }
 
 export async function putStroke(stroke: Stroke): Promise<void> {
@@ -171,4 +183,24 @@ export async function deleteRecording(id: Id): Promise<void> {
   const db = await getDb()
   await db.delete('recordings', id)
   await db.delete('recordingBlobs', id)
+}
+
+// ─── Imagens ─────────────────────────────────────────────────────────────────
+
+export async function putImage(image: PageImage, blob?: Blob): Promise<void> {
+  const db = await getDb()
+  await db.put('images', image)
+  // O binário só é gravado na criação; mover e redimensionar não o tocam.
+  if (blob) await db.put('imageBlobs', { id: image.id, blob })
+}
+
+export async function getImageBlob(id: Id): Promise<Blob | undefined> {
+  const db = await getDb()
+  return (await db.get('imageBlobs', id))?.blob
+}
+
+export async function deleteImage(id: Id): Promise<void> {
+  const db = await getDb()
+  await db.delete('images', id)
+  await db.delete('imageBlobs', id)
 }

@@ -2,9 +2,11 @@ import { openDB } from 'idb'
 import type { DBSchema, IDBPDatabase } from 'idb'
 import type {
   Id,
+  ImageBlob,
   Item,
   Notebook,
   Page,
+  PageImage,
   Recording,
   RecordingBlob,
   Section,
@@ -29,17 +31,22 @@ interface OrganizadorDB extends DBSchema {
   items: { key: Id; value: Item; indexes: { byPage: Id; byKind: Item['kind'] } }
   recordings: { key: Id; value: Recording; indexes: { byPage: Id } }
   recordingBlobs: { key: Id; value: RecordingBlob }
+  images: { key: Id; value: PageImage; indexes: { byPage: Id } }
+  imageBlobs: { key: Id; value: ImageBlob }
 }
 
 const DB_NAME = 'organizador'
-const DB_VERSION = 1
+const DB_VERSION = 2
 
 let dbPromise: Promise<IDBPDatabase<OrganizadorDB>> | null = null
 
 export function getDb(): Promise<IDBPDatabase<OrganizadorDB>> {
   if (!dbPromise) {
     dbPromise = openDB<OrganizadorDB>(DB_NAME, DB_VERSION, {
-      upgrade(db) {
+      upgrade(db, oldVersion) {
+        // Cada versão acrescenta o que falta, sem tocar no que já existe:
+        // é isso que preserva as anotações de quem já vinha usando o app.
+        if (oldVersion < 1) {
         db.createObjectStore('notebooks', { keyPath: 'id' })
 
         const sections = db.createObjectStore('sections', { keyPath: 'id' })
@@ -62,6 +69,13 @@ export function getDb(): Promise<IDBPDatabase<OrganizadorDB>> {
         recordings.createIndex('byPage', 'pageId')
 
         db.createObjectStore('recordingBlobs', { keyPath: 'id' })
+        }
+
+        if (oldVersion < 2) {
+          const images = db.createObjectStore('images', { keyPath: 'id' })
+          images.createIndex('byPage', 'pageId')
+          db.createObjectStore('imageBlobs', { keyPath: 'id' })
+        }
       },
     })
   }

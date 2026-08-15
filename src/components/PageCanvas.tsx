@@ -27,6 +27,9 @@ import {
 } from '../ink/viewport'
 import type { Layout, ViewState } from '../ink/viewport'
 import { ScribbleToast } from './ScribbleToast'
+import { MIN_IMAGE_SIZE, onImageReady } from '../ink/images'
+import { imageHandleRadius } from '../ink/renderer'
+import type { PageImage } from '../domain/types'
 
 /**
  * A folha.
@@ -38,8 +41,12 @@ import { ScribbleToast } from './ScribbleToast'
  */
 
 interface Gesture {
-  kind: 'draw' | 'erase' | 'lasso' | 'pan' | 'pinch'
+  kind: 'draw' | 'erase' | 'lasso' | 'pan' | 'pinch' | 'moveImage' | 'resizeImage'
   pointerId: number
+  /** Imagem sendo movida ou redimensionada, e o estado dela ao começar. */
+  imageId?: string
+  imageStart?: PageImage['rect']
+  grabPage?: Pt
   builder?: StrokeBuilder
   lasso?: Pt[]
   /** Ponto da tela onde o arrasto começou, e a janela naquele instante. */
@@ -65,6 +72,8 @@ export function PageCanvas() {
   const selection = useStore((s) => s.selection)
   const theme = useStore((s) => s.theme)
   const savedZoom = useStore((s) => s.zoom)
+  const images = useStore((s) => s.images)
+  const selectedImageId = useStore((s) => s.selectedImageId)
 
   const commitStroke = useStore((s) => s.commitStroke)
   const eraseStrokes = useStore((s) => s.eraseStrokes)
@@ -72,11 +81,19 @@ export function PageCanvas() {
   const toggleItemStatus = useStore((s) => s.toggleItemStatus)
   const setTool = useStore((s) => s.setTool)
   const setZoom = useStore((s) => s.setZoom)
+  const addImage = useStore((s) => s.addImage)
+  const updateImageRect = useStore((s) => s.updateImageRect)
+  const removeImage = useStore((s) => s.removeImage)
+  const selectImage = useStore((s) => s.selectImage)
+  const undoErase = useStore((s) => s.undoErase)
 
   const page = pages.find((p) => p.id === activePageId) ?? null
 
   const [gestureNotice, setGestureNotice] = useState(0)
   const [zoomLabel, setZoomLabel] = useState(() => formatZoom(savedZoom))
+  const [erasedCount, setErasedCount] = useState(0)
+  const [imageError, setImageError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // ─── Estado quente, fora do React ──────────────────────────────────────────
 
@@ -95,8 +112,14 @@ export function PageCanvas() {
   const pinchingRef = useRef(false)
   const dirty = useRef(true)
 
-  const stateRef = useRef({ strokes, zones, items, tool, penColor, penWidth, showZones, selection, theme })
-  stateRef.current = { strokes, zones, items, tool, penColor, penWidth, showZones, selection, theme }
+  const stateRef = useRef({
+    strokes, zones, items, tool, penColor, penWidth, showZones, selection, theme,
+    images, selectedImageId,
+  })
+  stateRef.current = {
+    strokes, zones, items, tool, penColor, penWidth, showZones, selection, theme,
+    images, selectedImageId,
+  }
 
   layoutRef.current.pageHeight = page?.height ?? layoutRef.current.pageHeight
 
@@ -104,7 +127,10 @@ export function PageCanvas() {
     dirty.current = true
   }, [])
 
-  useEffect(markDirty, [strokes, zones, items, showZones, selection, theme, markDirty])
+  useEffect(markDirty, [strokes, zones, items, showZones, selection, theme, images, selectedImageId, markDirty])
+
+  // Imagem terminou de decodificar: repinta pra ela aparecer no lugar do vazio.
+  useEffect(() => onImageReady(markDirty), [markDirty])
 
   /** Muda a janela e agenda o redesenho. Todo caminho de zoom/rolagem passa aqui. */
   const applyView = useCallback((next: ViewState) => {
@@ -205,6 +231,8 @@ export function PageCanvas() {
         lassoPath: gesture?.kind === 'lasso' ? (gesture.lasso ?? null) : null,
         pendingErase: pendingErase.current,
         selected: st.selection,
+        images: st.images,
+        selectedImageId: st.selectedImageId,
         showZones: st.showZones,
         theme: THEMES[st.theme],
         zoomBadge: pinchingRef.current ? formatZoom(viewRef.current.zoom) : null,
@@ -254,6 +282,71 @@ export function PageCanvas() {
     applyView(resetZoom(viewRef.current, layoutRef.current))
     commitZoom()
   }, [applyView, commitZoom])
+
+  // ─── Imagens ───────────────────────────────────────────────────────────────
+
+  /** Imagem sob o ponto; a de cima ganha, já que são desenhadas em ordem. */
+  const imageAt = useCallback((pt: Pt): PageImage | null => {
+    const list = stateRef.current.images
+    for (let i = list.length - 1; i >= 0; i--) {
+      const { x, y, w, h } = list[i].rect
+      if (pt.x >= x && pt.x <= x + w && pt.y >= y && pt.y <= y + h) return list[i]
+    }
+    return null
+  }, [])
+
+  /** O toque caiu na alça de redimensionar da imagem selecionada? */
+  const onResizeHandle = useCallback((pt: Pt): PageImage | null => {
+    const id = stateRef.current.selectedImageId
+    if (!id) return null
+    const image = stateRef.current.images.find((i) => i.id === id)
+    if (!image) return null
+    const { x, y, w, h } = image.rect
+    const scale = computeMetrics(viewRef.current, layoutRef.current).scale
+    const reach = imageHandleRadius(scale)
+    return Math.hypot(pt.x - (x + w), pt.y - (y + h)) <= reach ? image : null
+  }, [])
+
+  /** Retângulo da folha visível agora — onde a imagem nova deve entrar. */
+  const visibleRect = useCallback(() => {
+    const m = computeMetrics(viewRef.current, layoutRef.current)
+    return {
+      x: m.scrollX,
+      y: m.scrollY,
+      w: layoutRef.current.viewWidth / m.scale,
+      h: layoutRef.current.viewHeight / m.scale,
+    }
+  }, [])
+
+  const insertImage = useCallback(
+    async (file: File | Blob) => {
+      setImageError(null)
+      try {
+        await addImage(file, visibleRect())
+      } catch (err) {
+        setImageError(err instanceof Error ? err.message : 'Não consegui abrir essa imagem.')
+      }
+    },
+    [addImage, visibleRect],
+  )
+
+  // Colar imagem da área de transferência.
+  useEffect(() => {
+    const onPaste = (event: ClipboardEvent) => {
+      for (const item of event.clipboardData?.items ?? []) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile()
+          if (file) {
+            event.preventDefault()
+            void insertImage(file)
+          }
+          return
+        }
+      }
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [insertImage])
 
   // ─── Carimbo de item ───────────────────────────────────────────────────────
 
@@ -346,6 +439,36 @@ export function PageCanvas() {
       const pt = toPage(event)
       const st = stateRef.current
 
+      // Ferramenta de imagem: escolher, mover e redimensionar. A caneta só
+      // mexe em imagem aqui — nas outras ferramentas ela escreve por cima.
+      if (st.tool === 'image') {
+        event.currentTarget.setPointerCapture(event.pointerId)
+        const handle = onResizeHandle(pt)
+        if (handle) {
+          gestureRef.current = {
+            kind: 'resizeImage',
+            pointerId: event.pointerId,
+            imageId: handle.id,
+            imageStart: { ...handle.rect },
+            grabPage: pt,
+          }
+          return
+        }
+        const hit = imageAt(pt)
+        selectImage(hit?.id ?? null)
+        if (hit) {
+          gestureRef.current = {
+            kind: 'moveImage',
+            pointerId: event.pointerId,
+            imageId: hit.id,
+            imageStart: { ...hit.rect },
+            grabPage: pt,
+          }
+        }
+        dirty.current = true
+        return
+      }
+
       const marker = hitItemMarker(pt)
       if (marker) {
         void toggleItemStatus(marker)
@@ -368,7 +491,7 @@ export function PageCanvas() {
       }
       dirty.current = true
     },
-    [page, toPage, toScreen, hitItemMarker, toggleItemStatus, beginPinch],
+    [page, toPage, toScreen, hitItemMarker, toggleItemStatus, beginPinch, imageAt, onResizeHandle, selectImage],
   )
 
   const onPointerMove = useCallback(
@@ -401,6 +524,26 @@ export function PageCanvas() {
 
       const pt = toPage(event)
 
+      if (gesture.kind === 'moveImage' && gesture.imageStart && gesture.grabPage) {
+        void updateImageRect(gesture.imageId!, {
+          ...gesture.imageStart,
+          x: gesture.imageStart.x + (pt.x - gesture.grabPage.x),
+          y: gesture.imageStart.y + (pt.y - gesture.grabPage.y),
+        })
+        dirty.current = true
+        return
+      }
+
+      if (gesture.kind === 'resizeImage' && gesture.imageStart && gesture.grabPage) {
+        // A proporção é preservada: o arrasto define a largura e a altura segue.
+        const start = gesture.imageStart
+        const aspect = start.h / Math.max(1, start.w)
+        const w = Math.max(MIN_IMAGE_SIZE, start.w + (pt.x - gesture.grabPage.x))
+        void updateImageRect(gesture.imageId!, { ...start, w, h: w * aspect })
+        dirty.current = true
+        return
+      }
+
       if (gesture.kind === 'draw' && gesture.builder) {
         // getCoalescedEvents devolve os pontos que o navegador agrupou entre
         // dois quadros — é o que preserva o formato do traço em movimento rápido.
@@ -425,7 +568,7 @@ export function PageCanvas() {
 
       dirty.current = true
     },
-    [toPage, toScreen, applyView, updatePinch],
+    [toPage, toScreen, applyView, updatePinch, updateImageRect],
   )
 
   const finishGesture = useCallback(async () => {
@@ -453,7 +596,10 @@ export function PageCanvas() {
     } else if (gesture.kind === 'erase') {
       const ids = [...pendingErase.current]
       pendingErase.current.clear()
-      if (ids.length > 0) await eraseStrokes(ids)
+      if (ids.length > 0) {
+        await eraseStrokes(ids)
+        setErasedCount(ids.length)
+      }
     } else if (gesture.kind === 'lasso' && gesture.lasso && gesture.lasso.length > 2) {
       setSelection(strokesInsideLasso(stateRef.current.strokes, gesture.lasso))
     }
@@ -564,6 +710,63 @@ export function PageCanvas() {
 
       <ScribbleToast trigger={gestureNotice} />
 
+      {/* Escolher arquivo: no Android abre a galeria, onde ficam os prints. */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden-file"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file) void insertImage(file)
+          // Zera pra que escolher o MESMO arquivo de novo volte a disparar.
+          e.target.value = ''
+        }}
+      />
+
+      {tool === 'image' && (
+        <div className="image-bar">
+          <button className="image-add" onClick={() => fileInputRef.current?.click()}>
+            + Adicionar imagem
+          </button>
+          {selectedImageId ? (
+            <>
+              <span className="image-hint">arraste pra mover · alça roxa pra redimensionar</span>
+              <button
+                className="image-delete"
+                onClick={() => {
+                  if (confirm('Excluir esta imagem da folha?')) void removeImage(selectedImageId)
+                }}
+              >
+                Excluir
+              </button>
+            </>
+          ) : (
+            <span className="image-hint">toque numa imagem pra ajustar</span>
+          )}
+          <button className="image-done" onClick={() => { selectImage(null); setTool('pen') }}>
+            Pronto
+          </button>
+        </div>
+      )}
+
+      {imageError && (
+        <div className="image-error" role="alert" onClick={() => setImageError(null)}>
+          {imageError}
+        </div>
+      )}
+
+      {erasedCount > 0 && (
+        <UndoBar
+          count={erasedCount}
+          onUndo={async () => {
+            await undoErase()
+            setErasedCount(0)
+          }}
+          onDone={() => setErasedCount(0)}
+        />
+      )}
+
       {tool === 'eraser' && (
         <button className="eraser-banner" onClick={() => setTool('pen')}>
           <span className="eraser-banner-dot" />
@@ -571,6 +774,35 @@ export function PageCanvas() {
           <strong>Voltar à caneta</strong>
         </button>
       )}
+    </div>
+  )
+}
+
+/**
+ * Aviso do que foi apagado, com volta.
+ *
+ * Apagar é o único caminho do app onde se perde trabalho sem recuperação. O
+ * aviso some sozinho, mas enquanto está na tela cobre o engano percebido na
+ * hora — que é quando quase todo engano é percebido.
+ */
+function UndoBar({
+  count,
+  onUndo,
+  onDone,
+}: {
+  count: number
+  onUndo: () => void
+  onDone: () => void
+}) {
+  useEffect(() => {
+    const timer = setTimeout(onDone, 5000)
+    return () => clearTimeout(timer)
+  }, [count, onDone])
+
+  return (
+    <div className="undo-bar" role="status">
+      {count === 1 ? '1 traço apagado' : `${count} traços apagados`}
+      <button onClick={onUndo}>Desfazer</button>
     </div>
   )
 }

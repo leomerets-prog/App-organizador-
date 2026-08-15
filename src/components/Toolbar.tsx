@@ -21,6 +21,7 @@ const TOOLS: { kind: ToolKind; glyph: string; label: string }[] = [
   { kind: 'highlighter', glyph: '▬', label: 'Marca-texto' },
   { kind: 'lasso', glyph: '◌', label: 'Laço' },
   { kind: 'eraser', glyph: '⌫', label: 'Borracha' },
+  { kind: 'image', glyph: '🖼', label: 'Imagem' },
 ]
 
 const ITEM_KINDS: ItemKind[] = ['tarefa', 'duvida', 'topico', 'pendencia', 'documento', 'importante']

@@ -1,9 +1,10 @@
-import type { Item, Stroke, Zone } from '../domain/types'
+import type { Item, PageImage, Stroke, Zone } from '../domain/types'
 import { ZONE_COLORS } from '../domain/templates'
 import { HIGHLIGHTER_ALPHA, pathForStroke, strokeToPath } from './stroke'
 import { INK_COLOR, LEGACY_INK_COLOR } from '../domain/constants'
 import type { StrokeStyle } from './stroke'
 import type { Pt } from '../lib/geometry'
+import { getImageElement } from './images'
 
 /**
  * Desenho da folha no canvas.
@@ -33,6 +34,9 @@ export interface RenderInput {
   strokes: Stroke[]
   zones: Zone[]
   items: Item[]
+  images: PageImage[]
+  /** Imagem em ajuste, que ganha alças de mover e redimensionar. */
+  selectedImageId: string | null
   viewport: Viewport
   /** Traço em andamento, ainda não salvo. */
   liveStroke: { points: Stroke['points']; style: StrokeStyle } | null
@@ -106,6 +110,8 @@ export function render(ctx: CanvasRenderingContext2D, input: RenderInput): void 
 
   drawRules(ctx, vp, theme, top, bottom)
   if (input.showZones) drawZones(ctx, input.zones, vp, theme)
+  // Imagens ficam sob a tinta: é o que permite anotar por cima de um print.
+  drawImages(ctx, input, vp)
   drawStrokes(ctx, input, top, bottom)
   if (input.liveStroke) drawLiveStroke(ctx, input.liveStroke, theme)
   drawItemMarkers(ctx, input.items, vp)
@@ -291,6 +297,73 @@ function drawLiveStroke(
   ctx.fillStyle = resolveInk(live.style.color, theme)
   ctx.fill(new Path2D(d))
   ctx.restore()
+}
+
+/** Espessura das alças, em px de tela, convertida pra px de página. */
+const HANDLE_SCREEN_SIZE = 22
+
+function drawImages(ctx: CanvasRenderingContext2D, input: RenderInput, vp: Viewport): void {
+  for (const image of input.images) {
+    const { x, y, w, h } = image.rect
+    const element = getImageElement(image.id)
+
+    if (element) {
+      ctx.drawImage(element, x, y, w, h)
+    } else {
+      // Marca o lugar enquanto a imagem decodifica, pra folha não "pular".
+      ctx.save()
+      ctx.fillStyle = input.theme.rule
+      ctx.globalAlpha = 0.5
+      ctx.fillRect(x, y, w, h)
+      ctx.restore()
+    }
+
+    if (image.id === input.selectedImageId) {
+      drawImageHandles(ctx, image, vp)
+    }
+  }
+}
+
+/**
+ * Moldura e alça de tamanho da imagem em ajuste.
+ *
+ * As alças são desenhadas com tamanho fixo em px de TELA: ampliada, a imagem
+ * cresce mas o alvo do dedo continua do mesmo tamanho.
+ */
+function drawImageHandles(
+  ctx: CanvasRenderingContext2D,
+  image: PageImage,
+  vp: Viewport,
+): void {
+  const { x, y, w, h } = image.rect
+  const handle = HANDLE_SCREEN_SIZE / vp.scale
+
+  ctx.save()
+  ctx.strokeStyle = '#7c5cff'
+  ctx.lineWidth = 2 / vp.scale
+  ctx.setLineDash([8 / vp.scale, 6 / vp.scale])
+  ctx.strokeRect(x, y, w, h)
+  ctx.setLineDash([])
+
+  // Alça de redimensionar, no canto inferior direito.
+  ctx.fillStyle = '#7c5cff'
+  ctx.beginPath()
+  ctx.arc(x + w, y + h, handle / 2, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.strokeStyle = '#fff'
+  ctx.lineWidth = 2 / vp.scale
+  const arrow = handle / 5
+  ctx.beginPath()
+  ctx.moveTo(x + w - arrow, y + h - arrow)
+  ctx.lineTo(x + w + arrow, y + h + arrow)
+  ctx.stroke()
+  ctx.restore()
+}
+
+/** Onde fica a alça de redimensionar, em coordenadas de página. */
+export function imageHandleRadius(scale: number): number {
+  return HANDLE_SCREEN_SIZE / scale
 }
 
 const ITEM_GLYPH: Record<Item['kind'], string> = {

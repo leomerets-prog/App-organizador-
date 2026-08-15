@@ -11,9 +11,12 @@ export function Sidebar({ onOpenPanel }: { onOpenPanel: () => void }) {
   const activeNotebookId = useStore((s) => s.activeNotebookId)
   const selectNotebook = useStore((s) => s.selectNotebook)
   const createNotebook = useStore((s) => s.createNotebook)
+  const renameNotebook = useStore((s) => s.renameNotebook)
+  const removeNotebook = useStore((s) => s.removeNotebook)
 
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   const submit = async () => {
     const trimmed = name.trim()
@@ -40,16 +43,39 @@ export function Sidebar({ onOpenPanel }: { onOpenPanel: () => void }) {
       <div className="sidebar-divider" />
 
       <div className="sidebar-scroll">
-        {notebooks.map((nb) => (
-          <button
-            key={nb.id}
-            className={`sidebar-row ${nb.id === activeNotebookId ? 'active' : ''}`}
-            onClick={() => void selectNotebook(nb.id)}
-          >
-            <span className="notebook-spine" style={{ background: nb.color }} aria-hidden />
-            <span className="sidebar-label">{nb.name}</span>
-          </button>
-        ))}
+        {notebooks.map((nb) =>
+          editingId === nb.id ? (
+            <NotebookRename
+              key={nb.id}
+              value={nb.name}
+              onSave={(value) => void renameNotebook(nb.id, value)}
+              onClose={() => setEditingId(null)}
+              onDelete={
+                notebooks.length > 1
+                  ? () => {
+                      if (confirm(`Excluir o bloco "${nb.name}" e tudo dentro dele?`)) {
+                        void removeNotebook(nb.id)
+                      }
+                    }
+                  : undefined
+              }
+            />
+          ) : (
+            <button
+              key={nb.id}
+              className={`sidebar-row ${nb.id === activeNotebookId ? 'active' : ''}`}
+              onClick={() => {
+                // Igual às seções e páginas: o segundo toque no ativo renomeia.
+                if (nb.id === activeNotebookId) setEditingId(nb.id)
+                else void selectNotebook(nb.id)
+              }}
+            >
+              <span className="notebook-spine" style={{ background: nb.color }} aria-hidden />
+              <span className="sidebar-label">{nb.name}</span>
+              {nb.id === activeNotebookId && <span className="chip-edit">✎</span>}
+            </button>
+          ),
+        )}
       </div>
 
       {creating ? (
@@ -74,5 +100,63 @@ export function Sidebar({ onOpenPanel }: { onOpenPanel: () => void }) {
         </button>
       )}
     </nav>
+  )
+}
+
+/** Renomear o bloco, com exclusão ao lado. */
+function NotebookRename({
+  value,
+  onSave,
+  onClose,
+  onDelete,
+}: {
+  value: string
+  onSave: (value: string) => void
+  onClose: () => void
+  onDelete?: () => void
+}) {
+  const [draft, setDraft] = useState(value)
+
+  const commit = () => {
+    const trimmed = draft.trim()
+    if (trimmed && trimmed !== value) onSave(trimmed)
+    onClose()
+  }
+
+  return (
+    <form
+      className="sidebar-new"
+      onSubmit={(e) => {
+        e.preventDefault()
+        commit()
+      }}
+    >
+      <div className="rename-form">
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') onClose()
+          }}
+          aria-label="Novo nome do bloco"
+        />
+        {onDelete && (
+          <button
+            type="button"
+            className="rename-del"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              onDelete()
+              onClose()
+            }}
+            aria-label="Excluir bloco"
+          >
+            🗑
+          </button>
+        )}
+      </div>
+    </form>
   )
 }

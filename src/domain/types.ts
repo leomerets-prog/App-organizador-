@@ -63,7 +63,7 @@ export interface InkPoint {
   t: number
 }
 
-export type ToolKind = 'pen' | 'highlighter' | 'eraser' | 'lasso'
+export type ToolKind = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'image'
 
 export interface Stroke {
   id: Id
@@ -149,6 +149,29 @@ export interface Recording {
 
 /** O blob de áudio vive numa store separada pra não pesar as consultas de metadados. */
 export interface RecordingBlob {
+  id: Id
+  blob: Blob
+}
+
+// ─── Imagens ─────────────────────────────────────────────────────────────────
+
+/**
+ * Uma foto ou print colado na folha. Fica sempre ATRÁS da tinta, pra que dê
+ * pra anotar por cima — que é o motivo de existir.
+ */
+export interface PageImage {
+  id: Id
+  pageId: Id
+  /** Posição e tamanho em px de página. */
+  rect: { x: number; y: number; w: number; h: number }
+  mime: string
+  /** Proporção original, preservada ao redimensionar. */
+  aspect: number
+  createdAt: number
+}
+
+/** Como no áudio, o binário fica separado dos metadados. */
+export interface ImageBlob {
   id: Id
   blob: Blob
 }

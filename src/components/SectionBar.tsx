@@ -6,6 +6,10 @@ import { TEMPLATES } from '../domain/templates'
 /**
  * A faixa de Seções e a lista de Páginas — as duas colunas do topo no OneNote.
  * No tablet elas viram uma barra horizontal só, pra sobrar folha pra escrever.
+ *
+ * Renomear: tocar de novo no item JÁ ativo abre o campo de nome. É um gesto
+ * que não atrapalha a navegação (o primeiro toque só troca de aba) e não exige
+ * pressionar e segurar, que no tablet compete com a rolagem.
  */
 export function SectionBar() {
   const sections = useStore((s) => s.sections)
@@ -19,9 +23,14 @@ export function SectionBar() {
   const selectPage = useStore((s) => s.selectPage)
   const createSection = useStore((s) => s.createSection)
   const createPage = useStore((s) => s.createPage)
+  const renameSection = useStore((s) => s.renameSection)
+  const renamePage = useStore((s) => s.renamePage)
   const removePage = useStore((s) => s.removePage)
+  const removeSection = useStore((s) => s.removeSection)
 
   const [newPageOpen, setNewPageOpen] = useState(false)
+  const [editing, setEditing] = useState<{ kind: 'section' | 'page'; id: string } | null>(null)
+
   const notebook = notebooks.find((n) => n.id === activeNotebookId)
 
   const addSection = () => {
@@ -35,16 +44,39 @@ export function SectionBar() {
 
       <div className="sectionbar-row">
         <div className="chips">
-          {sections.map((section) => (
-            <button
-              key={section.id}
-              className={`chip ${section.id === activeSectionId ? 'active' : ''}`}
-              onClick={() => void selectSection(section.id)}
-            >
-              <span className="chip-tab" style={{ background: section.color }} aria-hidden />
-              {section.name}
-            </button>
-          ))}
+          {sections.map((section) =>
+            editing?.kind === 'section' && editing.id === section.id ? (
+              <RenameField
+                key={section.id}
+                value={section.name}
+                onSave={(name) => void renameSection(section.id, name)}
+                onClose={() => setEditing(null)}
+                onDelete={
+                  sections.length > 1
+                    ? () => {
+                        if (confirm(`Excluir a seção "${section.name}" e todas as páginas dela?`)) {
+                          void removeSection(section.id)
+                        }
+                      }
+                    : undefined
+                }
+              />
+            ) : (
+              <button
+                key={section.id}
+                className={`chip ${section.id === activeSectionId ? 'active' : ''}`}
+                onClick={() => {
+                  // Já está aberta: o segundo toque é pra renomear.
+                  if (section.id === activeSectionId) setEditing({ kind: 'section', id: section.id })
+                  else void selectSection(section.id)
+                }}
+              >
+                <span className="chip-tab" style={{ background: section.color }} aria-hidden />
+                {section.name}
+                {section.id === activeSectionId && <span className="chip-edit">✎</span>}
+              </button>
+            ),
+          )}
           <button className="chip ghost" onClick={addSection}>
             <span className="plus">+</span> Seção
           </button>
@@ -53,18 +85,31 @@ export function SectionBar() {
 
       <div className="sectionbar-row pages">
         <div className="chips">
-          {pages.map((page) => (
-            <button
-              key={page.id}
-              className={`chip page ${page.id === activePageId ? 'active' : ''}`}
-              onClick={() => void selectPage(page.id)}
-              onDoubleClick={() => {
-                if (confirm(`Excluir a página "${page.title}"?`)) void removePage(page.id)
-              }}
-            >
-              {page.title}
-            </button>
-          ))}
+          {pages.map((page) =>
+            editing?.kind === 'page' && editing.id === page.id ? (
+              <RenameField
+                key={page.id}
+                value={page.title}
+                onSave={(title) => void renamePage(page.id, title)}
+                onClose={() => setEditing(null)}
+                onDelete={() => {
+                  if (confirm(`Excluir a página "${page.title}"?`)) void removePage(page.id)
+                }}
+              />
+            ) : (
+              <button
+                key={page.id}
+                className={`chip page ${page.id === activePageId ? 'active' : ''}`}
+                onClick={() => {
+                  if (page.id === activePageId) setEditing({ kind: 'page', id: page.id })
+                  else void selectPage(page.id)
+                }}
+              >
+                {page.title}
+                {page.id === activePageId && <span className="chip-edit">✎</span>}
+              </button>
+            ),
+          )}
           <button
             className="chip ghost"
             onClick={() => setNewPageOpen((v) => !v)}
@@ -97,6 +142,68 @@ export function SectionBar() {
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * Campo de renomear, com exclusão ao lado.
+ * Guardar o texto num estado local (e não gravar a cada tecla) evita escrever
+ * no banco a cada letra digitada.
+ */
+function RenameField({
+  value,
+  onSave,
+  onClose,
+  onDelete,
+}: {
+  value: string
+  onSave: (value: string) => void
+  onClose: () => void
+  onDelete?: () => void
+}) {
+  const [draft, setDraft] = useState(value)
+
+  const commit = () => {
+    const trimmed = draft.trim()
+    // Nome vazio manteria o item invisível na barra; nesse caso o antigo fica.
+    if (trimmed && trimmed !== value) onSave(trimmed)
+    onClose()
+  }
+
+  return (
+    <form
+      className="rename-form"
+      onSubmit={(e) => {
+        e.preventDefault()
+        commit()
+      }}
+    >
+      <input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') onClose()
+        }}
+        aria-label="Novo nome"
+      />
+      {onDelete && (
+        <button
+          type="button"
+          className="rename-del"
+          // onMouseDown evita que o blur do campo feche o formulário antes do clique.
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            onDelete()
+            onClose()
+          }}
+          aria-label="Excluir"
+        >
+          🗑
+        </button>
+      )}
+    </form>
   )
 }
 

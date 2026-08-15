@@ -71,6 +71,45 @@ function straightLine(): InkPoint[] {
   return points
 }
 
+/**
+ * Cursiva de verdade: cada letra fecha um laço que cruza o próprio traço,
+ * como acontece em g, ç, o, e, l. Foi este caso que ligou a borracha sozinho
+ * enquanto o usuário escrevia — a palavra tem vários cruzamentos, igual a um
+ * rabisco, mas avança pela linha em vez de voltar por cima de si mesma.
+ */
+function cursiveWithLoops(letters = 6): InkPoint[] {
+  const points: InkPoint[] = []
+  const step = 26
+  let i = 0
+  for (let l = 0; l < letters; l++) {
+    for (let s = 0; s <= 22; s++) {
+      const t = s / 22
+      const angle = t * Math.PI * 2 + 0.6
+      points.push(
+        pt(
+          40 + l * step + Math.cos(angle) * 10 + t * step * 0.85,
+          80 + Math.sin(angle) * 16,
+          i++,
+        ),
+      )
+    }
+  }
+  return points
+}
+
+/** Assinatura: cursiva rápida, apertada e com muitos laços. */
+function signature(): InkPoint[] {
+  const points: InkPoint[] = []
+  let i = 0
+  for (let s = 0; s <= 200; s++) {
+    const t = s / 200
+    const x = 40 + t * 260
+    const y = 80 + Math.sin(t * Math.PI * 9) * 24 + Math.sin(t * Math.PI * 23) * 9
+    points.push(pt(x, y, i++))
+  }
+  return points
+}
+
 /** A letra "e" cursiva, que tem um laço legítimo. */
 function singleLoop(): InkPoint[] {
   const points: InkPoint[] = []
@@ -95,6 +134,9 @@ const CASES: Case[] = [
   { name: 'vaivém 8 passadas', points: zigzag(8), expected: true },
 
   { name: 'palavra cursiva', points: cursiveWord(), expected: false },
+  { name: 'cursiva com laços (o defeito)', points: cursiveWithLoops(), expected: false },
+  { name: 'cursiva com laços, longa', points: cursiveWithLoops(10), expected: false },
+  { name: 'assinatura', points: signature(), expected: false },
   { name: 'palavra cursiva longa', points: cursiveWord(10), expected: false },
   { name: 'linha reta', points: straightLine(), expected: false },
   { name: 'laço único (letra e)', points: singleLoop(), expected: false },

@@ -24,6 +24,16 @@ Feito para o Lenovo Idea Tab com caneta, mas roda em qualquer tablet.
   apagar é a mão, arrastando depois
 - Uma faixa avisa que a borracha está ligada; toque nela para voltar à caneta
 - Escrever normalmente nunca dispara o gesto (ver "O gesto do rabisco" abaixo)
+- Depois de apagar, aparece **Desfazer** por 5 segundos
+
+**Imagens**
+- Ferramenta Imagem → "Adicionar imagem" abre a galeria do tablet
+- Também aceita colar da área de transferência
+- Arraste para mover, alça roxa para redimensionar (proporção preservada)
+- A imagem fica **atrás da tinta**: dá para anotar por cima do print
+
+**Renomear** — toque de novo no bloco, seção ou página **já aberto** para
+renomear. O botão 🗑 ao lado exclui.
 
 **Zoom**
 - Pinça com dois dedos aproxima e afasta a folha
@@ -63,11 +73,18 @@ Feito para o Lenovo Idea Tab com caneta, mas roda em qualquer tablet.
 
 ## Instalando no tablet
 
-Passo a passo completo em **[GUIA-TABLET.md](GUIA-TABLET.md)** — roda tudo
-dentro do tablet, via Termux, sem computador e sem nuvem.
+**Como aplicativo (recomendado):** baixe o `Organizador.apk` da release
+[`ultimo`](../../releases/tag/ultimo) e toque no arquivo. Atualizar é repetir
+isso — as anotações são preservadas, porque o APK é sempre assinado com a mesma
+chave (`keystore/organizador.jks`, versionada de propósito; trocá-la quebraria
+todas as atualizações futuras).
 
-A pasta **`tablet/`** já contém o app compilado e pronto. No tablet não se
-compila nada: basta servir essa pasta.
+O GitHub monta o APK sozinho a cada mudança enviada
+(`.github/workflows/apk.yml`).
+
+**Sem instalar (via navegador):** passo a passo em
+**[GUIA-TABLET.md](GUIA-TABLET.md)**, usando Termux. A pasta **`tablet/`** já
+contém o app compilado.
 
 ## Desenvolvendo (no computador)
 
@@ -87,13 +104,19 @@ npm run build:tablet   # regenera a pasta tablet/ (commitar junto)
 
 ## O gesto do rabisco
 
-O risco deste recurso é apagar escrita por engano, então a detecção exige duas
-coisas ao mesmo tempo:
+O risco deste recurso é apagar escrita por engano, então o sinal escolhido
+precisa separar bem os dois casos.
 
-1. **O traço volta por cima de si mesmo** — voltas fechadas geram
-   auto-cruzamentos; o vaivém gera idas e voltas ao longo do eixo do traço.
-2. **O traço é denso** — percorre um caminho muito mais longo do que a área que
-   ocupa. Escrever avança pela linha; rabiscar fica no lugar.
+**Escrever avança; rabiscar volta.** É esse o único sinal usado: quantas vezes
+o traço vai e volta ao longo do próprio eixo.
+
+Contar auto-cruzamentos parece o sinal óbvio e é uma armadilha: letra cursiva
+fecha um laço em quase toda letra (g, ç, o, e, l), e uma palavra de seis letras
+produz tantos cruzamentos quanto três voltas rabiscadas. Isso ligava a borracha
+no meio da escrita. A densidade também não separa — a mesma cursiva com laços dá
+densidade maior que rabiscos legítimos.
+
+Medido: escrita fica em 0–1 inversões, rabisco em 5–9. A separação é larga.
 
 Os limiares estão em `src/ink/scribble.ts`, na constante `SCRIBBLE`, com
 comentário explicando cada um. Para ajustar a sensibilidade, mexa ali.
@@ -104,8 +127,9 @@ Há um teste que verifica a fronteira entre "apagar" e "escrever":
 npm run test:scribble
 ```
 
-Ele cobre 3/4/5 círculos e vaivém (devem apagar) contra palavra cursiva, linha
-reta, laço único da letra "e", pingo do "i" e 1–2 círculos (não podem apagar).
+Ele cobre 3/4/5 círculos e vaivém (devem apagar) contra palavra cursiva,
+**cursiva com laços**, assinatura, linha reta, laço único da letra "e", pingo do
+"i" e 1–2 círculos (não podem apagar).
 **Ao mexer nos limiares, rode este teste.**
 
 ---
@@ -146,4 +170,4 @@ grava no banco em seguida. É isso que mantém a escrita fluida.
 4. **Zonas editáveis na folha** — arrastar as bordas, criar zona nova à mão.
 5. **Ícones personalizados** — você cria os seus carimbos, com os seus
    significados.
-6. **Empacotar como app Android**.
+6. ~~Empacotar como app Android~~ — feito.

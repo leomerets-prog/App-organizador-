@@ -8,26 +8,44 @@ import { boundsOf, dist, pathLength, segmentsIntersect, simplify } from '../lib/
  * ele rabisca por cima do que quer apagar — três voltas, ou um vaivém — e o
  * traço do rabisco vira o comando de apagar em vez de virar tinta.
  *
- * Um rabisco se distingue da escrita normal por duas propriedades ao mesmo tempo:
+ * O QUE SEPARA UM RABISCO DA ESCRITA
  *
- *   1. Ele volta por cima de si mesmo. Voltas fechadas geram auto-cruzamentos;
- *      vaivéns geram inversões bruscas de direção.
- *   2. Ele é denso: percorre um caminho muito mais longo do que a área que ocupa.
- *      Escrever "organização" também tem cruzamentos, mas se espalha pela linha.
+ * Uma coisa só, e ela é decisiva: **escrever avança, rabiscar volta**. A escrita
+ * caminha pela linha e quase nunca retrocede; o rabisco vai e volta por cima do
+ * mesmo lugar. É o que `countAxisReversals` mede.
  *
- * Exigir as duas coisas juntas é o que evita apagar palavra por engano.
+ * POR QUE NÃO SE USA AUTO-CRUZAMENTO
+ *
+ * Contar quantas vezes o traço cruza a si mesmo parece o sinal óbvio, e é uma
+ * armadilha: letra cursiva fecha um laço em quase toda letra — g, ç, o, e, l —
+ * e cada laço é um cruzamento. Uma palavra cursiva de seis letras produz cinco
+ * ou mais cruzamentos, o mesmo que três voltas rabiscadas. Isso ligava a
+ * borracha no meio da escrita do usuário.
+ *
+ * A densidade também não separa: a mesma cursiva com laços dá densidade 3,2,
+ * MAIOR que a de rabiscos legítimos. Ela continua aqui só como filtro barato
+ * pra descartar traço retilíneo antes das contas caras — nunca como prova.
+ *
+ * Os números medidos, que sustentam a escolha:
+ *
+ *   escrita  (cursiva, cursiva com laços, assinatura, linha)  inversões: 0 a 1
+ *   rabisco  (3/4/5 voltas, vaivém de 6 e 8 passadas)         inversões: 5 a 9
+ *
+ * A separação é larga e não depende de calibrar nada fino. O auto-cruzamento
+ * segue calculado apenas para diagnóstico no teste.
  */
 
 export const SCRIBBLE = {
-  /** Voltas fechadas necessárias (cada círculo fechado gera ~1 cruzamento). */
-  minSelfIntersections: 3,
   /**
-   * Idas e voltas ao longo do eixo principal pro rabisco em vaivém.
-   * Em 5, duas voltas fechadas (que dão 4) continuam valendo como escrita —
-   * margem de segurança contra apagar sem querer.
+   * O único gatilho: quantas vezes o traço vai e volta ao longo do próprio eixo.
+   * Em 5, escrita cursiva (0 a 1) fica bem longe do limiar e duas voltas
+   * fechadas (3) ainda contam como escrita.
    */
   minAxisReversals: 5,
-  /** Comprimento do caminho ÷ diagonal da caixa. Acima disso, o traço "volta por cima". */
+  /**
+   * Filtro barato, não prova. Só evita rodar as contas caras num traço
+   * retilíneo. Não serve pra separar rabisco de cursiva — ver o cabeçalho.
+   */
   minDensity: 2.2,
   /** Abaixo deste comprimento (px de página) é toque ou pingo, nunca rabisco. */
   minPathLength: 60,
@@ -80,14 +98,19 @@ export function analyzeScribble(points: readonly InkPoint[]): ScribbleAnalysis {
   if (density < SCRIBBLE.minDensity) return fail({ length, diagonal, density })
 
   const sample = downsample(simplify(points, SCRIBBLE.simplifyTolerance), SCRIBBLE.maxAnalyzedPoints)
-  const selfIntersections = countSelfIntersections(sample)
   const axisReversals = countAxisReversals(sample)
 
-  const isScribble =
-    selfIntersections >= SCRIBBLE.minSelfIntersections ||
-    axisReversals >= SCRIBBLE.minAxisReversals
+  // Cruzamentos entram só no relatório: são enganosos como prova (ver cabeçalho).
+  const selfIntersections = countSelfIntersections(sample)
 
-  return { isScribble, selfIntersections, axisReversals, density, length, diagonal }
+  return {
+    isScribble: axisReversals >= SCRIBBLE.minAxisReversals,
+    selfIntersections,
+    axisReversals,
+    density,
+    length,
+    diagonal,
+  }
 }
 
 /**

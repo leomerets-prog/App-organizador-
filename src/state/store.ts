@@ -6,6 +6,7 @@ import type {
   ItemKind,
   Notebook,
   Page,
+  PageImage,
   Recording,
   Section,
   Stroke,
@@ -18,6 +19,7 @@ import { newId } from '../lib/id'
 import { boundsOf, unionBounds } from '../lib/geometry'
 import { PAGE_WIDTH, PAGE_MIN_HEIGHT, PAGE_GROWTH, HIGHLIGHTER_WIDTH } from '../domain/constants'
 import { zoneAtPoint } from '../zones/hit'
+import { forgetImage, placeNewImage, readImageFile } from '../ink/images'
 import { applyTheme, loadPrefs, savePrefs } from './prefs'
 import type { Theme } from './prefs'
 
@@ -43,6 +45,9 @@ export interface AppState {
   zones: Zone[]
   items: Item[]
   recordings: Recording[]
+  images: PageImage[]
+  /** Imagem em ajuste (mover/redimensionar). */
+  selectedImageId: Id | null
 
   // Ferramentas
   tool: ToolKind
@@ -70,6 +75,8 @@ export interface AppState {
   createSection: (name: string, color: string) => Promise<void>
   createPage: (title: string, templateId: string) => Promise<void>
   renamePage: (id: Id, title: string) => Promise<void>
+  renameSection: (id: Id, name: string) => Promise<void>
+  renameNotebook: (id: Id, name: string) => Promise<void>
   removePage: (id: Id) => Promise<void>
   removeSection: (id: Id) => Promise<void>
   removeNotebook: (id: Id) => Promise<void>
@@ -84,6 +91,9 @@ export interface AppState {
 
   commitStroke: (points: InkPoint[], startedAt: number) => Promise<void>
   eraseStrokes: (ids: Id[]) => Promise<void>
+  /** Devolve os traços da última borrachada. Null quando não há o que desfazer. */
+  undoErase: () => Promise<number>
+  canUndoErase: () => boolean
   setSelection: (ids: Id[]) => void
   clearSelection: () => void
 
@@ -96,8 +106,22 @@ export interface AppState {
   removeRecording: (id: Id) => Promise<void>
   setActiveRecording: (id: Id | null) => void
 
+  addImage: (file: File | Blob, visible: { x: number; y: number; w: number; h: number }) => Promise<void>
+  updateImageRect: (id: Id, rect: PageImage['rect']) => Promise<void>
+  removeImage: (id: Id) => Promise<void>
+  selectImage: (id: Id | null) => void
+
   growPageIfNeeded: (bottomY: number) => Promise<void>
 }
+
+/**
+ * Última borrachada, guardada só na memória.
+ *
+ * Apagar sem volta é o único caminho do app em que se perde trabalho de
+ * verdade — ainda mais com um gesto que pode ser reconhecido errado. Um passo
+ * de desfazer cobre justamente o engano que se percebe na hora.
+ */
+let lastErased: Stroke[] = []
 
 /** Guarda do arranque: garante uma única execução por carregamento do app. */
 let initOnce: Promise<void> | null = null
@@ -132,6 +156,8 @@ export const useStore = create<AppState>((set, get) => ({
   zones: [],
   items: [],
   recordings: [],
+  images: [],
+  selectedImageId: null,
 
   tool: 'pen',
   penColor: initialPrefs.penColor,
@@ -170,18 +196,19 @@ export const useStore = create<AppState>((set, get) => ({
     const sections = await repo.listSections(id)
     set({ activeNotebookId: id, sections, activeSectionId: null, pages: [] })
     if (sections[0]) await get().selectSection(sections[0].id)
-    else set({ activePageId: null, strokes: [], zones: [], items: [], recordings: [] })
+    else set({ activePageId: null, strokes: [], zones: [], items: [], recordings: [], images: [] })
   },
 
   async selectSection(id) {
     const pages = await repo.listPages(id)
     set({ activeSectionId: id, pages })
     if (pages[0]) await get().selectPage(pages[0].id)
-    else set({ activePageId: null, strokes: [], zones: [], items: [], recordings: [] })
+    else set({ activePageId: null, strokes: [], zones: [], items: [], recordings: [], images: [] })
   },
 
   async selectPage(id) {
-    set({ loadingPage: true, activePageId: id, selection: new Set() })
+    set({ loadingPage: true, activePageId: id, selection: new Set(), selectedImageId: null })
+    lastErased = []
     const content = await repo.loadPageContent(id)
     // Se o usuário trocou de página enquanto isto carregava, descarta o resultado.
     if (get().activePageId !== id) return
@@ -254,13 +281,29 @@ export const useStore = create<AppState>((set, get) => ({
     set({ pages: get().pages.map((p) => (p.id === id ? updated : p)) })
   },
 
+  async renameSection(id, name) {
+    const section = get().sections.find((s) => s.id === id)
+    if (!section) return
+    const updated = { ...section, name, updatedAt: Date.now() }
+    await repo.putSection(updated)
+    set({ sections: get().sections.map((s) => (s.id === id ? updated : s)) })
+  },
+
+  async renameNotebook(id, name) {
+    const nb = get().notebooks.find((n) => n.id === id)
+    if (!nb) return
+    const updated = { ...nb, name, updatedAt: Date.now() }
+    await repo.putNotebook(updated)
+    set({ notebooks: get().notebooks.map((n) => (n.id === id ? updated : n)) })
+  },
+
   async removePage(id) {
     await repo.deletePage(id)
     const pages = get().pages.filter((p) => p.id !== id)
     set({ pages })
     if (get().activePageId === id) {
       if (pages[0]) await get().selectPage(pages[0].id)
-      else set({ activePageId: null, strokes: [], zones: [], items: [], recordings: [] })
+      else set({ activePageId: null, strokes: [], zones: [], items: [], recordings: [], images: [] })
     }
   },
 
@@ -352,6 +395,7 @@ export const useStore = create<AppState>((set, get) => ({
   async eraseStrokes(ids) {
     if (ids.length === 0) return
     const dead = new Set(ids)
+    lastErased = get().strokes.filter((s) => dead.has(s.id))
     set({ strokes: get().strokes.filter((s) => !dead.has(s.id)) })
     await repo.deleteStrokes(ids)
 
@@ -374,6 +418,28 @@ export const useStore = create<AppState>((set, get) => ({
       }
     }
   },
+
+  /**
+   * Devolve os traços da última borrachada. Um passo só, de propósito: cobre o
+   * engano percebido na hora, que é o caso real, sem virar um histórico.
+   */
+  async undoErase() {
+    const restore = lastErased
+    lastErased = []
+    if (restore.length === 0) return 0
+
+    const pageId = get().activePageId
+    const valid = restore.filter((s) => s.pageId === pageId)
+    if (valid.length === 0) return 0
+
+    for (const stroke of valid) await repo.putStroke(stroke)
+    set({
+      strokes: [...get().strokes, ...valid].sort((a, b) => a.startedAt - b.startedAt),
+    })
+    return valid.length
+  },
+
+  canUndoErase: () => lastErased.length > 0,
 
   setSelection: (ids) => set({ selection: new Set(ids) }),
   clearSelection: () => set({ selection: new Set() }),
@@ -439,6 +505,51 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setActiveRecording: (activeRecordingId) => set({ activeRecordingId }),
+
+  // ─── Imagens ───────────────────────────────────────────────────────────────
+
+  async addImage(file, visible) {
+    const pageId = get().activePageId
+    if (!pageId) return
+
+    const { blob, width, height, mime } = await readImageFile(file)
+    const rect = placeNewImage(PAGE_WIDTH, visible, width, height)
+
+    const image: PageImage = {
+      id: newId(),
+      pageId,
+      rect,
+      mime,
+      aspect: height / Math.max(1, width),
+      createdAt: Date.now(),
+    }
+
+    await repo.putImage(image, blob)
+    // Já entra selecionada, com a ferramenta de imagem: o passo seguinte é
+    // sempre posicionar, e ninguém quer caçar como fazer isso.
+    set({ images: [...get().images, image], selectedImageId: image.id, tool: 'image' })
+    await get().growPageIfNeeded(rect.y + rect.h)
+  },
+
+  async updateImageRect(id, rect) {
+    const image = get().images.find((i) => i.id === id)
+    if (!image) return
+    const updated = { ...image, rect }
+    set({ images: get().images.map((i) => (i.id === id ? updated : i)) })
+    await repo.putImage(updated)
+    await get().growPageIfNeeded(rect.y + rect.h)
+  },
+
+  async removeImage(id) {
+    await repo.deleteImage(id)
+    forgetImage(id)
+    set({
+      images: get().images.filter((i) => i.id !== id),
+      selectedImageId: get().selectedImageId === id ? null : get().selectedImageId,
+    })
+  },
+
+  selectImage: (selectedImageId) => set({ selectedImageId }),
 
   // ─── Folha ─────────────────────────────────────────────────────────────────
 

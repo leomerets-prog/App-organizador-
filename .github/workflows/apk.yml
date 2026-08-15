@@ -1,0 +1,80 @@
+name: Montar APK
+
+# Monta o app a cada mudança enviada e publica o APK numa Release fixa
+# chamada "ultimo". O tablet baixa sempre do mesmo endereço, sem procurar nada.
+on:
+  push:
+    branches: ['**']
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # Java 17, não 21: o Gradle 8.2 que o Capacitor traz não roda em 21.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Verificar o gesto do rabisco
+        # A fronteira entre apagar e escrever é o ponto mais frágil do app.
+        # Um APK que apaga escrita por engano não deve chegar ao tablet.
+        run: npm run test:scribble
+
+      - name: Compilar o app
+        run: npm run build:tablet
+
+      - name: Levar o app pro projeto Android
+        run: npx cap sync android
+
+      - name: Montar o APK
+        run: ./gradlew assembleDebug --no-daemon
+        working-directory: android
+        env:
+          # Numera cada build, pra dar pra saber qual versão está no tablet.
+          APK_VERSION_CODE: ${{ github.run_number }}
+          APK_VERSION_NAME: ${{ github.run_number }}-${{ github.sha }}
+
+      - name: Renomear pro nome que o tablet vê
+        run: |
+          mkdir -p dist-apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk dist-apk/Organizador.apk
+          ls -la dist-apk/
+
+      - name: Guardar o APK como anexo da execução
+        uses: actions/upload-artifact@v4
+        with:
+          name: Organizador-apk
+          path: dist-apk/Organizador.apk
+          retention-days: 90
+
+      - name: Publicar na Release "ultimo"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ultimo
+          name: Organizador — versão mais recente
+          body: |
+            Versão ${{ github.run_number }}, do commit ${{ github.sha }}.
+
+            **Para instalar ou atualizar no tablet:** baixe o `Organizador.apk`
+            abaixo e toque no arquivo. As anotações que já estão no aparelho
+            são preservadas.
+          files: dist-apk/Organizador.apk
+          make_latest: true

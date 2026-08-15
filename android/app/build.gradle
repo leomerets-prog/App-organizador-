@@ -1,0 +1,81 @@
+apply plugin: 'com.android.application'
+
+android {
+    /*
+     * Chave de assinatura FIXA, versionada junto do projeto.
+     *
+     * O Android só aceita instalar uma atualização por cima quando a assinatura
+     * é a mesma da versão anterior. Se cada build gerasse uma chave nova, a
+     * única saída seria desinstalar e reinstalar — apagando as anotações. Por
+     * isso a chave mora no repositório, e não pode ser trocada.
+     *
+     * Contrapartida assumida: quem tiver acesso a este repositório privado pode
+     * assinar um APK com esta identidade. Aceitável para um app pessoal que não
+     * é distribuído em loja nenhuma. Publicar na Play Store exigiria uma chave
+     * guardada fora do código.
+     */
+    signingConfigs {
+        organizador {
+            storeFile file('../../keystore/organizador.jks')
+            storePassword 'organizador'
+            keyAlias 'organizador'
+            keyPassword 'organizador'
+        }
+    }
+
+    namespace "com.leomerets.organizador"
+    compileSdk rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "com.leomerets.organizador"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        // A esteira do GitHub numera cada build; fora dela, vale o valor local.
+        versionCode System.getenv("APK_VERSION_CODE") ? System.getenv("APK_VERSION_CODE").toInteger() : 1
+        versionName System.getenv("APK_VERSION_NAME") ?: "local"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.organizador
+        }
+        release {
+            signingConfig signingConfigs.organizador
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
