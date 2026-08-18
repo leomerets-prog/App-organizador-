@@ -30,6 +30,10 @@ Feito para o Lenovo Idea Tab com caneta, mas roda em qualquer tablet.
   OneNote. Com a borracha ativa, a barra lateral controla o **tamanho dela**
 - Toque parado com a borracha não apaga nada — só o arrasto apaga
 
+**A borracha apaga só onde passa** — é borracha de ponta, não de traço.
+Passar no meio de uma palavra tira aquele pedaço e deixa as duas metades, cada
+uma virando um traço independente. Desfazer devolve a palavra inteira.
+
 **Imagens**
 - Ferramenta Imagem → "Adicionar imagem" abre a galeria do tablet
 - Também aceita colar da área de transferência
@@ -103,7 +107,7 @@ contém o app compilado.
 ```bash
 npm install
 npm run dev            # servidor de desenvolvimento
-npm run test:scribble  # teste do gesto do rabisco
+npm test               # testes do rabisco e da borracha
 npm run build:tablet   # regenera a pasta tablet/ (commitar junto)
 ```
 
@@ -111,6 +115,23 @@ npm run build:tablet   # regenera a pasta tablet/ (commitar junto)
 
 > Ao mudar qualquer coisa em `src/`, rode `npm run build:tablet` e comite a
 > pasta `tablet/` junto — é dela que o tablet lê.
+
+---
+
+## A borracha
+
+É **borracha de ponta**: apaga o pedaço por onde passou, não o traço inteiro.
+Cada passada percorre o segmento entre a posição anterior e a atual — trabalhar
+por segmento, e não por ponto solto, é o que evita buracos quando a mão anda
+rápido e os eventos do sistema chegam espaçados.
+
+O que sobra de um corte vira pedaços independentes, cada um um traço por
+direito próprio. Itens carimbados que apontavam para o traço original são
+religados aos pedaços, senão apagar um naco de uma tarefa faria a tarefa
+sumir do painel.
+
+A lógica fica em `src/ink/erase.ts`, sem depender de React nem de banco.
+Verificação: `npm run test:erase`.
 
 ---
 
@@ -160,7 +181,7 @@ src/
   audio/       gravação
   components/  a folha, a navegação, as barras, o painel
   lib/         geometria e utilidades
-tools/         teste do gesto do rabisco
+tools/         testes do gesto do rabisco e da borracha
 ```
 
 Regra da casa: **componente não fala com o banco**. Ele chama uma ação de

@@ -2,13 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import { THEMES, render } from '../ink/renderer'
 import type { Viewport } from '../ink/renderer'
-import {
-  PenTracker,
-  StrokeBuilder,
-  pressureFrom,
-  strokesHitByPath,
-  strokesInsideLasso,
-} from '../ink/input'
+import { PenTracker, StrokeBuilder, pressureFrom, strokesInsideLasso } from '../ink/input'
 import { analyzeScribble } from '../ink/scribble'
 import { PAGE_WIDTH } from '../domain/constants'
 import type { Pt } from '../lib/geometry'
@@ -39,6 +33,9 @@ import type { PageImage } from '../domain/types'
  * do ciclo do React — é isso que segura a escrita e a pinça na velocidade da
  * mão, sem re-renderizar a árvore a cada quadro.
  */
+
+/** A borracha corta na hora; nada fica "marcado pra apagar" esperando o fim. */
+const EMPTY_SET: Set<string> = new Set()
 
 /** Limites do que conta como toque, e do intervalo entre dois deles. */
 const TAP_MAX_MS = 300
@@ -90,7 +87,9 @@ export function PageCanvas() {
   const selectedImageId = useStore((s) => s.selectedImageId)
 
   const commitStroke = useStore((s) => s.commitStroke)
-  const eraseStrokes = useStore((s) => s.eraseStrokes)
+  const beginErase = useStore((s) => s.beginErase)
+  const eraseSweep = useStore((s) => s.eraseSweep)
+  const endErase = useStore((s) => s.endErase)
   const setSelection = useStore((s) => s.setSelection)
   const toggleItemStatus = useStore((s) => s.toggleItemStatus)
   const setTool = useStore((s) => s.setTool)
@@ -126,7 +125,6 @@ export function PageCanvas() {
   const gestureRef = useRef<Gesture | null>(null)
   const touchesRef = useRef(new Map<number, Pt>())
   const penTracker = useRef(new PenTracker())
-  const pendingErase = useRef<Set<string>>(new Set())
   const pinchingRef = useRef(false)
   const dirty = useRef(true)
   /** Onde desenhar a bolinha da borracha; null quando ela não está em uso. */
@@ -272,7 +270,7 @@ export function PageCanvas() {
               }
             : null,
         lassoPath: gesture?.kind === 'lasso' ? (gesture.lasso ?? null) : null,
-        pendingErase: pendingErase.current,
+        pendingErase: EMPTY_SET,
         selected: st.selection,
         images: st.images,
         selectedImageId: st.selectedImageId,
@@ -586,6 +584,7 @@ export function PageCanvas() {
 
       if (st.tool === 'eraser' || eraseByButton) {
         eraserCursorRef.current = pt
+        beginErase()
         gestureRef.current = { kind: 'erase', pointerId: event.pointerId, lasso: [pt] }
       } else if (st.tool === 'lasso') {
         gestureRef.current = { kind: 'lasso', pointerId: event.pointerId, lasso: [pt] }
@@ -603,6 +602,7 @@ export function PageCanvas() {
       hitItemMarker,
       toggleItemStatus,
       beginPinch,
+      beginErase,
       imageAt,
       onResizeHandle,
       onDeleteBadge,
@@ -683,13 +683,23 @@ export function PageCanvas() {
           gesture.builder.add(pt.x, pt.y, pressureFrom(event.nativeEvent))
         }
       } else if (gesture.kind === 'erase') {
+        // Corta do ponto anterior até este. Trabalhar por segmento — e não por
+        // ponto solto — é o que evita buracos quando a mão anda rápido e os
+        // eventos chegam espaçados.
+        const anterior = gesture.lasso![gesture.lasso!.length - 1] ?? pt
         gesture.lasso!.push(pt)
         eraserCursorRef.current = pt
-        // O raio é em px de página, então a borracha alcança sempre a mesma
-        // quantidade de escrita, independente da aproximação.
-        const radius = stateRef.current.eraserSize
-        for (const id of strokesHitByPath(stateRef.current.strokes, [pt], radius)) {
-          pendingErase.current.add(id)
+
+        const events = event.nativeEvent.getCoalescedEvents?.() ?? []
+        if (events.length > 1) {
+          let de = anterior
+          for (const raw of events) {
+            const ate = toPage(raw)
+            eraseSweep(de, ate)
+            de = ate
+          }
+        } else {
+          eraseSweep(anterior, pt)
         }
       } else if (gesture.kind === 'lasso') {
         gesture.lasso!.push(pt)
@@ -697,7 +707,7 @@ export function PageCanvas() {
 
       dirty.current = true
     },
-    [toPage, toScreen, applyView, updatePinch, updateImageRect, cancelLongPress],
+    [toPage, toScreen, applyView, updatePinch, updateImageRect, cancelLongPress, eraseSweep],
   )
 
   /**
@@ -759,7 +769,7 @@ export function PageCanvas() {
 
       // Toque parado com a borracha não apaga: ele existe pro toque duplo.
       if (upScreen && wasTap(press, upScreen)) {
-        pendingErase.current.clear()
+        await endErase()
         if (wasDoubleTap(upScreen)) {
           setTool('pen')
           setToolNotice(Date.now())
@@ -768,18 +778,14 @@ export function PageCanvas() {
         return
       }
 
-      const ids = [...pendingErase.current]
-      pendingErase.current.clear()
-      if (ids.length > 0) {
-        await eraseStrokes(ids)
-        setErasedCount(ids.length)
-      }
+      const apagados = await endErase()
+      if (apagados > 0) setErasedCount(apagados)
     } else if (gesture.kind === 'lasso' && gesture.lasso && gesture.lasso.length > 2) {
       setSelection(strokesInsideLasso(stateRef.current.strokes, gesture.lasso))
     }
 
     dirty.current = true
-  }, [commitStroke, eraseStrokes, setSelection, setTool, wasTap, wasDoubleTap])
+  }, [commitStroke, endErase, setSelection, setTool, wasTap, wasDoubleTap])
 
   const onPointerUp = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -1049,7 +1055,9 @@ function UndoBar({
 
   return (
     <div className="undo-bar" role="status">
-      {count === 1 ? '1 traço apagado' : `${count} traços apagados`}
+      {/* Sem contagem de traços: a borracha corta pedaços, e dizer "1 traço
+          apagado" depois de tirar um naco do meio de uma palavra confunde. */}
+      Trecho apagado
       <button onClick={onUndo}>Desfazer</button>
     </div>
   )

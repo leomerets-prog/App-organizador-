@@ -33,10 +33,10 @@ jobs:
       - name: Instalar dependências
         run: npm ci
 
-      - name: Verificar o gesto do rabisco
-        # A fronteira entre apagar e escrever é o ponto mais frágil do app.
-        # Um APK que apaga escrita por engano não deve chegar ao tablet.
-        run: npm run test:scribble
+      - name: Verificar a borracha e o gesto do rabisco
+        # Tudo que apaga escrita é verificado antes de virar APK: a fronteira
+        # entre rabiscar e escrever, e o corte da borracha de ponta.
+        run: npm test
 
       - name: Compilar o app
         run: npm run build:tablet

@@ -27,6 +27,8 @@ import {
 } from '../domain/constants'
 import { zoneAtPoint } from '../zones/hit'
 import { forgetImage, placeNewImage, readImageFile } from '../ink/images'
+import { eraseAlongSegment } from '../ink/erase'
+import type { Pt } from '../lib/geometry'
 import { applyTheme, loadPrefs, savePrefs } from './prefs'
 import type { Theme } from './prefs'
 
@@ -100,8 +102,14 @@ export interface AppState {
   setEraserSize: (size: number) => void
 
   commitStroke: (points: InkPoint[], startedAt: number) => Promise<void>
-  eraseStrokes: (ids: Id[]) => Promise<void>
-  /** Devolve os traços da última borrachada. Null quando não há o que desfazer. */
+
+  /** Começa uma borrachada. Uma por movimento contínuo da mão. */
+  beginErase: () => void
+  /** Uma passada, do ponto anterior ao atual. Devolve quantos traços mudaram. */
+  eraseSweep: (from: Pt, to: Pt) => number
+  /** Fim do movimento: grava e religa os itens. Devolve quantos sumiram. */
+  endErase: () => Promise<number>
+  /** Desfaz a última borrachada inteira. */
   undoErase: () => Promise<number>
   canUndoErase: () => boolean
   setSelection: (ids: Id[]) => void
@@ -128,10 +136,79 @@ export interface AppState {
  * Última borrachada, guardada só na memória.
  *
  * Apagar sem volta é o único caminho do app em que se perde trabalho de
- * verdade — ainda mais com um gesto que pode ser reconhecido errado. Um passo
- * de desfazer cobre justamente o engano que se percebe na hora.
+ * verdade. Um passo de desfazer cobre justamente o engano que se percebe na
+ * hora — e com a borracha de ponta ele precisa desfazer duas coisas: devolver
+ * os traços inteiros e tirar os pedaços que sobraram do corte.
  */
-let lastErased: Stroke[] = []
+let lastErase: {
+  restore: Stroke[]
+  removeIds: Id[]
+  items: Item[]
+} | null = null
+
+/**
+ * Borrachada em andamento.
+ *
+ * `originals` guarda os traços como estavam antes do primeiro corte, `lineage`
+ * liga cada pedaço ao traço de origem mesmo depois de cortes sucessivos, e
+ * `created` marca o que nasceu durante o movimento e ainda não foi gravado.
+ */
+let eraseSession: {
+  originals: Map<Id, Stroke>
+  lineage: Map<Id, Id>
+  created: Set<Id>
+} | null = null
+
+/**
+ * Religa os itens carimbados depois de um corte.
+ *
+ * Sem isto, apagar um pedaço da tinta de uma tarefa faria a tarefa inteira
+ * desaparecer do painel — o item apontaria pra um traço que deixou de existir.
+ * Aqui cada referência perdida é trocada pelos pedaços que sobraram dela.
+ */
+async function reconcileItems(
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+  lineage: Map<Id, Id>,
+  removedRoots: Set<Id>,
+): Promise<void> {
+  if (removedRoots.size === 0) return
+
+  const strokes = get().strokes
+  const byRoot = new Map<Id, Id[]>()
+  for (const stroke of strokes) {
+    const root = lineage.get(stroke.id)
+    if (!root) continue
+    const list = byRoot.get(root) ?? []
+    list.push(stroke.id)
+    byRoot.set(root, list)
+  }
+
+  for (const item of get().items) {
+    if (!item.strokeIds.some((id) => removedRoots.has(id))) continue
+
+    const next = new Set<Id>()
+    for (const id of item.strokeIds) {
+      if (removedRoots.has(id)) for (const piece of byRoot.get(id) ?? []) next.add(piece)
+      else next.add(id)
+    }
+
+    if (next.size === 0) {
+      await get().removeItem(item.id)
+      continue
+    }
+
+    const own = strokes.filter((s) => next.has(s.id))
+    const updated: Item = {
+      ...item,
+      strokeIds: [...next],
+      bounds: unionBounds(own.map((s) => s.bounds)),
+      updatedAt: Date.now(),
+    }
+    await repo.putItem(updated)
+    set({ items: get().items.map((i) => (i.id === item.id ? updated : i)) })
+  }
+}
 
 /** Guarda do arranque: garante uma única execução por carregamento do app. */
 let initOnce: Promise<void> | null = null
@@ -220,7 +297,8 @@ export const useStore = create<AppState>((set, get) => ({
 
   async selectPage(id) {
     set({ loadingPage: true, activePageId: id, selection: new Set(), selectedImageId: null })
-    lastErased = []
+    lastErase = null
+    eraseSession = null
     const content = await repo.loadPageContent(id)
     // Se o usuário trocou de página enquanto isto carregava, descarta o resultado.
     if (get().activePageId !== id) return
@@ -409,54 +487,120 @@ export const useStore = create<AppState>((set, get) => ({
     await get().growPageIfNeeded(bounds.maxY)
   },
 
-  async eraseStrokes(ids) {
-    if (ids.length === 0) return
-    const dead = new Set(ids)
-    lastErased = get().strokes.filter((s) => dead.has(s.id))
-    set({ strokes: get().strokes.filter((s) => !dead.has(s.id)) })
-    await repo.deleteStrokes(ids)
+  // ─── Borracha ──────────────────────────────────────────────────────────────
 
-    // Item que perdeu toda a tinta perde o sentido de existir.
-    for (const item of get().items) {
-      const remaining = item.strokeIds.filter((sid) => !dead.has(sid))
-      if (remaining.length === item.strokeIds.length) continue
-      if (remaining.length === 0) {
-        await get().removeItem(item.id)
-      } else {
-        const strokes = get().strokes.filter((s) => remaining.includes(s.id))
-        const updated = {
-          ...item,
-          strokeIds: remaining,
-          bounds: unionBounds(strokes.map((s) => s.bounds)),
-          updatedAt: Date.now(),
-        }
-        await repo.putItem(updated)
-        set({ items: get().items.map((i) => (i.id === item.id ? updated : i)) })
-      }
-    }
+  beginErase() {
+    eraseSession = { originals: new Map(), lineage: new Map(), created: new Set() }
   },
 
   /**
-   * Devolve os traços da última borrachada. Um passo só, de propósito: cobre o
-   * engano percebido na hora, que é o caso real, sem virar um histórico.
+   * Uma passada da borracha. Só mexe na memória — a gravação acontece no fim
+   * do movimento, porque um arrasto dispara dezenas de passadas e gravar cada
+   * uma engasgaria a mão.
    */
-  async undoErase() {
-    const restore = lastErased
-    lastErased = []
-    if (restore.length === 0) return 0
+  eraseSweep(from, to) {
+    const session = eraseSession
+    if (!session) return 0
 
-    const pageId = get().activePageId
-    const valid = restore.filter((s) => s.pageId === pageId)
-    if (valid.length === 0) return 0
+    const replacements = eraseAlongSegment(
+      get().strokes,
+      from,
+      to,
+      get().eraserSize,
+      newId,
+    )
+    if (replacements.length === 0) return 0
 
-    for (const stroke of valid) await repo.putStroke(stroke)
-    set({
-      strokes: [...get().strokes, ...valid].sort((a, b) => a.startedAt - b.startedAt),
-    })
-    return valid.length
+    const strokes = [...get().strokes]
+
+    for (const { original, fragments } of replacements) {
+      // A raiz da linhagem é o traço que existia antes desta borrachada. Ela
+      // sobrevive a cortes sucessivos: um pedaço cortado de novo continua
+      // apontando pro mesmo original, e é isso que permite religar os itens
+      // carimbados no fim.
+      const root = session.lineage.get(original.id) ?? original.id
+      if (!session.originals.has(root) && !session.created.has(original.id)) {
+        session.originals.set(root, original)
+      }
+      session.created.delete(original.id)
+
+      const at = strokes.findIndex((s) => s.id === original.id)
+      if (at >= 0) strokes.splice(at, 1, ...fragments)
+
+      for (const fragment of fragments) {
+        session.lineage.set(fragment.id, root)
+        session.created.add(fragment.id)
+      }
+    }
+
+    set({ strokes })
+    return replacements.length
   },
 
-  canUndoErase: () => lastErased.length > 0,
+  /** Fim do movimento: grava o resultado e reconcilia os itens carimbados. */
+  async endErase() {
+    const session = eraseSession
+    eraseSession = null
+    if (!session) return 0
+
+    const current = get().strokes
+    const currentIds = new Set(current.map((s) => s.id))
+
+    const removedIds = [...session.originals.keys()].filter((id) => !currentIds.has(id))
+    const addedStrokes = current.filter((s) => session.created.has(s.id))
+    if (removedIds.length === 0 && addedStrokes.length === 0) return 0
+
+    for (const stroke of addedStrokes) await repo.putStroke(stroke)
+    await repo.deleteStrokes(removedIds)
+
+    lastErase = {
+      restore: removedIds.map((id) => session.originals.get(id)!).filter(Boolean),
+      removeIds: addedStrokes.map((s) => s.id),
+      // Os itens são guardados inteiros: desfazer volta a lista como estava,
+      // em vez de tentar refazer a religação ao contrário.
+      items: get().items,
+    }
+
+    await reconcileItems(get, set, session.lineage, new Set(removedIds))
+    return removedIds.length
+  },
+
+  /**
+   * Desfaz a última borrachada: devolve os traços inteiros e tira os pedaços
+   * que a borracha havia criado. Um passo só, de propósito — cobre o engano
+   * percebido na hora, que é o caso real, sem virar um histórico.
+   */
+  async undoErase() {
+    const op = lastErase
+    lastErase = null
+    if (!op) return 0
+
+    const pageId = get().activePageId
+    const restore = op.restore.filter((s) => s.pageId === pageId)
+    if (restore.length === 0 && op.removeIds.length === 0) return 0
+
+    const dead = new Set(op.removeIds)
+    await repo.deleteStrokes(op.removeIds)
+    for (const stroke of restore) await repo.putStroke(stroke)
+
+    set({
+      strokes: [...get().strokes.filter((s) => !dead.has(s.id)), ...restore].sort(
+        (a, b) => a.startedAt - b.startedAt,
+      ),
+    })
+
+    // Itens voltam exatamente como estavam antes da borrachada.
+    for (const item of op.items) await repo.putItem(item)
+    const alive = new Set(op.items.map((i) => i.id))
+    for (const item of get().items) {
+      if (!alive.has(item.id)) await repo.deleteItem(item.id)
+    }
+    set({ items: op.items })
+
+    return restore.length
+  },
+
+  canUndoErase: () => lastErase !== null,
 
   setSelection: (ids) => set({ selection: new Set(ids) }),
   clearSelection: () => set({ selection: new Set() }),
