@@ -50,6 +50,8 @@ export interface RenderInput {
   theme: Theme
   /** Rótulo do zoom durante a pinça; nulo quando não há pinça em curso. */
   zoomBadge: string | null
+  /** Onde a borracha está e qual o alcance dela, em coordenadas de página. */
+  eraserCursor: { x: number; y: number; radius: number } | null
 }
 
 export interface Theme {
@@ -116,6 +118,7 @@ export function render(ctx: CanvasRenderingContext2D, input: RenderInput): void 
   if (input.liveStroke) drawLiveStroke(ctx, input.liveStroke, theme)
   drawItemMarkers(ctx, input.items, vp)
   if (input.lassoPath) drawLasso(ctx, input.lassoPath)
+  if (input.eraserCursor) drawEraserCursor(ctx, input.eraserCursor, vp, theme)
 
   ctx.restore()
 
@@ -296,6 +299,40 @@ function drawLiveStroke(
   }
   ctx.fillStyle = resolveInk(live.style.color, theme)
   ctx.fill(new Path2D(d))
+  ctx.restore()
+}
+
+/**
+ * A bolinha da borracha, como no OneNote.
+ *
+ * Sem ela a borracha é cega: não dá pra saber o que vai ser alcançado antes de
+ * encostar. O círculo é desenhado exatamente com o raio usado pra decidir o que
+ * apagar, então o que se vê é o que some.
+ */
+function drawEraserCursor(
+  ctx: CanvasRenderingContext2D,
+  cursor: NonNullable<RenderInput['eraserCursor']>,
+  vp: Viewport,
+  theme: Theme,
+): void {
+  ctx.save()
+  ctx.beginPath()
+  ctx.arc(cursor.x, cursor.y, cursor.radius, 0, Math.PI * 2)
+
+  ctx.fillStyle = '#ef4444'
+  ctx.globalAlpha = 0.12
+  ctx.fill()
+
+  // Borda dupla: clara por fora, escura por dentro, pra o anel ser visível
+  // tanto sobre a folha vazia quanto sobre um traço grosso ou uma imagem.
+  ctx.globalAlpha = 0.9
+  ctx.lineWidth = 3 / vp.scale
+  ctx.strokeStyle = theme.paper
+  ctx.stroke()
+
+  ctx.lineWidth = 1.5 / vp.scale
+  ctx.strokeStyle = '#ef4444'
+  ctx.stroke()
   ctx.restore()
 }
 

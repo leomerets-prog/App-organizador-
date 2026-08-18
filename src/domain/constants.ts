@@ -64,3 +64,15 @@ export const PEN_WIDTH_PRESETS = [0.6, 1.2, 2.4, 5, 9] as const
 
 /** O marca-texto é sempre grosso; a barra da caneta não vale pra ele. */
 export const HIGHLIGHTER_WIDTH = 22
+
+/**
+ * Raio da borracha, em px de página.
+ *
+ * Como é medido em página e não em tela, ampliar a folha não muda o que a
+ * borracha alcança em relação à escrita — ela apaga a mesma quantidade de
+ * tinta em qualquer aproximação.
+ */
+export const ERASER_MIN = 6
+export const ERASER_MAX = 90
+export const ERASER_DEFAULT = 18
+export const ERASER_PRESETS = [8, 18, 36, 60] as const

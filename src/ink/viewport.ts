@@ -46,6 +46,9 @@ export interface ViewMetrics {
 
 export const INITIAL_VIEW: ViewState = { zoom: ZOOM_FIT, scrollX: 0, scrollY: 0 }
 
+/** Piso da escala. Nunca zero: zero produz matriz degenerada no canvas. */
+const MIN_SCALE = 1e-4
+
 export function clampZoom(zoom: number): number {
   if (!Number.isFinite(zoom)) return ZOOM_FIT
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom))
@@ -56,7 +59,17 @@ export function clampZoom(zoom: number): number {
  * dentro dos limites da folha.
  */
 export function computeMetrics(view: ViewState, layout: Layout): ViewMetrics {
-  const scale = layout.fitScale * clampZoom(view.zoom)
+  /*
+   * Escala precisa ser positiva e finita, sempre.
+   *
+   * Durante o giro do tablet, ou quando a barra lateral aparece e some, a área
+   * da folha pode medir zero por um instante. Com escala 0 as divisões daqui
+   * viram NaN, e o canvas recebe uma matriz degenerada — o que não dá erro em
+   * JavaScript, mas derruba o processo de desenho do navegador. Um piso barato
+   * aqui vale mais que qualquer tratamento depois.
+   */
+  const rawScale = layout.fitScale * clampZoom(view.zoom)
+  const scale = Number.isFinite(rawScale) && rawScale > MIN_SCALE ? rawScale : MIN_SCALE
 
   // Quanto da folha, em px de página, cabe na tela.
   const visibleW = layout.viewWidth / scale
@@ -141,7 +154,9 @@ export function resetZoom(view: ViewState, layout: Layout): ViewState {
   return clampView({ zoom: ZOOM_FIT, scrollX: 0, scrollY: view.scrollY }, layout)
 }
 
+/** Prende o valor na faixa. NaN cai no mínimo em vez de contaminar tudo adiante. */
 function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min
   return Math.min(max, Math.max(min, value))
 }
 

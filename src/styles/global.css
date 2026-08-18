@@ -112,6 +112,15 @@ input {
 
 /* ── Esqueleto ────────────────────────────────────────────────────────────── */
 
+/*
+ * Duas colunas com a barra lateral; UMA coluna sem ela.
+ *
+ * Deixar `0 1fr` com a lateral escondida parece equivalente e não é: sem a
+ * lateral no fluxo, a área principal escorrega pra primeira coluna, que vale
+ * zero. O canvas então nasce com largura 0, a escala vira 0 e o desenho com
+ * matriz degenerada derrubava o processo do navegador — tela branca ao tocar
+ * no ☰ e ao girar o tablet.
+ */
 .app {
   display: grid;
   grid-template-columns: 232px 1fr;
@@ -120,7 +129,7 @@ input {
 }
 
 .app.nav-hidden {
-  grid-template-columns: 0 1fr;
+  grid-template-columns: 1fr;
 }
 
 .app.nav-hidden .sidebar {
@@ -1056,8 +1065,10 @@ input {
 /* ── Telas estreitas (tablet em pé) ───────────────────────────────────────── */
 
 @media (max-width: 820px) {
+  /* A lateral vira sobreposição e sai do fluxo: uma coluna só, pelo mesmo
+     motivo explicado acima. */
   .app {
-    grid-template-columns: 0 1fr;
+    grid-template-columns: 1fr;
   }
 
   .app .sidebar {
@@ -1215,4 +1226,31 @@ input {
   font-size: 11px;
   opacity: 0.5;
   margin-left: 2px;
+}
+
+/* ── Fundo que fecha a lateral sobreposta ─────────────────────────────────── */
+
+.nav-backdrop {
+  display: none;
+}
+
+@media (max-width: 820px) {
+  .nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 14;
+    background: rgba(0, 0, 0, 0.45);
+  }
+}
+
+/* Amostra da borracha: círculo vazado, como o anel que aparece na folha. */
+.eraser-preview {
+  height: 42px;
+}
+
+.eraser-preview-dot {
+  border-radius: 50%;
+  border: 1.5px solid var(--danger);
+  background: rgba(239, 68, 68, 0.14);
 }

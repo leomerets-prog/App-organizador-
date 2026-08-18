@@ -40,6 +40,17 @@ import type { PageImage } from '../domain/types'
  * mão, sem re-renderizar a árvore a cada quadro.
  */
 
+/** Limites do que conta como toque, e do intervalo entre dois deles. */
+const TAP_MAX_MS = 300
+const TAP_MAX_MOVE = 10
+const DOUBLE_TAP_MS = 450
+const DOUBLE_TAP_MOVE = 70
+
+interface PressInfo {
+  at: number
+  screen: Pt
+}
+
 interface Gesture {
   kind: 'draw' | 'erase' | 'lasso' | 'pan' | 'pinch' | 'moveImage' | 'resizeImage'
   pointerId: number
@@ -72,6 +83,7 @@ export function PageCanvas() {
   const selection = useStore((s) => s.selection)
   const theme = useStore((s) => s.theme)
   const savedZoom = useStore((s) => s.zoom)
+  const eraserSize = useStore((s) => s.eraserSize)
   const images = useStore((s) => s.images)
   const selectedImageId = useStore((s) => s.selectedImageId)
 
@@ -93,6 +105,10 @@ export function PageCanvas() {
   const [zoomLabel, setZoomLabel] = useState(() => formatZoom(savedZoom))
   const [erasedCount, setErasedCount] = useState(0)
   const [imageError, setImageError] = useState<string | null>(null)
+  const [toolNotice, setToolNotice] = useState(0)
+  // Confirmação dentro da própria barra: a janela do sistema pode não aparecer
+  // dentro do app empacotado, e ali ela fica fora do alcance do polegar.
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // ─── Estado quente, fora do React ──────────────────────────────────────────
@@ -111,14 +127,20 @@ export function PageCanvas() {
   const pendingErase = useRef<Set<string>>(new Set())
   const pinchingRef = useRef(false)
   const dirty = useRef(true)
+  /** Onde desenhar a bolinha da borracha; null quando ela não está em uso. */
+  const eraserCursorRef = useRef<Pt | null>(null)
+  /** Último toque curto, pra reconhecer o toque duplo que volta pra caneta. */
+  const lastTapRef = useRef<{ at: number; x: number; y: number } | null>(null)
+  /** Início do toque atual, pra saber se foi toque ou arrasto. */
+  const pressRef = useRef<PressInfo | null>(null)
 
   const stateRef = useRef({
     strokes, zones, items, tool, penColor, penWidth, showZones, selection, theme,
-    images, selectedImageId,
+    images, selectedImageId, eraserSize,
   })
   stateRef.current = {
     strokes, zones, items, tool, penColor, penWidth, showZones, selection, theme,
-    images, selectedImageId,
+    images, selectedImageId, eraserSize,
   }
 
   layoutRef.current.pageHeight = page?.height ?? layoutRef.current.pageHeight
@@ -131,6 +153,9 @@ export function PageCanvas() {
 
   // Imagem terminou de decodificar: repinta pra ela aparecer no lugar do vazio.
   useEffect(() => onImageReady(markDirty), [markDirty])
+
+  // Trocar de imagem cancela uma exclusão que estava pendente de confirmação.
+  useEffect(() => setConfirmDelete(false), [selectedImageId])
 
   /** Muda a janela e agenda o redesenho. Todo caminho de zoom/rolagem passa aqui. */
   const applyView = useCallback((next: ViewState) => {
@@ -146,9 +171,23 @@ export function PageCanvas() {
     if (!canvas || !container) return
 
     const rect = container.getBoundingClientRect()
+
+    // Medida inválida: mantém o que já estava e espera a próxima medição. Ao
+    // girar o tablet a área chega a medir zero por um instante, e aceitar esse
+    // valor zeraria a escala do desenho.
+    if (!(rect.width > 0) || !(rect.height > 0)) return
+
     const dpr = window.devicePixelRatio || 1
-    canvas.width = Math.round(rect.width * dpr)
-    canvas.height = Math.round(rect.height * dpr)
+    // Teto do buffer: acima disso o navegador recusa ou estoura a memória.
+    const maxPixels = 8192
+    const pxW = Math.min(maxPixels, Math.round(rect.width * dpr))
+    const pxH = Math.min(maxPixels, Math.round(rect.height * dpr))
+
+    // Reatribuir width/height reconstrói o buffer inteiro; só quando muda.
+    if (canvas.width !== pxW || canvas.height !== pxH) {
+      canvas.width = pxW
+      canvas.height = pxH
+    }
     canvas.style.width = `${rect.width}px`
     canvas.style.height = `${rect.height}px`
 
@@ -236,6 +275,10 @@ export function PageCanvas() {
         showZones: st.showZones,
         theme: THEMES[st.theme],
         zoomBadge: pinchingRef.current ? formatZoom(viewRef.current.zoom) : null,
+        eraserCursor:
+          st.tool === 'eraser' && eraserCursorRef.current
+            ? { ...eraserCursorRef.current, radius: st.eraserSize }
+            : null,
       })
 
       dirty.current = false
@@ -425,6 +468,7 @@ export function PageCanvas() {
         if (penTracker.current.shouldRejectTouch()) return
         if (gestureRef.current) return
 
+        pressRef.current = { at: Date.now(), screen: toScreen(event) }
         gestureRef.current = {
           kind: 'pan',
           pointerId: event.pointerId,
@@ -476,11 +520,13 @@ export function PageCanvas() {
       }
 
       event.currentTarget.setPointerCapture(event.pointerId)
+      pressRef.current = { at: Date.now(), screen: toScreen(event) }
 
       // Botão lateral da caneta apaga, quando existe.
       const eraseByButton = event.buttons === 32 || event.button === 5
 
       if (st.tool === 'eraser' || eraseByButton) {
+        eraserCursorRef.current = pt
         gestureRef.current = { kind: 'erase', pointerId: event.pointerId, lasso: [pt] }
       } else if (st.tool === 'lasso') {
         gestureRef.current = { kind: 'lasso', pointerId: event.pointerId, lasso: [pt] }
@@ -558,8 +604,11 @@ export function PageCanvas() {
         }
       } else if (gesture.kind === 'erase') {
         gesture.lasso!.push(pt)
-        // O raio da borracha é em px de página, então acompanha o zoom sozinho.
-        for (const id of strokesHitByPath(stateRef.current.strokes, [pt], 14)) {
+        eraserCursorRef.current = pt
+        // O raio é em px de página, então a borracha alcança sempre a mesma
+        // quantidade de escrita, independente da aproximação.
+        const radius = stateRef.current.eraserSize
+        for (const id of strokesHitByPath(stateRef.current.strokes, [pt], radius)) {
           pendingErase.current.add(id)
         }
       } else if (gesture.kind === 'lasso') {
@@ -571,9 +620,41 @@ export function PageCanvas() {
     [toPage, toScreen, applyView, updatePinch, updateImageRect],
   )
 
-  const finishGesture = useCallback(async () => {
+  /**
+   * Foi um toque ou um arrasto?
+   *
+   * Distinguir os dois é o que permite o toque duplo voltar pra caneta sem
+   * apagar nada: com a borracha ligada, um toque parado não apaga — só um
+   * arrasto apaga. Também evita a dedada acidental que comeria uma palavra.
+   */
+  const wasTap = useCallback((press: PressInfo | null, upScreen: Pt | null): boolean => {
+    if (!press || !upScreen) return false
+    return (
+      Date.now() - press.at < TAP_MAX_MS &&
+      Math.hypot(upScreen.x - press.screen.x, upScreen.y - press.screen.y) < TAP_MAX_MOVE
+    )
+  }, [])
+
+  /** Dois toques seguidos, perto um do outro. */
+  const wasDoubleTap = useCallback((upScreen: Pt): boolean => {
+    const last = lastTapRef.current
+    const now = Date.now()
+    const near =
+      !!last &&
+      now - last.at < DOUBLE_TAP_MS &&
+      Math.hypot(upScreen.x - last.x, upScreen.y - last.y) < DOUBLE_TAP_MOVE
+
+    lastTapRef.current = near ? null : { at: now, x: upScreen.x, y: upScreen.y }
+    return near
+  }, [])
+
+  const finishGesture = useCallback(async (upScreen: Pt | null) => {
     const gesture = gestureRef.current
+    // O registro do toque é lido depois, na decisão de toque-vs-arrasto; por
+    // isso é guardado antes de ser limpo.
+    const press = pressRef.current
     gestureRef.current = null
+    pressRef.current = null
     if (!gesture) return
 
     if (gesture.kind === 'draw' && gesture.builder && gesture.builder.length > 0) {
@@ -594,6 +675,19 @@ export function PageCanvas() {
 
       await commitStroke(points, Date.now())
     } else if (gesture.kind === 'erase') {
+      eraserCursorRef.current = null
+
+      // Toque parado com a borracha não apaga: ele existe pro toque duplo.
+      if (upScreen && wasTap(press, upScreen)) {
+        pendingErase.current.clear()
+        if (wasDoubleTap(upScreen)) {
+          setTool('pen')
+          setToolNotice(Date.now())
+        }
+        dirty.current = true
+        return
+      }
+
       const ids = [...pendingErase.current]
       pendingErase.current.clear()
       if (ids.length > 0) {
@@ -605,12 +699,30 @@ export function PageCanvas() {
     }
 
     dirty.current = true
-  }, [commitStroke, eraseStrokes, setSelection, setTool])
+  }, [commitStroke, eraseStrokes, setSelection, setTool, wasTap, wasDoubleTap])
 
   const onPointerUp = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
       if (event.pointerType === 'touch') {
         touchesRef.current.delete(event.pointerId)
+
+        // Toque duplo com o dedo, enquanto a borracha está ligada, volta pra
+        // caneta — sem precisar ir até a barra lateral.
+        if (
+          gestureRef.current?.kind === 'pan' &&
+          gestureRef.current.pointerId === event.pointerId &&
+          stateRef.current.tool === 'eraser'
+        ) {
+          const up = toScreen(event)
+          if (wasTap(pressRef.current, up) && wasDoubleTap(up)) {
+            gestureRef.current = null
+            pressRef.current = null
+            setTool('pen')
+            setToolNotice(Date.now())
+            dirty.current = true
+            return
+          }
+        }
 
         if (gestureRef.current?.kind === 'pinch') {
           // Só encerra a pinça quando o segundo dedo sai; com um dedo ainda na
@@ -629,9 +741,9 @@ export function PageCanvas() {
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId)
       }
-      void finishGesture()
+      void finishGesture(toScreen(event))
     },
-    [finishGesture, commitZoom],
+    [finishGesture, commitZoom, toScreen, wasTap, wasDoubleTap, setTool],
   )
 
   // ─── Roda do mouse: rolar, e com Ctrl, aproximar ───────────────────────────
@@ -730,21 +842,41 @@ export function PageCanvas() {
             + Adicionar imagem
           </button>
           {selectedImageId ? (
-            <>
-              <span className="image-hint">arraste pra mover · alça roxa pra redimensionar</span>
-              <button
-                className="image-delete"
-                onClick={() => {
-                  if (confirm('Excluir esta imagem da folha?')) void removeImage(selectedImageId)
-                }}
-              >
-                Excluir
-              </button>
-            </>
+            confirmDelete ? (
+              <>
+                <span className="image-hint">Excluir esta imagem?</span>
+                <button
+                  className="image-delete"
+                  onClick={() => {
+                    void removeImage(selectedImageId)
+                    setConfirmDelete(false)
+                  }}
+                >
+                  Sim, excluir
+                </button>
+                <button className="image-done" onClick={() => setConfirmDelete(false)}>
+                  Cancelar
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="image-hint">arraste pra mover · alça roxa pra redimensionar</span>
+                <button className="image-delete" onClick={() => setConfirmDelete(true)}>
+                  Excluir
+                </button>
+              </>
+            )
           ) : (
             <span className="image-hint">toque numa imagem pra ajustar</span>
           )}
-          <button className="image-done" onClick={() => { selectImage(null); setTool('pen') }}>
+          <button
+            className="image-done"
+            onClick={() => {
+              selectImage(null)
+              setConfirmDelete(false)
+              setTool('pen')
+            }}
+          >
             Pronto
           </button>
         </div>
@@ -771,9 +903,26 @@ export function PageCanvas() {
         <button className="eraser-banner" onClick={() => setTool('pen')}>
           <span className="eraser-banner-dot" />
           Borracha ligada — arraste pra apagar
-          <strong>Voltar à caneta</strong>
+          <strong>2 toques voltam à caneta</strong>
         </button>
       )}
+
+      {toolNotice > 0 && <ToolNotice trigger={toolNotice} onDone={() => setToolNotice(0)} />}
+    </div>
+  )
+}
+
+/** Confirmação curta de que o toque duplo foi entendido. */
+function ToolNotice({ trigger, onDone }: { trigger: number; onDone: () => void }) {
+  useEffect(() => {
+    const timer = setTimeout(onDone, 1400)
+    return () => clearTimeout(timer)
+  }, [trigger, onDone])
+
+  return (
+    <div className="scribble-toast" role="status">
+      <span className="scribble-toast-icon">✎</span>
+      De volta à caneta
     </div>
   )
 }

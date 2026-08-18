@@ -1,5 +1,8 @@
 import { useStore } from '../state/store'
 import {
+  ERASER_MAX,
+  ERASER_MIN,
+  ERASER_PRESETS,
   INK_COLOR,
   PEN_COLORS,
   PEN_WIDTH_MAX,
@@ -46,6 +49,8 @@ export function Toolbar() {
   const toggleZones = useStore((s) => s.toggleZones)
   const theme = useStore((s) => s.theme)
   const toggleTheme = useStore((s) => s.toggleTheme)
+  const eraserSize = useStore((s) => s.eraserSize)
+  const setEraserSize = useStore((s) => s.setEraserSize)
 
   const selection = useStore((s) => s.selection)
   const clearSelection = useStore((s) => s.clearSelection)
@@ -95,21 +100,51 @@ export function Toolbar() {
 
       <div className="toolbar-divider" />
 
-      <div className="swatches">
-        {PEN_COLORS.map((color) => (
-          <button
-            key={color}
-            className={`swatch ${penColor === color ? 'active' : ''} ${
-              color === INK_COLOR ? 'swatch-ink' : ''
-            }`}
-            style={color === INK_COLOR ? undefined : { background: color }}
-            onClick={() => setPenColor(color)}
-            aria-label={color === INK_COLOR ? 'Cor padrão' : `Cor ${color}`}
-          />
-        ))}
-      </div>
+      {/* Com a borracha ligada, a barra passa a controlar o tamanho DELA. É a
+          medida que importa naquele momento, e evita duas barras concorrendo. */}
+      {tool === 'eraser' ? (
+        <SizeControl
+          value={eraserSize}
+          onChange={setEraserSize}
+          min={ERASER_MIN}
+          max={ERASER_MAX}
+          step={1}
+          presets={ERASER_PRESETS}
+          decimals={0}
+          label="Tamanho da borracha"
+          variant="eraser"
+        />
+      ) : (
+        <>
+          <div className="swatches">
+            {PEN_COLORS.map((color) => (
+              <button
+                key={color}
+                className={`swatch ${penColor === color ? 'active' : ''} ${
+                  color === INK_COLOR ? 'swatch-ink' : ''
+                }`}
+                style={color === INK_COLOR ? undefined : { background: color }}
+                onClick={() => setPenColor(color)}
+                aria-label={color === INK_COLOR ? 'Cor padrão' : `Cor ${color}`}
+              />
+            ))}
+          </div>
 
-      <WidthControl value={penWidth} onChange={setPenWidth} disabled={tool === 'highlighter'} />
+          <SizeControl
+            value={penWidth}
+            onChange={setPenWidth}
+            min={PEN_WIDTH_MIN}
+            max={PEN_WIDTH_MAX}
+            step={0.1}
+            presets={PEN_WIDTH_PRESETS}
+            decimals={1}
+            label="Espessura do traço"
+            variant="pen"
+            disabled={tool === 'highlighter'}
+            note={tool === 'highlighter' ? 'marca-texto tem espessura fixa' : undefined}
+          />
+        </>
+      )}
 
       <div className="toolbar-divider" />
 
@@ -124,64 +159,99 @@ export function Toolbar() {
       </button>
 
       <div className="toolbar-tip">
-        <strong>3 voltas</strong> rabiscadas ligam a borracha
+        {tool === 'eraser' ? (
+          <>
+            <strong>2 toques</strong> na folha voltam à caneta
+          </>
+        ) : (
+          <>
+            <strong>3 voltas</strong> rabiscadas ligam a borracha
+          </>
+        )}
       </div>
     </aside>
   )
 }
 
 /**
- * Controle da espessura: barra contínua com amostra do traço em tamanho real.
+ * Controle de tamanho, usado pela caneta e pela borracha.
  *
- * As espessuras fixas de antes não serviam — o mais fino delas ainda saía
- * grosso, e não havia como chegar num traço mais fino que o menor botão.
- * A barra resolve isso e os atalhos evitam ter que mirar toda hora.
+ * A amostra é desenhada na medida real, então o que se vê é o que sai — vale
+ * tanto pro traço quanto pro alcance da borracha, que sem isso seria cego.
  */
-function WidthControl({
+function SizeControl({
   value,
   onChange,
-  disabled,
+  min,
+  max,
+  step,
+  presets,
+  decimals,
+  label,
+  variant,
+  disabled = false,
+  note,
 }: {
   value: number
   onChange: (v: number) => void
-  disabled: boolean
+  min: number
+  max: number
+  step: number
+  presets: readonly number[]
+  decimals: number
+  label: string
+  variant: 'pen' | 'eraser'
+  disabled?: boolean
+  note?: string
 }) {
+  // A amostra da borracha é um círculo do diâmetro real, mas a caixa é pequena:
+  // acima disso ela é mostrada proporcional, sem estourar a lateral.
+  const previewMax = 34
+  const shown = variant === 'eraser' ? Math.min(previewMax, value) : value
+
   return (
     <div className={`width-control ${disabled ? 'disabled' : ''}`}>
-      <div className="width-preview" aria-hidden>
-        {/* A amostra usa a mesma medida do traço, então o que se vê é o que sai. */}
-        <span className="width-preview-dot" style={{ width: value, height: value }} />
+      <div className={`width-preview ${variant === 'eraser' ? 'eraser-preview' : ''}`} aria-hidden>
+        <span
+          className={variant === 'eraser' ? 'eraser-preview-dot' : 'width-preview-dot'}
+          style={{ width: shown, height: shown }}
+        />
       </div>
 
       <input
         className="width-slider"
         type="range"
-        min={PEN_WIDTH_MIN}
-        max={PEN_WIDTH_MAX}
-        step={0.1}
+        min={min}
+        max={max}
+        step={step}
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
-        aria-label="Espessura do traço"
+        aria-label={label}
       />
 
-      <div className="width-value">{value.toFixed(1)}</div>
+      <div className="width-value">{value.toFixed(decimals)}</div>
 
       <div className="width-presets">
-        {PEN_WIDTH_PRESETS.map((w) => (
+        {presets.map((p) => (
           <button
-            key={w}
-            className={`width-preset ${Math.abs(value - w) < 0.05 ? 'active' : ''}`}
-            onClick={() => onChange(w)}
+            key={p}
+            className={`width-preset ${Math.abs(value - p) < step / 2 ? 'active' : ''}`}
+            onClick={() => onChange(p)}
             disabled={disabled}
-            aria-label={`Espessura ${w}`}
+            aria-label={`${label} ${p}`}
           >
-            <span style={{ width: Math.max(2, w), height: Math.max(2, w) }} />
+            <span
+              style={{
+                width: Math.max(2, Math.min(16, variant === 'eraser' ? p / 3.5 : p)),
+                height: Math.max(2, Math.min(16, variant === 'eraser' ? p / 3.5 : p)),
+              }}
+            />
           </button>
         ))}
       </div>
 
-      {disabled && <div className="width-note">marca-texto tem espessura fixa</div>}
+      {note && <div className="width-note">{note}</div>}
     </div>
   )
 }

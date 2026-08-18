@@ -17,7 +17,14 @@ import { buildZones } from '../domain/templates'
 import * as repo from '../db/repo'
 import { newId } from '../lib/id'
 import { boundsOf, unionBounds } from '../lib/geometry'
-import { PAGE_WIDTH, PAGE_MIN_HEIGHT, PAGE_GROWTH, HIGHLIGHTER_WIDTH } from '../domain/constants'
+import {
+  PAGE_WIDTH,
+  PAGE_MIN_HEIGHT,
+  PAGE_GROWTH,
+  HIGHLIGHTER_WIDTH,
+  ERASER_MIN,
+  ERASER_MAX,
+} from '../domain/constants'
 import { zoneAtPoint } from '../zones/hit'
 import { forgetImage, placeNewImage, readImageFile } from '../ink/images'
 import { applyTheme, loadPrefs, savePrefs } from './prefs'
@@ -57,6 +64,8 @@ export interface AppState {
   theme: Theme
   /** Aproximação da folha, guardada entre aberturas. */
   zoom: number
+  /** Raio da borracha, em px de página. */
+  eraserSize: number
   selection: Set<Id>
 
   // Gravação em andamento
@@ -88,6 +97,7 @@ export interface AppState {
   setTheme: (theme: Theme) => void
   toggleTheme: () => void
   setZoom: (zoom: number) => void
+  setEraserSize: (size: number) => void
 
   commitStroke: (points: InkPoint[], startedAt: number) => Promise<void>
   eraseStrokes: (ids: Id[]) => Promise<void>
@@ -141,6 +151,7 @@ function persist(get: () => AppState): void {
     penWidth: s.penWidth,
     showZones: s.showZones,
     zoom: s.zoom,
+    eraserSize: s.eraserSize,
   })
 }
 
@@ -165,6 +176,7 @@ export const useStore = create<AppState>((set, get) => ({
   showZones: initialPrefs.showZones,
   theme: initialPrefs.theme,
   zoom: initialPrefs.zoom,
+  eraserSize: initialPrefs.eraserSize,
   selection: new Set(),
 
   activeRecordingId: null,
@@ -363,6 +375,11 @@ export const useStore = create<AppState>((set, get) => ({
   setZoom(zoom) {
     if (Math.abs(get().zoom - zoom) < 0.001) return
     set({ zoom })
+    persist(get)
+  },
+
+  setEraserSize(size) {
+    set({ eraserSize: Math.min(ERASER_MAX, Math.max(ERASER_MIN, size)) })
     persist(get)
   },
 

@@ -11,7 +11,9 @@ export default function App() {
   const ready = useStore((s) => s.ready)
   const init = useStore((s) => s.init)
   const [panelOpen, setPanelOpen] = useState(false)
-  const [navOpen, setNavOpen] = useState(true)
+  // Em tela estreita a lateral vira sobreposição e cobre a folha; começa
+  // fechada pra que o tablet em pé abra já mostrando a página.
+  const [navOpen, setNavOpen] = useState(() => window.innerWidth > 820)
 
   useEffect(() => {
     void init()
@@ -48,6 +50,10 @@ export default function App() {
           <Toolbar />
         </div>
       </main>
+
+      {/* Toque fora fecha a lateral sobreposta — em tela estreita ela cobre o
+          próprio botão ☰, e sem isto não haveria como fechá-la. */}
+      {navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} />}
 
       {panelOpen && <Panel onClose={() => setPanelOpen(false)} />}
     </div>

@@ -1,4 +1,4 @@
-import { INK_COLOR, PEN_WIDTH_DEFAULT } from '../domain/constants'
+import { ERASER_DEFAULT, ERASER_MAX, ERASER_MIN, INK_COLOR, PEN_WIDTH_DEFAULT } from '../domain/constants'
 import { ZOOM_FIT, clampZoom } from '../ink/viewport'
 
 /**
@@ -18,6 +18,8 @@ export interface Prefs {
   showZones: boolean
   /** Aproximação preferida da folha. 1 = folha inteira na largura da tela. */
   zoom: number
+  /** Raio da borracha, em px de página. */
+  eraserSize: number
 }
 
 const KEY = 'organizador.prefs.v1'
@@ -28,6 +30,7 @@ const DEFAULTS: Prefs = {
   penWidth: PEN_WIDTH_DEFAULT,
   showZones: true,
   zoom: ZOOM_FIT,
+  eraserSize: ERASER_DEFAULT,
 }
 
 export function loadPrefs(): Prefs {
@@ -41,6 +44,10 @@ export function loadPrefs(): Prefs {
       penWidth: typeof saved.penWidth === 'number' ? saved.penWidth : DEFAULTS.penWidth,
       showZones: typeof saved.showZones === 'boolean' ? saved.showZones : DEFAULTS.showZones,
       zoom: typeof saved.zoom === 'number' ? clampZoom(saved.zoom) : DEFAULTS.zoom,
+      eraserSize:
+        typeof saved.eraserSize === 'number'
+          ? Math.min(ERASER_MAX, Math.max(ERASER_MIN, saved.eraserSize))
+          : DEFAULTS.eraserSize,
     }
   } catch {
     // Navegador com armazenamento bloqueado: segue nos padrões.

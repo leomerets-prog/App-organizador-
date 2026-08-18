@@ -22,9 +22,13 @@ Feito para o Lenovo Idea Tab com caneta, mas roda em qualquer tablet.
 - Rabisque **três voltas** em qualquer lugar da folha, ou faça um **vaivém**
 - A borracha liga. O rabisco não apaga nada sozinho: quem escolhe o que
   apagar é a mão, arrastando depois
-- Uma faixa avisa que a borracha está ligada; toque nela para voltar à caneta
+- Uma faixa avisa que a borracha está ligada. **Dois toques na folha** voltam
+  para a caneta — ou toque na faixa
 - Escrever normalmente nunca dispara o gesto (ver "O gesto do rabisco" abaixo)
 - Depois de apagar, aparece **Desfazer** por 5 segundos
+- Um anel vermelho mostra o alcance da borracha enquanto ela apaga, como no
+  OneNote. Com a borracha ativa, a barra lateral controla o **tamanho dela**
+- Toque parado com a borracha não apaga nada — só o arrasto apaga
 
 **Imagens**
 - Ferramenta Imagem → "Adicionar imagem" abre a galeria do tablet
@@ -34,6 +38,9 @@ Feito para o Lenovo Idea Tab com caneta, mas roda em qualquer tablet.
 
 **Renomear** — toque de novo no bloco, seção ou página **já aberto** para
 renomear. O botão 🗑 ao lado exclui.
+
+**Tela estreita / tablet em pé** — a barra lateral vira sobreposição; toque
+fora dela para fechar.
 
 **Zoom**
 - Pinça com dois dedos aproxima e afasta a folha
