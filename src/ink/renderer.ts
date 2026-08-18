@@ -395,6 +395,24 @@ function drawImageHandles(
   ctx.moveTo(x + w - arrow, y + h - arrow)
   ctx.lineTo(x + w + arrow, y + h + arrow)
   ctx.stroke()
+
+  // Botão de excluir, no canto superior direito. Fica na própria imagem pra
+  // que apagar seja um toque, e não uma caçada pela barra de ferramentas.
+  ctx.fillStyle = '#ef4444'
+  ctx.beginPath()
+  ctx.arc(x + w, y, handle / 2, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.strokeStyle = '#fff'
+  ctx.lineWidth = 2.2 / vp.scale
+  ctx.lineCap = 'round'
+  const cross = handle / 6
+  ctx.beginPath()
+  ctx.moveTo(x + w - cross, y - cross)
+  ctx.lineTo(x + w + cross, y + cross)
+  ctx.moveTo(x + w + cross, y - cross)
+  ctx.lineTo(x + w - cross, y + cross)
+  ctx.stroke()
   ctx.restore()
 }
 

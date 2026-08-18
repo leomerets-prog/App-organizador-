@@ -45,6 +45,8 @@ const TAP_MAX_MS = 300
 const TAP_MAX_MOVE = 10
 const DOUBLE_TAP_MS = 450
 const DOUBLE_TAP_MOVE = 70
+/** Quanto tempo o dedo precisa ficar parado sobre a imagem pra abrir o ajuste. */
+const LONG_PRESS_MS = 500
 
 interface PressInfo {
   at: number
@@ -133,6 +135,8 @@ export function PageCanvas() {
   const lastTapRef = useRef<{ at: number; x: number; y: number } | null>(null)
   /** Início do toque atual, pra saber se foi toque ou arrasto. */
   const pressRef = useRef<PressInfo | null>(null)
+  /** Temporizador do toque longo sobre imagem. */
+  const longPressRef = useRef<number | undefined>(undefined)
 
   const stateRef = useRef({
     strokes, zones, items, tool, penColor, penWidth, showZones, selection, theme,
@@ -338,6 +342,17 @@ export function PageCanvas() {
     return null
   }, [])
 
+  /** O toque caiu no botão de excluir da imagem selecionada? */
+  const onDeleteBadge = useCallback((pt: Pt): PageImage | null => {
+    const id = stateRef.current.selectedImageId
+    if (!id) return null
+    const image = stateRef.current.images.find((i) => i.id === id)
+    if (!image) return null
+    const { x, y, w } = image.rect
+    const scale = computeMetrics(viewRef.current, layoutRef.current).scale
+    return Math.hypot(pt.x - (x + w), pt.y - y) <= imageHandleRadius(scale) ? image : null
+  }, [])
+
   /** O toque caiu na alça de redimensionar da imagem selecionada? */
   const onResizeHandle = useCallback((pt: Pt): PageImage | null => {
     const id = stateRef.current.selectedImageId
@@ -349,6 +364,42 @@ export function PageCanvas() {
     const reach = imageHandleRadius(scale)
     return Math.hypot(pt.x - (x + w), pt.y - (y + h)) <= reach ? image : null
   }, [])
+
+  /**
+   * Segurar o dedo sobre uma imagem abre o ajuste dela.
+   *
+   * Sem isto, mexer numa imagem já colada dependia de descobrir que existe a
+   * ferramenta Imagem e ativá-la antes — não havia pista nenhuma na folha de
+   * que a imagem era tocável, e apagar uma virava um beco sem saída.
+   *
+   * O gesto é do DEDO, não da caneta: o dedo nunca escreve, então segurá-lo
+   * não tem como atrapalhar um traço em andamento.
+   */
+  const armLongPress = useCallback(
+    (pt: Pt) => {
+      clearTimeout(longPressRef.current)
+      const image = imageAt(pt)
+      if (!image) return
+
+      longPressRef.current = window.setTimeout(() => {
+        // O arrasto cancela: quem moveu o dedo queria rolar a folha.
+        if (gestureRef.current?.kind !== 'pan') return
+        gestureRef.current = null
+        pressRef.current = null
+        selectImage(image.id)
+        setTool('image')
+        setToolNotice(-Date.now())
+        dirty.current = true
+      }, LONG_PRESS_MS)
+    },
+    [imageAt, selectImage, setTool],
+  )
+
+  const cancelLongPress = useCallback(() => {
+    clearTimeout(longPressRef.current)
+  }, [])
+
+  useEffect(() => cancelLongPress, [cancelLongPress])
 
   /** Retângulo da folha visível agora — onde a imagem nova deve entrar. */
   const visibleRect = useCallback(() => {
@@ -475,6 +526,7 @@ export function PageCanvas() {
           fromScreen: toScreen(event),
           fromView: { ...viewRef.current },
         }
+        armLongPress(toPage(event))
         return
       }
 
@@ -487,6 +539,13 @@ export function PageCanvas() {
       // mexe em imagem aqui — nas outras ferramentas ela escreve por cima.
       if (st.tool === 'image') {
         event.currentTarget.setPointerCapture(event.pointerId)
+
+        if (onDeleteBadge(pt)) {
+          setConfirmDelete(true)
+          dirty.current = true
+          return
+        }
+
         const handle = onResizeHandle(pt)
         if (handle) {
           gestureRef.current = {
@@ -537,7 +596,18 @@ export function PageCanvas() {
       }
       dirty.current = true
     },
-    [page, toPage, toScreen, hitItemMarker, toggleItemStatus, beginPinch, imageAt, onResizeHandle, selectImage],
+    [
+      page,
+      toPage,
+      toScreen,
+      hitItemMarker,
+      toggleItemStatus,
+      beginPinch,
+      imageAt,
+      onResizeHandle,
+      onDeleteBadge,
+      selectImage,
+    ],
   )
 
   const onPointerMove = useCallback(
@@ -547,6 +617,16 @@ export function PageCanvas() {
       if (event.pointerType === 'touch') {
         if (!touchesRef.current.has(event.pointerId)) return
         touchesRef.current.set(event.pointerId, toScreen(event))
+
+        // Dedo que anda quer rolar a folha, não abrir a imagem.
+        const press = pressRef.current
+        if (press) {
+          const now = toScreen(event)
+          if (Math.hypot(now.x - press.screen.x, now.y - press.screen.y) > TAP_MAX_MOVE) {
+            cancelLongPress()
+          }
+        }
+
         if (gestureRef.current?.kind === 'pinch') {
           updatePinch()
           return
@@ -617,7 +697,7 @@ export function PageCanvas() {
 
       dirty.current = true
     },
-    [toPage, toScreen, applyView, updatePinch, updateImageRect],
+    [toPage, toScreen, applyView, updatePinch, updateImageRect, cancelLongPress],
   )
 
   /**
@@ -705,6 +785,7 @@ export function PageCanvas() {
     (event: React.PointerEvent<HTMLCanvasElement>) => {
       if (event.pointerType === 'touch') {
         touchesRef.current.delete(event.pointerId)
+        cancelLongPress()
 
         // Toque duplo com o dedo, enquanto a borracha está ligada, volta pra
         // caneta — sem precisar ir até a barra lateral.
@@ -743,7 +824,7 @@ export function PageCanvas() {
       }
       void finishGesture(toScreen(event))
     },
-    [finishGesture, commitZoom, toScreen, wasTap, wasDoubleTap, setTool],
+    [finishGesture, commitZoom, toScreen, wasTap, wasDoubleTap, setTool, cancelLongPress],
   )
 
   // ─── Roda do mouse: rolar, e com Ctrl, aproximar ───────────────────────────
@@ -860,14 +941,18 @@ export function PageCanvas() {
               </>
             ) : (
               <>
-                <span className="image-hint">arraste pra mover · alça roxa pra redimensionar</span>
+                <span className="image-hint">
+                  arraste pra mover · alça roxa redimensiona · ✕ exclui
+                </span>
                 <button className="image-delete" onClick={() => setConfirmDelete(true)}>
                   Excluir
                 </button>
               </>
             )
           ) : (
-            <span className="image-hint">toque numa imagem pra ajustar</span>
+            <span className="image-hint">
+              toque numa imagem pra ajustar — ou segure o dedo nela em qualquer ferramenta
+            </span>
           )}
           <button
             className="image-done"
@@ -907,22 +992,36 @@ export function PageCanvas() {
         </button>
       )}
 
-      {toolNotice > 0 && <ToolNotice trigger={toolNotice} onDone={() => setToolNotice(0)} />}
+      {toolNotice !== 0 && (
+        <ToolNotice
+          trigger={toolNotice}
+          texto={toolNotice > 0 ? 'De volta à caneta' : 'Imagem selecionada — use a barra abaixo'}
+          onDone={() => setToolNotice(0)}
+        />
+      )}
     </div>
   )
 }
 
-/** Confirmação curta de que o toque duplo foi entendido. */
-function ToolNotice({ trigger, onDone }: { trigger: number; onDone: () => void }) {
+/** Confirmação curta de que um gesto trocou de ferramenta. */
+function ToolNotice({
+  trigger,
+  texto,
+  onDone,
+}: {
+  trigger: number
+  texto: string
+  onDone: () => void
+}) {
   useEffect(() => {
-    const timer = setTimeout(onDone, 1400)
+    const timer = setTimeout(onDone, 1600)
     return () => clearTimeout(timer)
   }, [trigger, onDone])
 
   return (
     <div className="scribble-toast" role="status">
-      <span className="scribble-toast-icon">✎</span>
-      De volta à caneta
+      <span className="scribble-toast-icon">{trigger > 0 ? '✎' : '🖼'}</span>
+      {texto}
     </div>
   )
 }

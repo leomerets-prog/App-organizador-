@@ -34,6 +34,11 @@ Feito para o Lenovo Idea Tab com caneta, mas roda em qualquer tablet.
 - Ferramenta Imagem → "Adicionar imagem" abre a galeria do tablet
 - Também aceita colar da área de transferência
 - Arraste para mover, alça roxa para redimensionar (proporção preservada)
+- **Para apagar uma imagem da anotação:** toque no **✕** vermelho no canto dela,
+  e confirme na barra
+- **Segure o dedo sobre a imagem** em qualquer ferramenta para abrir o ajuste —
+  não é preciso trocar de ferramenta antes. Arrastar o dedo continua rolando a
+  folha normalmente
 - A imagem fica **atrás da tinta**: dá para anotar por cima do print
 
 **Renomear** — toque de novo no bloco, seção ou página **já aberto** para
