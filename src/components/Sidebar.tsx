@@ -1,12 +1,19 @@
 import { useState } from 'react'
 import { useStore } from '../state/store'
 import { NOTEBOOK_COLORS } from '../domain/constants'
+import { INSTALLED_VERSION } from '../update/updates'
 
 /**
  * Barra lateral: a lista de Blocos de Anotações, com as lombadas coloridas.
  * Mesma hierarquia do OneNote — Bloco → Seção → Página.
  */
-export function Sidebar({ onOpenPanel }: { onOpenPanel: () => void }) {
+export function Sidebar({
+  onOpenPanel,
+  onOpenUpdate,
+}: {
+  onOpenPanel: () => void
+  onOpenUpdate: () => void
+}) {
   const notebooks = useStore((s) => s.notebooks)
   const activeNotebookId = useStore((s) => s.activeNotebookId)
   const selectNotebook = useStore((s) => s.selectNotebook)
@@ -99,6 +106,10 @@ export function Sidebar({ onOpenPanel }: { onOpenPanel: () => void }) {
           <span className="plus">+</span> Bl. Anotações
         </button>
       )}
+
+      <button className="sidebar-version" onClick={onOpenUpdate}>
+        Versão {INSTALLED_VERSION} · atualizar
+      </button>
     </nav>
   )
 }

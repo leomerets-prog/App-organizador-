@@ -7,6 +7,9 @@ cadernos, num lugar só.
 
 Feito para o Lenovo Idea Tab com caneta, mas roda em qualquer tablet.
 
+> Continuando o projeto? Leia **[HANDOFF.md](HANDOFF.md)** primeiro — estado,
+> decisões já tomadas e as armadilhas conhecidas.
+
 ---
 
 ## Como está agora (v0.1)
@@ -82,6 +85,11 @@ fora dela para fechar.
 - "Ir" leva de volta à página de origem
 
 **Organização** — igual OneNote: Blocos de Anotações → Seções → Páginas
+
+**Versão e atualização** — o rodapé da barra lateral mostra a versão instalada
+e abre a tela de atualização. Ela tenta verificar sozinha se há versão nova; o
+repositório sendo privado, o GitHub recusa a consulta anônima e a tela explica
+isso, oferecendo o botão que abre a página de versões no navegador.
 
 **Offline** — tudo fica salvo no tablet (IndexedDB). Funciona sem internet.
 

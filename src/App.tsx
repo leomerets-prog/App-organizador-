@@ -6,11 +6,13 @@ import { PageCanvas } from './components/PageCanvas'
 import { Toolbar } from './components/Toolbar'
 import { AudioBar } from './components/AudioBar'
 import { Panel } from './components/Panel'
+import { UpdatePanel } from './components/UpdatePanel'
 
 export default function App() {
   const ready = useStore((s) => s.ready)
   const init = useStore((s) => s.init)
   const [panelOpen, setPanelOpen] = useState(false)
+  const [updateOpen, setUpdateOpen] = useState(false)
   // Em tela estreita a lateral vira sobreposição e cobre a folha; começa
   // fechada pra que o tablet em pé abra já mostrando a página.
   const [navOpen, setNavOpen] = useState(() => window.innerWidth > 820)
@@ -30,7 +32,7 @@ export default function App() {
 
   return (
     <div className={`app ${navOpen ? '' : 'nav-hidden'}`}>
-      <Sidebar onOpenPanel={() => setPanelOpen(true)} />
+      <Sidebar onOpenPanel={() => setPanelOpen(true)} onOpenUpdate={() => setUpdateOpen(true)} />
 
       <main className="main">
         <div className="topbar">
@@ -56,6 +58,7 @@ export default function App() {
       {navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} />}
 
       {panelOpen && <Panel onClose={() => setPanelOpen(false)} />}
+      {updateOpen && <UpdatePanel onClose={() => setUpdateOpen(false)} />}
     </div>
   )
 }

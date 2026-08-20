@@ -1,6 +1,6 @@
 import type { Item, PageImage, Stroke, Zone } from '../domain/types'
 import { ZONE_COLORS } from '../domain/templates'
-import { HIGHLIGHTER_ALPHA, pathForStroke, strokeToPath } from './stroke'
+import { highlighterPaint, pathForStroke, strokeToPath } from './stroke'
 import { INK_COLOR, LEGACY_INK_COLOR } from '../domain/constants'
 import type { StrokeStyle } from './stroke'
 import type { Pt } from '../lib/geometry'
@@ -76,6 +76,11 @@ export const LIGHT_THEME: Theme = {
 }
 
 export const THEMES = { dark: DARK_THEME, light: LIGHT_THEME }
+
+/** O papel deste tema é escuro? Decide a mistura do marca-texto. */
+function paperIsDark(theme: Theme): boolean {
+  return theme.paper === DARK_THEME.paper
+}
 
 /**
  * Cor com que o traço é realmente pintado.
@@ -266,8 +271,9 @@ function drawStrokes(
 
     ctx.save()
     if (stroke.tool === 'highlighter') {
-      ctx.globalAlpha = HIGHLIGHTER_ALPHA
-      ctx.globalCompositeOperation = 'multiply'
+      const paint = highlighterPaint(paperIsDark(input.theme))
+      ctx.globalAlpha = paint.alpha
+      ctx.globalCompositeOperation = paint.operation
     }
     const ink = resolveInk(stroke.color, input.theme)
     if (input.pendingErase.has(stroke.id)) {
@@ -294,8 +300,9 @@ function drawLiveStroke(
   if (!d) return
   ctx.save()
   if (live.style.tool === 'highlighter') {
-    ctx.globalAlpha = HIGHLIGHTER_ALPHA
-    ctx.globalCompositeOperation = 'multiply'
+    const paint = highlighterPaint(paperIsDark(theme))
+    ctx.globalAlpha = paint.alpha
+    ctx.globalCompositeOperation = paint.operation
   }
   ctx.fillStyle = resolveInk(live.style.color, theme)
   ctx.fill(new Path2D(d))

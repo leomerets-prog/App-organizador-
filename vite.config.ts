@@ -3,6 +3,11 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  // A versão do APK entra no próprio app, pra que ele saiba se identificar.
+  // Fora da esteira do GitHub vale "dev".
+  define: {
+    __APP_VERSION__: JSON.stringify(process.env.APK_VERSION_CODE ?? 'dev'),
+  },
   plugins: [
     react(),
     VitePWA({

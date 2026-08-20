@@ -92,5 +92,19 @@ export function invalidateStrokePath(stroke: Stroke): void {
   pathCache.delete(stroke)
 }
 
-/** Opacidade do marca-texto: precisa deixar ler o que está por baixo. */
-export const HIGHLIGHTER_ALPHA = 0.32
+/**
+ * Como o marca-texto se mistura com a folha.
+ *
+ * `multiply` é o comportamento certo no papel claro: a cor escurece o branco e
+ * vira uma faixa, deixando ler o que está por baixo. No papel escuro ele é
+ * inútil — multiplicar por um fundo quase preto dá quase preto, e a marcação
+ * some. Ali a mistura precisa clarear.
+ */
+export function highlighterPaint(paperIsDark: boolean): {
+  alpha: number
+  operation: GlobalCompositeOperation
+} {
+  return paperIsDark
+    ? { alpha: 0.45, operation: 'screen' }
+    : { alpha: 0.32, operation: 'multiply' }
+}

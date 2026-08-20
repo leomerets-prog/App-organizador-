@@ -59,7 +59,7 @@ export function InkThumbnail({ itemId, bounds }: { itemId: string; bounds: Bound
         })
         if (!d) continue
         ctx.fillStyle = resolveInk(stroke.color, THEMES[theme])
-        ctx.globalAlpha = stroke.tool === 'highlighter' ? 0.35 : 1
+        ctx.globalAlpha = stroke.tool === 'highlighter' ? 0.5 : 1
         ctx.fill(new Path2D(d))
       }
     }

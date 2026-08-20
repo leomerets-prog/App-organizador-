@@ -16,6 +16,12 @@ jobs:
   apk:
     runs-on: ubuntu-latest
 
+    # A versão precisa chegar nos DOIS lados: no app (que a mostra na tela) e
+    # no Gradle (que a grava no APK). Por isso fica no nível do trabalho.
+    env:
+      APK_VERSION_CODE: ${{ github.run_number }}
+      APK_VERSION_NAME: ${{ github.run_number }}-${{ github.sha }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -47,10 +53,6 @@ jobs:
       - name: Montar o APK
         run: ./gradlew assembleDebug --no-daemon
         working-directory: android
-        env:
-          # Numera cada build, pra dar pra saber qual versão está no tablet.
-          APK_VERSION_CODE: ${{ github.run_number }}
-          APK_VERSION_NAME: ${{ github.run_number }}-${{ github.sha }}
 
       - name: Renomear pro nome que o tablet vê
         run: |
