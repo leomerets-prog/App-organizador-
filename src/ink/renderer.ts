@@ -430,6 +430,7 @@ export function imageHandleRadius(scale: number): number {
 
 const ITEM_GLYPH: Record<Item['kind'], string> = {
   tarefa: '✓',
+  pauta: '☰',
   duvida: '?',
   topico: '▸',
   documento: '¶',
@@ -439,6 +440,7 @@ const ITEM_GLYPH: Record<Item['kind'], string> = {
 
 const ITEM_COLOR: Record<Item['kind'], string> = {
   tarefa: '#22c55e',
+  pauta: '#0ea5e9',
   duvida: '#f59e0b',
   topico: '#8b5cf6',
   documento: '#06b6d4',
@@ -449,6 +451,8 @@ const ITEM_COLOR: Record<Item['kind'], string> = {
 /** Carimbo do item na margem esquerda, alinhado com a tinta que ele marca. */
 function drawItemMarkers(ctx: CanvasRenderingContext2D, items: Item[], vp: Viewport): void {
   for (const item of items) {
+    // Arquivado é o "isto não era item": some da folha e do painel.
+    if (item.status === 'arquivado') continue
     const y = item.bounds.minY + (item.bounds.maxY - item.bounds.minY) / 2
     const x = 18
     const color = ITEM_COLOR[item.kind]
@@ -464,7 +468,11 @@ function drawItemMarkers(ctx: CanvasRenderingContext2D, items: Item[], vp: Viewp
     ctx.globalAlpha = done ? 0.4 : 1
     ctx.strokeStyle = color
     ctx.lineWidth = 1.5
+    // Anel tracejado: foi o app que identificou este campo, não o usuário que
+    // carimbou. A diferença fica visível na folha sem precisar tocar em nada.
+    if (item.source === 'auto') ctx.setLineDash([3, 3])
     ctx.stroke()
+    ctx.setLineDash([])
 
     ctx.fillStyle = color
     ctx.font = '600 13px ui-sans-serif, system-ui, sans-serif'

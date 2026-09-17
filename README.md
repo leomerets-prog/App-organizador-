@@ -1,9 +1,11 @@
 # Organizador
 
 Caderno de trabalho com caneta, para tablet. Você escreve à mão numa folha
-dividida em **zonas**, marca o que importa com um **carimbo**, e o app reúne
-tudo num painel único — todas as tarefas, dúvidas e pendências de todos os
-cadernos, num lugar só.
+dividida em **zonas**, e o app **identifica sozinho** o que você escreveu dentro
+de cada uma: cada linha na faixa "Tarefas" vira uma tarefa, cada linha em
+"Pauta" vira uma pauta. Tudo isso se junta num painel único, separado por abas —
+todas as tarefas, pautas, dúvidas e pendências de todos os cadernos, num lugar
+só. O que a zona não pegar, você carimba à mão com o laço.
 
 Feito para o Lenovo Idea Tab com caneta, mas roda em qualquer tablet.
 
@@ -18,7 +20,7 @@ Feito para o Lenovo Idea Tab com caneta, mas roda em qualquer tablet.
 - Escrita com caneta sensível à pressão, rolagem infinita para baixo
 - Rejeição de palma: a mão apoiada não risca a folha
 - Zonas nomeadas — o que você escreve dentro de "Dúvidas" já nasce classificado
-- Quatro modelos de folha: Reunião, Levantamento, Estudo, Livre
+- Cinco modelos de folha: Reunião, Levantamento, Estudo, Lista de tarefas, Livre
 - Marca-texto, laço e borracha
 
 **Rabisco liga a borracha** — para caneta sem botão de borracha
@@ -68,10 +70,21 @@ fora dela para fechar.
 - A cor padrão da caneta acompanha o tema: o que você escreveu no escuro
   continua legível no claro
 
-**Carimbos**
-- Pegue o laço, cerque uma anotação, escolha: Tarefa, Dúvida, Tópico,
+**Campos identificados sozinho**
+- Escreva dentro de uma faixa da folha — Pauta, Tarefas, Dúvidas, Pendências,
+  Documentos — e **cada linha vira um item no painel**, sem carimbar nada
+- O carimbo aparece na margem com **anel tracejado**: foi o app que identificou
+- O corpo da anotação e a folha Livre não geram item nenhum: ali a escrita é a
+  anotação em si
+- Errou o tipo? Troque no próprio cartão do painel — sua escolha fica
+- Não era item? **✕** no cartão arquiva sem apagar uma letra da anotação, e a
+  identificação não o traz de volta
+- Dá para desligar tudo no botão **Campos**, na barra de ferramentas
+
+**Carimbos à mão**
+- Pegue o laço, cerque uma anotação, escolha: Tarefa, Pauta, Dúvida, Tópico,
   Pendência, Documento, Importante
-- O carimbo aparece na margem, alinhado com a sua letra
+- O carimbo aparece na margem, alinhado com a sua letra, com anel cheio
 - Toque no carimbo para marcar como concluído
 
 **Áudio**
@@ -80,7 +93,9 @@ fora dela para fechar.
   (próxima etapa) tocar num rabisco e ouvir o que estava sendo dito
 
 **Painel**
-- Tudo que foi carimbado, de todos os cadernos, agrupado por tipo
+- Abas por tipo: Tudo, Tarefas, Pautas, Pendências, Dúvidas, Tópicos,
+  Documentos, Importantes — e Arquivados, quando houver
+- Filtro **Tudo / Esta página** e chave para mostrar os concluídos
 - Cada item mostra um recorte da sua própria letra
 - "Ir" leva de volta à página de origem
 
@@ -115,7 +130,7 @@ contém o app compilado.
 ```bash
 npm install
 npm run dev            # servidor de desenvolvimento
-npm test               # testes do rabisco e da borracha
+npm test               # testes do rabisco, da borracha e dos campos
 npm run build:tablet   # regenera a pasta tablet/ (commitar junto)
 ```
 
@@ -140,6 +155,37 @@ sumir do painel.
 
 A lógica fica em `src/ink/erase.ts`, sem depender de React nem de banco.
 Verificação: `npm run test:erase`.
+
+---
+
+## A identificação dos campos
+
+A ideia cabe numa frase: **a zona diz o que a escrita significa, e cada linha
+escrita ali dentro é um campo**.
+
+Escrever é o único gesto. Ao parar a caneta, o app agrupa os traços em linhas
+dentro de cada zona e cria um item por linha — tarefa, pauta, dúvida, o que a
+zona significar. Quem escreveu três linhas na faixa "Tarefas" tem três tarefas
+no painel.
+
+Por que linha, e não bloco: numa faixa de tarefas as pessoas escrevem uma por
+linha. Juntar linhas viraria uma tarefa só, gigante, que não dá para concluir em
+separado — o erro que mais custa aqui. Linhas quase encostadas (baseline torta,
+acento, pingo do "i") ainda são reunidas, com limite apertado.
+
+Duas defesas que vieram de defeitos reais:
+
+- **Vão entre colunas com piso de altura.** O limite que separa duas colunas na
+  mesma faixa é medido em alturas de escrita. Numa linha rasa — letra toda
+  baixa, um traço — o limite ficava minúsculo e o espaço normal entre duas
+  palavras virava "duas colunas": duas tarefas onde havia uma. Hoje há piso.
+- **O item é reconhecido pela tinta que contém.** Enquanto sobrar um traço em
+  comum, ele continua sendo o mesmo item — mantém o tipo que você escolheu, o
+  concluído que você marcou e o arquivado de quando você disse que aquilo não
+  era item. Sem isso, cada palavra acrescentada à linha apagaria sua decisão.
+
+A lógica fica em `src/items/detect.ts`, pura, sem React nem banco.
+Verificação: `npm run test:fields`.
 
 ---
 
@@ -183,13 +229,14 @@ Cada pasta tem um trabalho só:
 src/
   domain/      modelo de dados, modelos de folha, medidas da página
   ink/         captura da caneta, desenho do traço, gesto do rabisco, zoom
+  items/       identificação dos campos escritos nas zonas
   zones/       em que zona um ponto caiu
   db/          persistência local (IndexedDB)
   state/       estado do app e todas as ações que mudam dados
   audio/       gravação
   components/  a folha, a navegação, as barras, o painel
   lib/         geometria e utilidades
-tools/         testes do gesto do rabisco e da borracha
+tools/         testes do gesto do rabisco, da borracha e dos campos
 ```
 
 Regra da casa: **componente não fala com o banco**. Ele chama uma ação de
@@ -209,6 +256,8 @@ grava no banco em seguida. É isso que mantém a escrita fluida.
 3. **Áudio ligado à tinta** — tocar num traço e ouvir o trecho da gravação
    daquele momento. Os dados necessários já estão sendo guardados.
 4. **Zonas editáveis na folha** — arrastar as bordas, criar zona nova à mão.
+   É o passo natural depois da identificação automática: hoje as faixas vêm
+   prontas do modelo de folha.
 5. **Ícones personalizados** — você cria os seus carimbos, com os seus
    significados.
 6. ~~Empacotar como app Android~~ — feito.

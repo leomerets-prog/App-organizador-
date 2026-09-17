@@ -444,6 +444,9 @@ export function PageCanvas() {
 
   const hitItemMarker = useCallback((pt: Pt): string | null => {
     for (const item of stateRef.current.items) {
+      // Arquivado não é desenhado; tocar no lugar onde ele estava não pode
+      // acender um carimbo invisível.
+      if (item.status === 'arquivado') continue
       const cy = item.bounds.minY + (item.bounds.maxY - item.bounds.minY) / 2
       // A tolerância acompanha o zoom: ampliado, o alvo não precisa crescer junto.
       const reach = 16 / Math.max(0.5, viewRef.current.zoom)

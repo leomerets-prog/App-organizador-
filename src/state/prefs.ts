@@ -16,6 +16,8 @@ export interface Prefs {
   penColor: string
   penWidth: number
   showZones: boolean
+  /** Identificar sozinho o que foi escrito dentro das zonas. */
+  autoFields: boolean
   /** Aproximação preferida da folha. 1 = folha inteira na largura da tela. */
   zoom: number
   /** Raio da borracha, em px de página. */
@@ -29,6 +31,7 @@ const DEFAULTS: Prefs = {
   penColor: INK_COLOR,
   penWidth: PEN_WIDTH_DEFAULT,
   showZones: true,
+  autoFields: true,
   zoom: ZOOM_FIT,
   eraserSize: ERASER_DEFAULT,
 }
@@ -43,6 +46,7 @@ export function loadPrefs(): Prefs {
       penColor: typeof saved.penColor === 'string' ? saved.penColor : DEFAULTS.penColor,
       penWidth: typeof saved.penWidth === 'number' ? saved.penWidth : DEFAULTS.penWidth,
       showZones: typeof saved.showZones === 'boolean' ? saved.showZones : DEFAULTS.showZones,
+      autoFields: typeof saved.autoFields === 'boolean' ? saved.autoFields : DEFAULTS.autoFields,
       zoom: typeof saved.zoom === 'number' ? clampZoom(saved.zoom) : DEFAULTS.zoom,
       eraserSize:
         typeof saved.eraserSize === 'number'

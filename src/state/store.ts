@@ -14,6 +14,8 @@ import type {
   Zone,
 } from '../domain/types'
 import { buildZones } from '../domain/templates'
+import { detectFields, planFieldSync } from '../items/detect'
+import type { DetectedField } from '../items/detect'
 import * as repo from '../db/repo'
 import { newId } from '../lib/id'
 import { boundsOf, unionBounds } from '../lib/geometry'
@@ -63,6 +65,8 @@ export interface AppState {
   penColor: string
   penWidth: number
   showZones: boolean
+  /** Identificar sozinho o que foi escrito dentro das zonas. */
+  autoFields: boolean
   theme: Theme
   /** Aproximação da folha, guardada entre aberturas. */
   zoom: number
@@ -96,6 +100,7 @@ export interface AppState {
   setPenColor: (color: string) => void
   setPenWidth: (width: number) => void
   toggleZones: () => void
+  toggleAutoFields: () => void
   setTheme: (theme: Theme) => void
   toggleTheme: () => void
   setZoom: (zoom: number) => void
@@ -117,8 +122,15 @@ export interface AppState {
 
   stampSelection: (kind: ItemKind) => Promise<void>
   toggleItemStatus: (id: Id) => Promise<void>
+  setItemStatus: (id: Id, status: Item['status']) => Promise<void>
+  setItemKind: (id: Id, kind: ItemKind) => Promise<void>
   setItemTitle: (id: Id, title: string) => Promise<void>
   removeItem: (id: Id) => Promise<void>
+
+  /** Refaz a identificação dos campos da página aberta. */
+  syncFields: () => Promise<void>
+  /** Pede a identificação pro fim da escrita; não roda no meio da frase. */
+  scheduleFieldSync: () => void
 
   addRecording: (rec: Recording, blob: Blob) => Promise<void>
   removeRecording: (id: Id) => Promise<void>
@@ -210,6 +222,50 @@ async function reconcileItems(
   }
 }
 
+/**
+ * Espera entre o fim do traço e a identificação dos campos.
+ *
+ * Curta o bastante pra que o painel esteja certo quando o usuário for olhar,
+ * longa o bastante pra não rodar entre uma palavra e a seguinte.
+ */
+const FIELD_SYNC_DELAY = 800
+
+let fieldSyncTimer: ReturnType<typeof setTimeout> | null = null
+let fieldSyncRunning = false
+let fieldSyncAgain = false
+
+/** Um campo identificado vira item novo, sempre em aberto. */
+function itemFromField(pageId: Id, field: DetectedField, now: number): Item {
+  return {
+    id: newId(),
+    pageId,
+    kind: field.kind,
+    status: 'aberto',
+    source: 'auto',
+    zoneId: field.zoneId,
+    strokeIds: [...field.strokeIds],
+    bounds: field.bounds,
+    title: '',
+    ocr: { status: 'pendente' },
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+/**
+ * O item cresce junto com a linha, mas só na tinta e no tamanho: tipo, estado e
+ * título são decisão do usuário e não se mexem aqui.
+ */
+function applyField(item: Item, field: DetectedField, now: number): Item {
+  return {
+    ...item,
+    zoneId: field.zoneId,
+    strokeIds: [...field.strokeIds],
+    bounds: field.bounds,
+    updatedAt: now,
+  }
+}
+
 /** Guarda do arranque: garante uma única execução por carregamento do app. */
 let initOnce: Promise<void> | null = null
 
@@ -227,6 +283,7 @@ function persist(get: () => AppState): void {
     penColor: s.penColor,
     penWidth: s.penWidth,
     showZones: s.showZones,
+    autoFields: s.autoFields,
     zoom: s.zoom,
     eraserSize: s.eraserSize,
   })
@@ -251,6 +308,7 @@ export const useStore = create<AppState>((set, get) => ({
   penColor: initialPrefs.penColor,
   penWidth: initialPrefs.penWidth,
   showZones: initialPrefs.showZones,
+  autoFields: initialPrefs.autoFields,
   theme: initialPrefs.theme,
   zoom: initialPrefs.zoom,
   eraserSize: initialPrefs.eraserSize,
@@ -303,6 +361,9 @@ export const useStore = create<AppState>((set, get) => ({
     // Se o usuário trocou de página enquanto isto carregava, descarta o resultado.
     if (get().activePageId !== id) return
     set({ ...content, loadingPage: false })
+    // Folhas escritas antes desta versão (ou com a identificação desligada)
+    // ganham seus campos ao serem abertas.
+    get().scheduleFieldSync()
   },
 
   // ─── Criação e remoção ─────────────────────────────────────────────────────
@@ -436,6 +497,20 @@ export const useStore = create<AppState>((set, get) => ({
     persist(get)
   },
 
+  /**
+   * Liga e desliga a identificação automática.
+   *
+   * Desligar não apaga o que já foi identificado: o que está no painel é
+   * trabalho do usuário (ele concluiu, arquivou, trocou o tipo), e sumir com
+   * isso por causa de um interruptor seria perda de trabalho de verdade.
+   */
+  toggleAutoFields() {
+    const autoFields = !get().autoFields
+    set({ autoFields })
+    persist(get)
+    if (autoFields) get().scheduleFieldSync()
+  },
+
   setTheme(theme) {
     applyTheme(theme)
     set({ theme })
@@ -485,6 +560,7 @@ export const useStore = create<AppState>((set, get) => ({
     set({ strokes: [...get().strokes, stroke] })
     await repo.putStroke(stroke)
     await get().growPageIfNeeded(bounds.maxY)
+    get().scheduleFieldSync()
   },
 
   // ─── Borracha ──────────────────────────────────────────────────────────────
@@ -562,6 +638,7 @@ export const useStore = create<AppState>((set, get) => ({
     }
 
     await reconcileItems(get, set, session.lineage, new Set(removedIds))
+    get().scheduleFieldSync()
     return removedIds.length
   },
 
@@ -597,6 +674,7 @@ export const useStore = create<AppState>((set, get) => ({
     }
     set({ items: op.items })
 
+    get().scheduleFieldSync()
     return restore.length
   },
 
@@ -615,13 +693,18 @@ export const useStore = create<AppState>((set, get) => ({
     if (chosen.length === 0) return
 
     const now = Date.now()
+    const bounds = unionBounds(chosen.map((s) => s.bounds))
+    const center = { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2 }
+
     const item: Item = {
       id: newId(),
       pageId: activePageId,
       kind,
       status: 'aberto',
+      source: 'carimbo',
+      zoneId: zoneAtPoint(get().zones, center)?.id ?? null,
       strokeIds: chosen.map((s) => s.id),
-      bounds: unionBounds(chosen.map((s) => s.bounds)),
+      bounds,
       title: '',
       ocr: { status: 'pendente' },
       createdAt: now,
@@ -629,13 +712,35 @@ export const useStore = create<AppState>((set, get) => ({
     }
     await repo.putItem(item)
     set({ items: [...get().items, item], selection: new Set(), tool: 'pen' })
+    // A tinta carimbada sai da identificação automática: sem isto a mesma
+    // anotação apareceria duas vezes no painel.
+    get().scheduleFieldSync()
   },
 
   async toggleItemStatus(id) {
     const item = get().items.find((i) => i.id === id)
     if (!item) return
-    const status = item.status === 'concluido' ? 'aberto' : 'concluido'
-    const updated = { ...item, status: status as Item['status'], updatedAt: Date.now() }
+    await get().setItemStatus(id, item.status === 'concluido' ? 'aberto' : 'concluido')
+  },
+
+  async setItemStatus(id, status) {
+    const item = get().items.find((i) => i.id === id)
+    if (!item) return
+    const updated: Item = { ...item, status, updatedAt: Date.now() }
+    await repo.putItem(updated)
+    set({ items: get().items.map((i) => (i.id === id ? updated : i)) })
+  },
+
+  /**
+   * Troca o tipo do item.
+   *
+   * A identificação nunca reescreve o tipo de um item que já existe — quando o
+   * usuário diz que aquela linha é tarefa e não pendência, a palavra dele fica.
+   */
+  async setItemKind(id, kind) {
+    const item = get().items.find((i) => i.id === id)
+    if (!item || item.kind === kind) return
+    const updated: Item = { ...item, kind, updatedAt: Date.now() }
     await repo.putItem(updated)
     set({ items: get().items.map((i) => (i.id === id ? updated : i)) })
   },
@@ -651,6 +756,81 @@ export const useStore = create<AppState>((set, get) => ({
   async removeItem(id) {
     await repo.deleteItem(id)
     set({ items: get().items.filter((i) => i.id !== id) })
+  },
+
+  // ─── Identificação dos campos ──────────────────────────────────────────────
+
+  /**
+   * Pede a identificação pro fim da escrita.
+   *
+   * Espera a mão parar de propósito: identificar no meio da frase criaria um
+   * item por palavra, que apareceria e sumiria do painel enquanto o usuário
+   * ainda está escrevendo a linha.
+   */
+  scheduleFieldSync() {
+    if (fieldSyncTimer !== null) clearTimeout(fieldSyncTimer)
+    fieldSyncTimer = setTimeout(() => {
+      fieldSyncTimer = null
+      void get().syncFields()
+    }, FIELD_SYNC_DELAY)
+  },
+
+  async syncFields() {
+    const pageId = get().activePageId
+    if (!pageId || !get().autoFields) return
+
+    // Uma passada por vez. Duas ao mesmo tempo criariam o mesmo campo duas
+    // vezes, porque a segunda não enxergaria o item que a primeira ainda não
+    // terminou de gravar.
+    if (fieldSyncRunning) {
+      fieldSyncAgain = true
+      return
+    }
+    fieldSyncRunning = true
+
+    try {
+      const { strokes, zones, items } = get()
+
+      const stamped = new Set<Id>()
+      for (const item of items) {
+        if (item.source === 'carimbo') for (const id of item.strokeIds) stamped.add(id)
+      }
+
+      const fields = detectFields(strokes, zones, { ignoreStrokeIds: stamped })
+      const plan = planFieldSync(
+        fields,
+        items.filter((i) => i.source === 'auto'),
+      )
+      if (plan.create.length === 0 && plan.update.length === 0 && plan.remove.length === 0) return
+
+      const now = Date.now()
+      const created = plan.create.map((field) => itemFromField(pageId, field, now))
+      const updated = plan.update.map(({ item, field }) => applyField(item, field, now))
+
+      for (const item of [...created, ...updated]) await repo.putItem(item)
+      for (const id of plan.remove) await repo.deleteItem(id)
+
+      // Trocou de página enquanto gravava: o que foi pro banco continua valendo,
+      // mas a lista da tela agora é de outra folha e não pode receber isto.
+      if (get().activePageId !== pageId) return
+
+      // A lista é remontada a partir da versão mais recente do estado, e não da
+      // que foi lida lá em cima: a mão pode ter escrito outra coisa no meio.
+      const changed = new Map([...created, ...updated].map((i) => [i.id, i]))
+      const dead = new Set(plan.remove)
+      const kept = get()
+        .items.filter((i) => !dead.has(i.id))
+        .map((i) => changed.get(i.id) ?? i)
+      const known = new Set(kept.map((i) => i.id))
+
+      set({ items: [...kept, ...created.filter((i) => !known.has(i.id))] })
+    } finally {
+      fieldSyncRunning = false
+      if (fieldSyncAgain) {
+        fieldSyncAgain = false
+        get().scheduleFieldSync()
+      }
+    }
   },
 
   // ─── Áudio ─────────────────────────────────────────────────────────────────

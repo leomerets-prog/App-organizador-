@@ -90,8 +90,21 @@ export interface Bounds {
 
 // ─── Zonas ───────────────────────────────────────────────────────────────────
 
-/** O que a zona significa. Define o tipo padrão dos itens criados dentro dela. */
-export type ZoneKind = 'anotacao' | 'topicos' | 'duvidas' | 'pendencias' | 'documentos' | 'livre'
+/**
+ * O que a zona significa.
+ *
+ * É daqui que sai a estratificação automática: a zona onde a escrita caiu
+ * define em que aba do painel ela vai aparecer (ver `items/detect.ts`).
+ */
+export type ZoneKind =
+  | 'anotacao'
+  | 'pautas'
+  | 'topicos'
+  | 'tarefas'
+  | 'duvidas'
+  | 'pendencias'
+  | 'documentos'
+  | 'livre'
 
 export interface Zone {
   id: Id
@@ -105,15 +118,40 @@ export interface Zone {
 
 // ─── Itens (o que foi carimbado) ─────────────────────────────────────────────
 
-export type ItemKind = 'tarefa' | 'duvida' | 'topico' | 'documento' | 'pendencia' | 'importante'
+export type ItemKind =
+  | 'tarefa'
+  | 'pauta'
+  | 'duvida'
+  | 'topico'
+  | 'documento'
+  | 'pendencia'
+  | 'importante'
 
+/**
+ * `arquivado` é o "não era item": guarda a decisão do usuário pra que a
+ * identificação automática não recrie o mesmo campo na próxima passada.
+ */
 export type ItemStatus = 'aberto' | 'concluido' | 'arquivado'
+
+/**
+ * De onde o item veio.
+ *
+ * `carimbo` — o usuário cercou a tinta com o laço e escolheu o tipo.
+ * `auto`    — o app identificou o campo pela zona em que a escrita caiu.
+ *
+ * A diferença importa na hora de reconciliar: só os automáticos são refeitos
+ * quando a tinta muda; os carimbados são do usuário e ninguém mexe neles.
+ */
+export type ItemSource = 'carimbo' | 'auto'
 
 export interface Item {
   id: Id
   pageId: Id
   kind: ItemKind
   status: ItemStatus
+  source: ItemSource
+  /** Zona de onde o campo saiu; nulo quando foi carimbado fora de qualquer zona. */
+  zoneId: Id | null
   /** Traços que compõem este item. */
   strokeIds: Id[]
   /** Região da página que o item ocupa — usada pro recorte na tela estratificada. */

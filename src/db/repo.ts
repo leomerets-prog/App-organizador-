@@ -117,7 +117,18 @@ export async function loadPageContent(pageId: Id): Promise<PageContent> {
   ])
   strokes.sort((a, b) => a.startedAt - b.startedAt)
   images.sort((a, b) => a.createdAt - b.createdAt)
-  return { strokes, zones, items, recordings, images }
+  return { strokes, zones, items: items.map(normalizeItem), recordings, images }
+}
+
+/**
+ * Itens gravados antes da identificação automática não têm origem nem zona.
+ * São todos carimbo — foi a única forma que existiu de criar item até aqui —,
+ * e dizer isso na leitura evita que a identificação os tome por seus e os
+ * apague na primeira passada.
+ */
+function normalizeItem(item: Item): Item {
+  if (item.source) return item
+  return { ...item, source: 'carimbo', zoneId: item.zoneId ?? null }
 }
 
 export async function putStroke(stroke: Stroke): Promise<void> {
@@ -157,7 +168,18 @@ export async function deleteItem(id: Id): Promise<void> {
 /** Todos os itens de todos os cadernos — a base da tela estratificada. */
 export async function listAllItems(): Promise<Item[]> {
   const db = await getDb()
-  return db.getAll('items')
+  return (await db.getAll('items')).map(normalizeItem)
+}
+
+/**
+ * Todas as páginas, de todos os blocos.
+ *
+ * O painel mostra item de caderno que não está aberto; sem isto a origem sairia
+ * como "outra página", que não ajuda ninguém a achar a anotação.
+ */
+export async function listAllPages(): Promise<Page[]> {
+  const db = await getDb()
+  return db.getAll('pages')
 }
 
 // ─── Gravações ───────────────────────────────────────────────────────────────

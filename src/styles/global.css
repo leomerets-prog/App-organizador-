@@ -1052,6 +1052,13 @@ input {
   color: var(--text-faint);
 }
 
+.card-side {
+  display: grid;
+  gap: 6px;
+  justify-items: stretch;
+  flex-shrink: 0;
+}
+
 .card-goto {
   height: 34px;
   padding: 0 12px;
@@ -1060,6 +1067,119 @@ input {
   font-size: 12px;
   color: var(--text-dim);
   flex-shrink: 0;
+}
+
+.card-archive {
+  height: 28px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.card-check.restore {
+  border-color: var(--line);
+  color: var(--text-dim);
+  font-size: 15px;
+}
+
+/* Seletor de tipo: conserta o palpite do app sem sair do cartão. */
+.card-kind {
+  margin-top: 2px;
+  height: 30px;
+  width: 100%;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 0 6px;
+}
+
+/* ── Abas do painel ───────────────────────────────────────────────────────── */
+
+/*
+ * Rolam na horizontal porque no tablet em pé não cabem oito abas na largura —
+ * e quebrá-las em duas fileiras empurraria os cartões pra fora da tela.
+ */
+.panel-tabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  padding-bottom: 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--line);
+}
+
+.panel-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.panel-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: var(--tap);
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 13px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.panel-tab.active {
+  border-color: var(--tab, var(--accent));
+  color: var(--tab, var(--text));
+  background: var(--surface-2);
+  font-weight: 600;
+}
+
+/* Aba vazia continua visível: é ela que ensina onde a escrita vai parar. */
+.panel-tab.empty {
+  opacity: 0.45;
+}
+
+.tab-glyph {
+  color: var(--tab, var(--text-dim));
+  font-size: 14px;
+}
+
+.tab-count {
+  font-size: 11px;
+  color: var(--text-faint);
+  background: var(--surface-3);
+  border-radius: 999px;
+  padding: 2px 7px;
+}
+
+.scope-switch {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  overflow: hidden;
+}
+
+.scope-switch button {
+  height: 34px;
+  padding: 0 12px;
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.scope-switch button.active {
+  background: var(--surface-3);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.scope-switch button:disabled {
+  opacity: 0.4;
 }
 
 /* ── Telas estreitas (tablet em pé) ───────────────────────────────────────── */
@@ -1092,6 +1212,14 @@ input {
   .audiobar {
     max-width: 100%;
     padding-top: 0;
+  }
+
+  .panel {
+    padding: 16px 14px 40px;
+  }
+
+  .panel-cards {
+    grid-template-columns: 1fr;
   }
 }
 

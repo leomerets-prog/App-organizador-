@@ -11,7 +11,8 @@
     "typecheck": "tsc -b --noEmit",
     "test:scribble": "esbuild tools/scribble-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/scribble-test.mjs --log-level=error && node node_modules/.cache/scribble-test.mjs",
     "test:erase": "esbuild tools/erase-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/erase-test.mjs --log-level=error && node node_modules/.cache/erase-test.mjs",
-    "test": "npm run test:scribble && npm run test:erase"
+    "test": "npm run test:scribble && npm run test:erase && npm run test:fields",
+    "test:fields": "esbuild tools/fields-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/fields-test.mjs --log-level=error && node node_modules/.cache/fields-test.mjs"
   },
   "dependencies": {
     "idb": "^8.0.0",

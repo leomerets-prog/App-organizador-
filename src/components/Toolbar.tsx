@@ -27,10 +27,19 @@ const TOOLS: { kind: ToolKind; glyph: string; label: string }[] = [
   { kind: 'image', glyph: '🖼', label: 'Imagem' },
 ]
 
-const ITEM_KINDS: ItemKind[] = ['tarefa', 'duvida', 'topico', 'pendencia', 'documento', 'importante']
+const ITEM_KINDS: ItemKind[] = [
+  'tarefa',
+  'pauta',
+  'duvida',
+  'topico',
+  'pendencia',
+  'documento',
+  'importante',
+]
 
 const ITEM_LABEL: Record<ItemKind, string> = {
   tarefa: 'Tarefa',
+  pauta: 'Pauta',
   duvida: 'Dúvida',
   topico: 'Tópico',
   pendencia: 'Pendência',
@@ -47,6 +56,8 @@ export function Toolbar() {
   const setPenWidth = useStore((s) => s.setPenWidth)
   const showZones = useStore((s) => s.showZones)
   const toggleZones = useStore((s) => s.toggleZones)
+  const autoFields = useStore((s) => s.autoFields)
+  const toggleAutoFields = useStore((s) => s.toggleAutoFields)
   const theme = useStore((s) => s.theme)
   const toggleTheme = useStore((s) => s.toggleTheme)
   const eraserSize = useStore((s) => s.eraserSize)
@@ -151,6 +162,21 @@ export function Toolbar() {
       <button className={`tool-btn ${showZones ? 'active' : ''}`} onClick={toggleZones}>
         <span className="tool-glyph">▦</span>
         <span className="tool-label">Zonas</span>
+      </button>
+
+      {/* O que o app identifica sozinho dentro das zonas. Fica ao lado das
+          zonas de propósito: é a mesma ideia, vista de dois ângulos. */}
+      <button
+        className={`tool-btn ${autoFields ? 'active' : ''}`}
+        onClick={toggleAutoFields}
+        title={
+          autoFields
+            ? 'Cada linha escrita dentro de uma zona vira item no painel'
+            : 'Identificação desligada: só o laço cria itens'
+        }
+      >
+        <span className="tool-glyph">⊞</span>
+        <span className="tool-label">Campos</span>
       </button>
 
       <button className="tool-btn" onClick={toggleTheme}>
