@@ -2,11 +2,16 @@
 
 Caderno de trabalho com caneta, para tablet. Você escreve à mão numa folha
 dividida em **zonas**, e o app **identifica e transcreve sozinho** o que você
-escreveu dentro de cada uma: cada linha na faixa "Tarefas" vira uma tarefa, cada
-linha em "Dúvidas" vira uma dúvida — e o texto aparece **ali mesmo, embaixo da
-sua letra**, na própria folha. As faixas são suas: arraste, redimensione, crie
-e renomeie na folha. O painel, com abas, é só o resumo de tudo que foi
-identificado; o conteúdo continua onde você escreveu.
+escreveu dentro de cada uma: cada linha na faixa "Tarefas" vira uma ação, cada
+linha em "Dúvidas" vira uma dúvida.
+
+Daí tudo isso chega na **Central**: a tela onde você trabalha o que escreveu —
+visão geral, Ações, Pautas, Pendências, Dúvidas, Documentos —, com busca no
+texto, filtro por caderno e as ações de cada item (concluir, reclassificar,
+voltar pra página onde ele nasceu). O texto também fica na folha, embaixo da sua
+letra; os dois lugares mostram o mesmo item.
+
+As faixas são suas: arraste, redimensione, crie e renomeie na própria folha.
 
 Feito para o Lenovo Idea Tab com caneta, mas roda em qualquer tablet.
 
@@ -110,12 +115,15 @@ fora dela para fechar.
 - Cada traço guarda o instante em que foi escrito, o que vai permitir
   (próxima etapa) tocar num rabisco e ouvir o que estava sendo dito
 
-**Painel**
-- Abas por tipo: Tudo, Tarefas, Pautas, Pendências, Dúvidas, Tópicos,
-  Documentos, Importantes — e Arquivados, quando houver
-- Filtro **Tudo / Esta página** e chave para mostrar os concluídos
-- Cada item mostra um recorte da sua própria letra
-- "Ir" leva de volta à página de origem
+**Central** (botão na barra lateral)
+- Trilho de módulos com o que há em cada um: Visão geral, Ações, Pautas,
+  Pendências, Dúvidas, Tópicos, Documentos, Importantes, Arquivados
+- **Visão geral**: quanto há em aberto de cada tipo e por caderno
+- **Busca** no texto transcrito e no caminho (caderno › seção › página)
+- Filtros de caderno, **Tudo / Esta página** e mostrar concluídos
+- Cada linha traz o texto, o caminho, a data, um recorte da sua letra, o seletor
+  de tipo e o ✕ que arquiva
+- Tocar no texto abre a página onde ele foi escrito
 
 **Organização** — igual OneNote: Blocos de Anotações → Seções → Páginas
 
@@ -148,7 +156,7 @@ contém o app compilado.
 ```bash
 npm install
 npm run dev            # servidor de desenvolvimento
-npm test               # rabisco, borracha, campos e zonas
+npm test               # rabisco, borracha, campos, zonas e Central
 npm run build:tablet   # regenera a pasta tablet/ (commitar junto)
 ```
 
@@ -173,6 +181,27 @@ sumir do painel.
 
 A lógica fica em `src/ink/erase.ts`, sem depender de React nem de banco.
 Verificação: `npm run test:erase`.
+
+---
+
+## A Central
+
+A folha é onde se escreve. A Central é onde o que foi escrito vira trabalho.
+
+Tudo que saiu das faixas — de todos os cadernos — chega lá já transcrito, numa
+lista com o caminho de onde veio. O trilho da esquerda mostra quanto há em cada
+módulo; a visão geral responde "o que tenho pela frente" de relance; a busca
+acha pelo texto ou pelo caminho, **sem acento e sem caixa** (procurar "duvida"
+acha "Dúvida").
+
+Em cada linha você marca como concluída, troca o tipo (o seu tipo fica; a zona
+não o desfaz), arquiva o que não era item, ou toca no texto pra abrir a página
+onde ele nasceu.
+
+O mesmo item aparece na folha e na Central: concluir num lugar risca no outro.
+
+Filtro, busca e contagem ficam em `src/items/central.ts`, puros.
+Verificação: `npm run test:central`.
 
 ---
 
@@ -305,7 +334,7 @@ Cada pasta tem um trabalho só:
 src/
   domain/      modelo de dados, modelos de folha, medidas da página
   ink/         captura da caneta, desenho do traço, gesto do rabisco, zoom
-  items/       identificação dos campos escritos nas zonas
+  items/       identificação dos campos escritos e o filtro da Central
   ocr/         transcrição da letra (ponte com o plugin Android)
   zones/       em que zona um ponto caiu, e a edição das faixas
   db/          persistência local (IndexedDB)
@@ -313,7 +342,7 @@ src/
   audio/       gravação
   components/  a folha, a navegação, as barras, o painel
   lib/         geometria e utilidades
-tools/         testes do rabisco, da borracha, dos campos e das zonas
+tools/         testes do rabisco, da borracha, dos campos, das zonas e da Central
 ```
 
 Regra da casa: **componente não fala com o banco**. Ele chama uma ação de

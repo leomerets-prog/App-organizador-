@@ -44,7 +44,7 @@ export function Sidebar({
 
       <button className="sidebar-row" onClick={onOpenPanel}>
         <span className="sidebar-glyph panel-glyph">◫</span>
-        <span className="sidebar-label">Painel</span>
+        <span className="sidebar-label">Central</span>
       </button>
 
       <div className="sidebar-divider" />

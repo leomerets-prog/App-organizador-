@@ -171,6 +171,12 @@ export async function listAllItems(): Promise<Item[]> {
   return (await db.getAll('items')).map(normalizeItem)
 }
 
+/** Todas as seções, de todos os blocos — a Central mostra o caminho inteiro. */
+export async function listAllSections(): Promise<Section[]> {
+  const db = await getDb()
+  return db.getAll('sections')
+}
+
 /**
  * Todas as páginas, de todos os blocos.
  *

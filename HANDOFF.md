@@ -10,13 +10,16 @@ quem continuar. Escrito para ser lido inteiro antes do primeiro commit.
 Caderno de trabalho com caneta, para tablet Android (feito para um Lenovo Idea
 Tab). O usuário escreve à mão numa folha dividida em **zonas** que classificam
 o que cai dentro delas: cada linha escrita numa zona com significado vira um
-**item** sozinha (tarefa, pauta, dúvida, pendência…) e é **transcrita ali
-mesmo**, embaixo da própria letra, na folha. As zonas são **editáveis na
-folha**: arrastar, redimensionar, criar, renomear e trocar o significado. O que
-a zona não pegar, ele marca com **carimbo** usando o laço. Um **painel com
-abas** reúne tudo, de todos os cadernos, como resumo — o conteúdo continua na
-página onde foi escrito, que é o pedido explícito do usuário: *"é pra sempre
-ficar lá e não ir saindo e caindo em outra tela"*.
+**item** sozinha (tarefa, pauta, dúvida, pendência…) e é **transcrita**. As
+zonas são **editáveis na folha**: arrastar, redimensionar, criar, renomear e
+trocar o significado. O que a zona não pegar, ele marca com **carimbo** usando o
+laço.
+
+O destino de tudo isso é a **Central**: *"como se fosse um CRM profissional
+onde eu vejo minha central, dúvidas, ações etc"*, nas palavras dele. Trilho de
+módulos, visão geral, busca no texto, filtro por caderno, e as ações de cada
+item. O texto também fica na folha, embaixo da letra — os dois lugares mostram
+o MESMO item, e marcar concluído num risca no outro.
 
 Hierarquia igual OneNote: **Bloco de Anotações → Seção → Página**.
 
@@ -43,7 +46,7 @@ privado do app. Nada sai do aparelho.
 ```bash
 npm install
 npm run dev            # servidor de desenvolvimento
-npm test               # rabisco + borracha + campos + zonas (rode sempre)
+npm test               # rabisco + borracha + campos + zonas + Central (rode sempre)
 npm run build:tablet   # regenera tablet/ — COMITAR JUNTO
 npx cap sync android   # leva tablet/ para o projeto Android
 ```
@@ -175,7 +178,7 @@ de uma tarefa a faria sumir do painel. A linhagem sobrevive a cortes sucessivos
 src/
   domain/      modelo de dados, modelos de folha, medidas e constantes
   ink/         captura da caneta, desenho, gesto do rabisco, zoom, borracha
-  items/       identificação dos campos escritos nas zonas
+  items/       identificação dos campos (detect) e o filtro da Central (central)
   ocr/         transcrição da letra (ponte com o plugin Android)
   zones/       em que zona um ponto caiu, e a edição das faixas
   db/          IndexedDB (versão 2: traços, zonas, itens, áudio, imagens)
@@ -183,7 +186,7 @@ src/
   update/      verificação de versão
   components/  folha, navegação, barras, painel
   lib/         geometria
-tools/         testes de rabisco, de borracha, de campos e de zonas
+tools/         testes de rabisco, de borracha, de campos, de zonas e da Central
 android/       projeto Capacitor (gerado, mas versionado)
 keystore/      chave de assinatura — não trocar
 ```
@@ -193,9 +196,9 @@ keystore/      chave de assinatura — não trocar
 grava depois. É isso que mantém a escrita fluida.
 
 **O que é puro e testável:** `ink/erase.ts`, `ink/scribble.ts`,
-`ink/viewport.ts`, `items/detect.ts`, `zones/edit.ts` e `lib/geometry.ts` não
-sabem nada de React nem de banco. Lógica nova de tinta, de identificação ou de
-zona deve nascer ali.
+`ink/viewport.ts`, `items/detect.ts`, `items/central.ts`, `zones/edit.ts` e
+`lib/geometry.ts` não sabem nada de React nem de banco. Lógica nova de tinta, de
+identificação, de zona ou de filtro deve nascer ali.
 
 **Caminho quente:** o traço em andamento e o estado da janela (zoom/rolagem)
 vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
@@ -217,7 +220,9 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Anotação e folha Livre não geram item | Ali a escrita é a anotação em si; item por linha encheria o painel de lixo e mataria a confiança nele |
 | Identificação só depois que a mão para (800ms) | Rodar no meio da frase criaria e apagaria um item por palavra |
 | "Não era item" arquiva, não apaga | Nenhum caminho novo pode custar tinta do usuário; e o arquivado impede que a identificação recrie o campo |
-| Transcrição aparece NA FOLHA, embaixo da letra | Pedido direto do usuário: o conteúdo não pode migrar pra outra tela. O painel é resumo, não destino |
+| A Central é o destino do que foi escrito | Pedido direto do usuário: uma tela tipo CRM com visão geral, dúvidas e ações. A folha é onde se escreve; a Central é onde se trabalha |
+| A transcrição TAMBÉM aparece na folha | Reconhecer a anotação no lugar onde ela foi feita, sem abrir outra tela pra saber o que está escrito ali |
+| Busca sem acento e sem caixa | Ninguém digita acento com pressa no teclado do tablet, e a transcrição às vezes erra o acento |
 | Texto escrito à mão nunca é sobrescrito | Corrigir uma transcrição errada e vê-la voltar ao errado na palavra seguinte destruiria a confiança no recurso |
 | Divisa ⇕ funciona em qualquer ferramenta | "Se a aba ficou pequena, eu expando e continuo escrevendo" — trocar de modo pra isso quebraria o fluxo |
 | Divisa tira de uma pra dar à outra | Crescer sem tirar de ninguém sobreporia faixas, e a mesma linha pertenceria a duas |
@@ -260,6 +265,10 @@ caso continua existindo o laço.
 
 **A edição de zonas vale só pra página onde foi feita.** Não há como salvar a
 folha ajustada como modelo — é a próxima etapa 2.
+
+**A busca da Central não acha o que ainda não tem texto.** Linha sem
+transcrição só é encontrada pelo recorte da letra, olhando. É mais um motivo
+pra transcrição importar.
 
 ---
 

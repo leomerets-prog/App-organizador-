@@ -5,7 +5,7 @@ import { SectionBar } from './components/SectionBar'
 import { PageCanvas } from './components/PageCanvas'
 import { Toolbar } from './components/Toolbar'
 import { AudioBar } from './components/AudioBar'
-import { Panel } from './components/Panel'
+import { Central } from './components/Central'
 import { UpdatePanel } from './components/UpdatePanel'
 
 export default function App() {
@@ -57,7 +57,7 @@ export default function App() {
           próprio botão ☰, e sem isto não haveria como fechá-la. */}
       {navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} />}
 
-      {panelOpen && <Panel onClose={() => setPanelOpen(false)} />}
+      {panelOpen && <Central onClose={() => setPanelOpen(false)} />}
       {updateOpen && <UpdatePanel onClose={() => setUpdateOpen(false)} />}
     </div>
   )
