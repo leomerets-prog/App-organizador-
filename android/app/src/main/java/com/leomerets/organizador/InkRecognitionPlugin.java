@@ -9,7 +9,6 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
-import com.google.mlkit.common.MlKitException;
 import com.google.mlkit.common.model.DownloadConditions;
 import com.google.mlkit.common.model.RemoteModelManager;
 import com.google.mlkit.vision.digitalink.DigitalInkRecognition;
@@ -120,12 +119,13 @@ public class InkRecognitionPlugin extends Plugin {
             recognizer = DigitalInkRecognition.getClient(
                     DigitalInkRecognizerOptions.builder(model).build());
             return true;
-        } catch (MlKitException error) {
-            call.reject("Não consegui preparar a transcrição: " + error.getMessage());
-            return false;
         } catch (Throwable error) {
+            // Um `catch` só, de Throwable: quem lançava MlKitException aqui era
+            // a resolução do idioma, que agora mora em `resolveIdentifier()` e
+            // trata a própria falha. Um catch de exceção verificada que ninguém
+            // lança nem compila em Java.
             Log.e(TAG, "organizador: reconhecedor de escrita indisponível", error);
-            call.reject("Este aparelho não tem o reconhecedor de escrita.");
+            call.reject("Este aparelho não tem o reconhecedor de escrita: " + error.getMessage());
             return false;
         }
     }

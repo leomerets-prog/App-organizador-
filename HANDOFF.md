@@ -43,6 +43,14 @@ privado do app. Nada sai do aparelho.
 
 ## Rodando
 
+**O plugin nativo é conferido aqui, antes da esteira.** `npm test` roda o
+`javac` contra as sombras em `tools/java-stubs` — cópias das assinaturas das
+bibliotecas do Android. Não substitui a compilação de verdade, mas pega o erro
+bobo em um segundo, em vez de dez minutos de esteira com o usuário esperando de
+app quebrado (aconteceu: um `catch` de exceção que ninguém lançava). Se a
+esteira reclamar de algo que passou aqui, **a sombra é que está errada** —
+corrija a sombra junto.
+
 **A esteira abre o app antes de publicar.** Compilar não prova que o app abre:
 a versão 8 saiu verde e fechava no tablet. Hoje o `apk.yml` instala a versão
 publicada num emulador, instala a nova POR CIMA (que é o que o usuário faz) e
