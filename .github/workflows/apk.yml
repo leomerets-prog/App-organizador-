@@ -92,18 +92,23 @@ jobs:
       # evita é confundir "o aparelho virtual não ligou" com "o app quebrou" —
       # infraestrutura instável não pode segurar a correção que o usuário está
       # esperando, mas app reprovado tem que segurar mesmo.
+      #
+      # `timeout-minutes` é o freio de mão: o aparelho virtual já passou de 25
+      # minutos sem ligar numa execução, e verificação que não termina vira
+      # obstáculo em vez de rede de proteção. Passou do tempo, o passo morre, o
+      # veredito fica ausente e a esteira segue avisando.
       - name: Abrir o app num Android de verdade
         id: emulador
         continue-on-error: true
+        timeout-minutes: 14
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
-          target: google_apis
+          target: default
           arch: x86_64
-          profile: pixel_c
           disable-animations: true
-          emulator-boot-timeout: 900
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-boot-timeout: 600
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -memory 2048
           script: bash tools/smoke-android.sh dist-apk/Organizador.apk dist-apk/logcat.txt dist-apk/anterior.apk dist-apk/veredito.txt
 
       - name: Ler o veredito do aparelho virtual
