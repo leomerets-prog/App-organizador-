@@ -39,9 +39,9 @@ jobs:
       - name: Instalar dependências
         run: npm ci
 
-      - name: Verificar a borracha e o gesto do rabisco
-        # Tudo que apaga escrita é verificado antes de virar APK: a fronteira
-        # entre rabiscar e escrever, e o corte da borracha de ponta.
+      - name: Verificar a lógica pura
+        # Tudo que apaga escrita ou classifica anotação é verificado antes de
+        # virar APK: rabisco, borracha de ponta, campos, zonas e a Central.
         run: npm test
 
       - name: Compilar o app
@@ -59,6 +59,53 @@ jobs:
           mkdir -p dist-apk
           cp android/app/build/outputs/apk/debug/app-debug.apk dist-apk/Organizador.apk
           ls -la dist-apk/
+
+      # ─── O app abre mesmo? ──────────────────────────────────────────────
+      #
+      # Compilar não prova nada sobre abrir. Esta parte instala o APK num
+      # Android de verdade e confere que ele abre, monta a tela e continua de
+      # pé. Vem ANTES de publicar: APK que não abre não chega no tablet.
+      # A versão que está publicada agora é a que está no tablet do usuário: a
+      # verificação instala ELA primeiro e a versão nova por cima, porque é o
+      # caminho que quebra — instalação limpa não reproduz o que quem atualiza
+      # encontra (banco antigo, service worker já registrado).
+      - name: Baixar a versão publicada hoje
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download ultimo \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern Organizador.apk \
+            --output dist-apk/anterior.apk || echo "sem versão anterior publicada"
+          ls -la dist-apk/
+
+      - name: Liberar a virtualização pro emulador
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Abrir o app num Android de verdade
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          ram-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash tools/smoke-android.sh dist-apk/Organizador.apk dist-apk/logcat.txt dist-apk/anterior.apk
+
+      - name: Guardar o log do Android
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logcat
+          path: dist-apk/logcat.txt
+          retention-days: 30
+          if-no-files-found: ignore
 
       - name: Guardar o APK como anexo da execução
         uses: actions/upload-artifact@v4

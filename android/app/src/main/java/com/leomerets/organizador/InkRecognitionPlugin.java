@@ -1,5 +1,7 @@
 package com.leomerets.organizador;
 
+import android.util.Log;
+
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -41,13 +43,23 @@ import java.util.List;
 @CapacitorPlugin(name = "InkRecognition")
 public class InkRecognitionPlugin extends Plugin {
 
+    private static final String TAG = "Organizador";
+
     /** Português do Brasil: é a letra que este app vai ler. */
     private static final String LANGUAGE_TAG = "pt-BR";
 
     private DigitalInkRecognitionModel model;
     private DigitalInkRecognizer recognizer;
 
-    /** Prepara modelo e reconhecedor uma vez só. Devolve false já tendo recusado a chamada. */
+    /**
+     * Prepara modelo e reconhecedor uma vez só. Devolve false já tendo recusado
+     * a chamada.
+     *
+     * Pega `Throwable`, e não só `Exception`: aparelho sem o reconhecedor
+     * devolve NoClassDefFoundError/VerifyError, que são Error. Recusar a
+     * chamada com uma explicação é o pior que pode acontecer aqui — derrubar o
+     * app não é opção: a transcrição é acessório, o caderno é o essencial.
+     */
     private boolean ensureRecognizer(PluginCall call) {
         if (recognizer != null) {
             return true;
@@ -66,6 +78,10 @@ public class InkRecognitionPlugin extends Plugin {
         } catch (MlKitException error) {
             call.reject("Não consegui preparar a transcrição: " + error.getMessage());
             return false;
+        } catch (Throwable error) {
+            Log.e(TAG, "organizador: reconhecedor de escrita indisponível", error);
+            call.reject("Este aparelho não tem o reconhecedor de escrita.");
+            return false;
         }
     }
 
@@ -75,6 +91,14 @@ public class InkRecognitionPlugin extends Plugin {
         if (!ensureRecognizer(call)) {
             return;
         }
+        try {
+            statusInterno(call);
+        } catch (Throwable error) {
+            falhou(call, error);
+        }
+    }
+
+    private void statusInterno(PluginCall call) {
         RemoteModelManager.getInstance()
                 .isModelDownloaded(model)
                 .addOnSuccessListener(downloaded -> {
@@ -93,6 +117,14 @@ public class InkRecognitionPlugin extends Plugin {
         if (!ensureRecognizer(call)) {
             return;
         }
+        try {
+            prepareInterno(call);
+        } catch (Throwable error) {
+            falhou(call, error);
+        }
+    }
+
+    private void prepareInterno(PluginCall call) {
         RemoteModelManager.getInstance()
                 .download(model, new DownloadConditions.Builder().build())
                 .addOnSuccessListener(nothing -> {
@@ -111,6 +143,14 @@ public class InkRecognitionPlugin extends Plugin {
             return;
         }
 
+        try {
+            recognizeInterno(call);
+        } catch (Throwable error) {
+            falhou(call, error);
+        }
+    }
+
+    private void recognizeInterno(PluginCall call) {
         JSArray strokes = call.getArray("strokes");
         if (strokes == null || strokes.length() == 0) {
             call.reject("Sem traços para transcrever");
@@ -161,11 +201,21 @@ public class InkRecognitionPlugin extends Plugin {
                         call.reject("Não consegui ler esta linha: " + error.getMessage()));
     }
 
+    /** Nenhuma falha da transcrição pode virar app fechado: vira recusa e log. */
+    private void falhou(PluginCall call, Throwable error) {
+        Log.e(TAG, "organizador: falha na transcrição", error);
+        call.reject("A transcrição falhou: " + error.getMessage());
+    }
+
     @Override
     protected void handleOnDestroy() {
-        if (recognizer != null) {
-            recognizer.close();
-            recognizer = null;
+        try {
+            if (recognizer != null) {
+                recognizer.close();
+                recognizer = null;
+            }
+        } catch (Throwable error) {
+            Log.e(TAG, "organizador: falha ao fechar o reconhecedor", error);
         }
         super.handleOnDestroy();
     }

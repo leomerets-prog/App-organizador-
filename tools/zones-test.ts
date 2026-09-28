@@ -15,12 +15,14 @@ import {
   MIN_ZONE_H,
   MIN_ZONE_W,
   SHEET,
+  MAX_SHEETS,
   boundaryAt,
   dragBoundary,
   dragZone,
   handleAt,
   pageToFrac,
   rectFromDrag,
+  visibleSheets,
   zoneAtFrac,
   zoneBoundaries,
 } from '../src/zones/edit'
@@ -142,6 +144,39 @@ const casos: { nome: string; rodar: () => string | null }[] = [
       return hit?.id === 'pequena' ? null : `pegou ${hit?.id ?? 'nada'}`
     },
   },
+  // ─── Repetição da divisão folha a folha ──────────────────────────────────
+
+  {
+    nome: 'uma tela mostra uma ou duas folhas',
+    rodar() {
+      const r = visibleSheets(0, 1000)
+      if (r.first !== 0 || r.last !== 0) return `veio ${r.first}..${r.last}`
+      const duas = visibleSheets(1500, 2200)
+      if (duas.first !== 0 || duas.last !== 1) return `veio ${duas.first}..${duas.last}`
+      return null
+    },
+  },
+  {
+    nome: 'medida degenerada não vira desenho infinito',
+    rodar() {
+      // É o caso da escala mínima (folha medindo zero ao girar o tablet): a
+      // altura visível explode e, sem teto, o desenho travaria o app.
+      const r = visibleSheets(0, 7_770_000)
+      if (r.last - r.first > MAX_SHEETS) return `${r.last - r.first} folhas de uma vez`
+      return null
+    },
+  },
+  {
+    nome: 'medida inválida não desenha nada estranho',
+    rodar() {
+      const r = visibleSheets(NaN, Infinity)
+      if (r.first !== 0 || r.last !== 0) return `veio ${r.first}..${r.last}`
+      const invertido = visibleSheets(900, 100)
+      if (invertido.last < invertido.first) return 'faixa invertida passou'
+      return null
+    },
+  },
+
   // ─── Divisas: crescer a faixa sem trocar de ferramenta ───────────────────
 
   {

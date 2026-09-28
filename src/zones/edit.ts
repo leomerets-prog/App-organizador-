@@ -146,6 +146,32 @@ export function zoneAtFrac(zones: readonly Zone[], p: Pt): Zone | null {
   return best
 }
 
+/**
+ * Teto de folhas desenhadas numa passada.
+ *
+ * A escala de exibição tem um piso minúsculo, de propósito: é ele que impede a
+ * matriz degenerada que derrubava o navegador quando a área da folha media zero
+ * (girar o tablet, abrir e fechar o ☰ — ver HANDOFF). Só que com escala mínima
+ * a "altura visível" em px de página vira milhões, e um laço que anda de folha
+ * em folha passaria a rodar dezenas de milhares de vezes POR QUADRO: o desenho
+ * engasga, o Android acha que o app travou e fecha o app.
+ *
+ * Nenhuma tela mostra mais que um punhado de folhas ao mesmo tempo, então o
+ * teto não tira nada de ninguém.
+ */
+export const MAX_SHEETS = 12
+
+/** Faixa de folhas visível, protegida contra medida degenerada. */
+export function visibleSheets(top: number, bottom: number): { first: number; last: number } {
+  if (!Number.isFinite(top) || !Number.isFinite(bottom) || bottom <= top) {
+    const only = Number.isFinite(top) ? Math.floor(top / SHEET) : 0
+    return { first: only, last: only }
+  }
+  const first = Math.floor(top / SHEET)
+  const last = Math.min(Math.floor(bottom / SHEET), first + MAX_SHEETS)
+  return { first, last }
+}
+
 // ─── Divisas entre faixas ────────────────────────────────────────────────────
 
 /** Duas alturas mais próximas que isto são a mesma divisa. */

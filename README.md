@@ -132,6 +132,10 @@ e abre a tela de atualização. Ela tenta verificar sozinha se há versão nova;
 repositório sendo privado, o GitHub recusa a consulta anônima e a tela explica
 isso, oferecendo o botão que abre a página de versões no navegador.
 
+**Se algo quebrar** — em vez de tela branca, o app mostra o erro numa tela
+legível, com um botão de tentar de novo. O texto do erro é o que ajuda a
+consertar: mande ele.
+
 **Offline** — tudo fica salvo no tablet (IndexedDB). Funciona sem internet.
 
 ---
@@ -145,7 +149,10 @@ chave (`keystore/organizador.jks`, versionada de propósito; trocá-la quebraria
 todas as atualizações futuras).
 
 O GitHub monta o APK sozinho a cada mudança enviada
-(`.github/workflows/apk.yml`).
+(`.github/workflows/apk.yml`) — e **abre o app num Android de verdade antes de
+publicar**: instala a versão que está publicada, instala a nova por cima (que é
+o que você faz ao atualizar) e só libera se o app abrir, montar a tela e
+continuar de pé. APK que não abre não chega no tablet.
 
 **Sem instalar (via navegador):** passo a passo em
 **[GUIA-TABLET.md](GUIA-TABLET.md)**, usando Termux. A pasta **`tablet/`** já

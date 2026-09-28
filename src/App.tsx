@@ -21,6 +21,12 @@ export default function App() {
     void init()
   }, [init])
 
+  // Marca de que a folha chegou à tela. É esta linha que a verificação
+  // automática procura no log do Android: sem ela, o app abriu branco.
+  useEffect(() => {
+    if (ready) console.log('organizador: pronto')
+  }, [ready])
+
   if (!ready) {
     return (
       <div className="boot">

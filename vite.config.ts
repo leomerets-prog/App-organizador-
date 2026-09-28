@@ -11,6 +11,24 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      /*
+       * O service worker se AUTODESTRÓI, de propósito.
+       *
+       * Dentro do APK os arquivos já vêm no aparelho: o cache do service
+       * worker não acrescenta nada e ainda traz um risco sério — ele guarda a
+       * versão antiga da tela e continua servindo ela depois que o usuário
+       * instala a atualização, ou serve um index.html que aponta pra arquivos
+       * que a versão nova não tem mais. Um app que abre branco depois de
+       * atualizar, sem explicação nenhuma.
+       *
+       * Com `selfDestroying`, o service worker que já está instalado em quem
+       * usava as versões anteriores é substituído por um que se apaga e limpa
+       * os caches. Quem instalar daqui pra frente nunca mais terá um.
+       *
+       * Contrapartida: o caminho por navegador (Termux) perde o modo offline.
+       * É legado — o APK é o caminho real, e nele nada disso faz falta.
+       */
+      selfDestroying: true,
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg'],
       // O servidor simples do Termux (python -m http.server) não conhece a

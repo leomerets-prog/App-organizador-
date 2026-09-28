@@ -1,1 +1,25 @@
-if(!self.define){let e,i={};const n=(n,s)=>(n=new URL(n+".js",s).href,i[n]||new Promise(i=>{if("document"in self){const e=document.createElement("script");e.src=n,e.onload=i,document.head.appendChild(e)}else e=n,importScripts(n),i()}).then(()=>{let e=i[n];if(!e)throw new Error(`Module ${n} didn’t register its module`);return e}));self.define=(s,r)=>{const d=e||("document"in self?document.currentScript.src:"")||location.href;if(i[d])return;let f={};const o=e=>n(e,d),c={module:{uri:d},exports:f,require:o};i[d]=Promise.all(s.map(e=>c[e]||o(e))).then(e=>(r(...e),f))}}define(["./workbox-9c191d2f"],function(e){"use strict";self.skipWaiting(),e.clientsClaim(),e.precacheAndRoute([{url:"registerSW.js",revision:"1872c500de691dce40960bb85481de07"},{url:"manifest.json",revision:"dd40b7ff88e0bde91a08cdcb765b81bd"},{url:"index.html",revision:"d3cd67c9bf48aaf6faca3db0af036901"},{url:"icon-512.png",revision:"26a8605cdaeede65e3b4ffd1b01429e2"},{url:"icon-192.png",revision:"4389b6c9742f5923691ece7b2ab71117"},{url:"favicon.svg",revision:"fba137ddc9def9f46f0c47a40ff682f9"},{url:"assets/index-BwGIkgGA.css",revision:null},{url:"assets/index-B51wKcFT.js",revision:null},{url:"favicon.svg",revision:"fba137ddc9def9f46f0c47a40ff682f9"},{url:"icon-192.png",revision:"4389b6c9742f5923691ece7b2ab71117"},{url:"icon-512.png",revision:"26a8605cdaeede65e3b4ffd1b01429e2"},{url:"manifest.json",revision:"dd40b7ff88e0bde91a08cdcb765b81bd"}],{}),e.cleanupOutdatedCaches(),e.registerRoute(new e.NavigationRoute(e.createHandlerBoundToURL("index.html")))});
+
+self.addEventListener('install', (e) => {
+  self.skipWaiting();
+});
+self.addEventListener('activate', (e) => {
+  self.registration.unregister()
+    .then(() => self.clients.matchAll())
+    .then((clients) => {
+      clients.forEach((client) => {
+        if (client instanceof WindowClient)
+          client.navigate(client.url);
+      });
+      return Promise.resolve();
+    })
+    .then(() => {
+      self.caches.keys().then((cacheNames) => {
+        Promise.all(
+          cacheNames.map((cacheName) => {
+            return self.caches.delete(cacheName);
+          }),
+        );
+      })
+    });
+});
+    

@@ -1,6 +1,6 @@
 import type { Item, PageImage, Stroke, Zone } from '../domain/types'
 import { ZONE_COLORS } from '../domain/templates'
-import { SHEET, zoneBoundaries } from '../zones/edit'
+import { SHEET, visibleSheets, zoneBoundaries } from '../zones/edit'
 import type { ZoneRectFrac } from '../zones/edit'
 import { highlighterPaint, pathForStroke, strokeToPath } from './stroke'
 import { INK_COLOR, LEGACY_INK_COLOR } from '../domain/constants'
@@ -101,6 +101,12 @@ export function resolveInk(color: string, theme: Theme): string {
 }
 
 const RULE_SPACING = 38
+
+/**
+ * Teto de pautas desenhadas numa passada, pelo mesmo motivo do teto de folhas
+ * em `zones/edit.ts`: com escala degenerada, `bottom` vira milhões.
+ */
+const MAX_RULES = 400
 
 export function render(ctx: CanvasRenderingContext2D, input: RenderInput): void {
   const { viewport: vp, theme } = input
@@ -224,11 +230,16 @@ function drawRules(
   top: number,
   bottom: number,
 ): void {
+  if (!Number.isFinite(top) || !Number.isFinite(bottom)) return
+
   ctx.strokeStyle = theme.rule
   ctx.lineWidth = 1
   ctx.beginPath()
   const first = Math.floor(top / RULE_SPACING) * RULE_SPACING
-  for (let y = first; y <= bottom; y += RULE_SPACING) {
+  // O teto vale pelo mesmo motivo das folhas: com escala degenerada, `bottom`
+  // vira milhões e este laço sozinho desenharia centenas de milhares de linhas.
+  const limit = Math.min(bottom, first + MAX_RULES * RULE_SPACING)
+  for (let y = first; y <= limit; y += RULE_SPACING) {
     ctx.moveTo(0, y + 0.5)
     ctx.lineTo(vp.pageWidth, y + 0.5)
   }
@@ -252,8 +263,7 @@ function drawZones(
   bottom: number,
   editing: RenderInput['zoneEditing'],
 ): void {
-  const firstSheet = Math.floor(top / SHEET)
-  const lastSheet = Math.floor(bottom / SHEET)
+  const { first: firstSheet, last: lastSheet } = visibleSheets(top, bottom)
 
   for (let sheet = firstSheet; sheet <= lastSheet; sheet++) {
     const baseY = sheet * SHEET
@@ -344,8 +354,7 @@ function drawBoundaryHandles(
 
   const x = vp.pageWidth - BOUNDARY_HANDLE_X
   const r = 13 / Math.max(0.1, vp.scale)
-  const firstSheet = Math.floor(top / SHEET)
-  const lastSheet = Math.floor(bottom / SHEET)
+  const { first: firstSheet, last: lastSheet } = visibleSheets(top, bottom)
 
   ctx.save()
   for (let sheet = firstSheet; sheet <= lastSheet; sheet++) {
@@ -652,6 +661,7 @@ function drawItemText(
 ): void {
   const top = vp.scrollY
   const bottom = vp.scrollY + vp.viewHeight / vp.scale
+  if (!Number.isFinite(top) || !Number.isFinite(bottom)) return
 
   ctx.save()
   ctx.textBaseline = 'top'

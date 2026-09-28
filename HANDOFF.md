@@ -43,6 +43,13 @@ privado do app. Nada sai do aparelho.
 
 ## Rodando
 
+**A esteira abre o app antes de publicar.** Compilar não prova que o app abre:
+a versão 8 saiu verde e fechava no tablet. Hoje o `apk.yml` instala a versão
+publicada num emulador, instala a nova POR CIMA (que é o que o usuário faz) e
+só publica se o app abrir, montar a tela e continuar de pé
+(`tools/smoke-android.sh`). O log do Android fica guardado como anexo da
+execução — é por ele que se descobre o que quebrou.
+
 ```bash
 npm install
 npm run dev            # servidor de desenvolvimento
@@ -109,7 +116,36 @@ Não existe exportação. Se a borracha errar e não houver como desfazer, o
 trabalho foi. Por isso existe o passo de desfazer, e por isso o toque parado
 com a borracha **não apaga** (só o arrasto apaga).
 
-### 7. Desenho e classificação das zonas têm que concordar
+### 7. Laço que anda folha a folha precisa de teto
+
+A escala de exibição tem um piso minúsculo (1e-4), de propósito — é ele que
+impede a matriz degenerada da armadilha 4. Só que com escala mínima a altura
+visível em px de página vira **milhões**, e qualquer laço que ande de folha em
+folha (zonas repetidas, alças de divisa) ou de linha em linha (as pautas) passa
+a rodar dezenas de milhares de vezes **por quadro**. O desenho engasga, o
+Android acha que o app travou e fecha.
+
+Foi isso que derrubou a versão 8 no tablet do usuário, junto com o service
+worker velho. Hoje `visibleSheets()` (em `zones/edit.ts`, testado) limita a
+`MAX_SHEETS`, e `drawRules` tem `MAX_RULES`.
+
+**Toda vez que aparecer um `for` que anda pela altura da página: ele tem teto?**
+
+### 8. Service worker não entra no APK
+
+Dentro do app os arquivos já estão no aparelho: o cache do service worker não
+acrescenta nada e ainda guarda a tela inteira. Depois de instalar a atualização,
+ele continuava servindo a versão antiga — medido: o app abria com o código velho
+na primeira abertura e só trocava na segunda.
+
+Hoje o `vite.config.ts` usa `selfDestroying: true`: quem tinha um service worker
+registrado recebe um que se apaga e limpa os caches, e ninguém mais registra um.
+O `main.tsx` ainda varre registros e caches na abertura, por garantia.
+
+**Não volte a ligar o service worker** sem resolver o que acontece com quem
+atualiza.
+
+### 9. Desenho e classificação das zonas têm que concordar
 
 A divisão em zonas **se repete a cada folha padrão** (1754px) conforme a página
 cresce pra baixo — é assim que `zones/hit.ts` classifica a escrita, com o resto
@@ -120,7 +156,7 @@ tarefas de verdade, e a escrita dali caía em outro lugar do painel.
 Hoje `drawZones` desenha uma repetição por folha. **Mexeu num dos dois lados,
 mexa no outro** — e role a página até a segunda folha pra conferir.
 
-### 8. Transcrição é plugin nativo; o navegador não tem
+### 10. Transcrição é plugin nativo; o navegador não tem
 
 Quem lê a letra é o ML Kit Digital Ink, num plugin Android
 (`InkRecognitionPlugin.java`). Três coisas a saber:
@@ -129,12 +165,15 @@ Quem lê a letra é o ML Kit Digital Ink, num plugin Android
   dele a ponte com a página já foi montada e o plugin não existe pro JavaScript
 - O modelo do idioma é baixado **uma vez** e precisa de internet nessa vez; daí
   em diante roda offline
+- Tudo no plugin pega `Throwable`, não `Exception`: aparelho sem o reconhecedor
+  devolve `NoClassDefFoundError`/`VerifyError`, que são `Error`. A transcrição é
+  acessório; derrubar o caderno por causa dela é inaceitável
 - No navegador não há equivalente offline. A ponte (`src/ocr/handwriting.ts`)
   detecta isso e devolve "indisponível" — o texto escrito à mão continua sendo
   o caminho que funciona em todo lugar, e **nunca é sobrescrito** pela leitura
   automática (é o `ocr.status === 'manual'`)
 
-### 9. Editar zona reclassifica a tinta
+### 11. Editar zona reclassifica a tinta
 
 O traço guarda a zona em que caiu quando foi escrito. Arrastar uma faixa por
 cima de anotação antiga precisa transformar aquilo — a divisão da folha manda, e
@@ -142,7 +181,7 @@ ela acabou de mudar (`reclassifyStrokes`). Pela mesma razão, trocar o
 significado da faixa re-tipa os itens que vieram dela, **exceto** os que o
 usuário tipou à mão no painel (`Item.kindByUser`).
 
-### 10. A identificação mede o vão em alturas de escrita — com piso
+### 12. A identificação mede o vão em alturas de escrita — com piso
 
 O que separa duas colunas na mesma faixa é um vão horizontal medido em alturas
 da escrita. Sem piso, uma linha rasa (letra toda baixa, um traço, um
@@ -154,7 +193,7 @@ Hoje a referência é a maior entre a altura da linha, a altura típica da zona 
 `MIN_WRITING_HEIGHT`. Ao mexer nas medidas de `items/detect.ts`, teste com
 escrita **baixa e miúda**, não só com letra graúda.
 
-### 11. Item automático é reconhecido pela tinta que contém
+### 13. Item automático é reconhecido pela tinta que contém
 
 Enquanto sobrar um traço em comum, o item continua sendo o mesmo — e mantém o
 tipo que o usuário escolheu, o concluído que ele marcou e o arquivado de quando
@@ -163,7 +202,7 @@ posição, ou a recriar itens do zero a cada passada, **cada palavra acrescentad
 à linha apagaria uma decisão do usuário**. `planFieldSync` existe pra isso e
 `tools/fields-test.ts` cerca esse comportamento.
 
-### 12. Itens carimbados precisam sobreviver ao corte
+### 14. Itens carimbados precisam sobreviver ao corte
 
 A borracha é de ponta: corta o traço em pedaços. Um item que apontava para o
 traço original passa a apontar para os pedaços — senão apagar um naco da tinta
@@ -186,7 +225,8 @@ src/
   update/      verificação de versão
   components/  folha, navegação, barras, painel
   lib/         geometria
-tools/         testes de rabisco, de borracha, de campos, de zonas e da Central
+tools/         testes de rabisco, borracha, campos, zonas, Central e o
+               roteiro que abre o app num Android de verdade
 android/       projeto Capacitor (gerado, mas versionado)
 keystore/      chave de assinatura — não trocar
 ```
@@ -227,6 +267,9 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Divisa ⇕ funciona em qualquer ferramenta | "Se a aba ficou pequena, eu expando e continuo escrevendo" — trocar de modo pra isso quebraria o fluxo |
 | Divisa tira de uma pra dar à outra | Crescer sem tirar de ninguém sobreporia faixas, e a mesma linha pertenceria a duas |
 | ML Kit Digital Ink, não OCR de imagem | Ele lê traços com tempo, que é o que o app já guarda; e roda offline depois do primeiro download |
+| A esteira abre o app antes de publicar | Compilar não prova que abre. A versão 8 saiu verde e fechava no tablet; cada volta dessas custa uma instalação do usuário |
+| A verificação instala a versão publicada e a nova POR CIMA | Instalação limpa não reproduz o que quebra em quem atualiza: banco antigo e service worker já registrado |
+| Erro de JavaScript vira tela legível | Tela branca não dá ao usuário nem o que contar pra quem vai consertar |
 
 ---
 
