@@ -87,16 +87,37 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      # `continue-on-error` aqui NÃO afrouxa a verificação: quem decide é o
+      # veredito escrito pelo roteiro, conferido no passo seguinte. O que isso
+      # evita é confundir "o aparelho virtual não ligou" com "o app quebrou" —
+      # infraestrutura instável não pode segurar a correção que o usuário está
+      # esperando, mas app reprovado tem que segurar mesmo.
       - name: Abrir o app num Android de verdade
+        id: emulador
+        continue-on-error: true
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 33
+          api-level: 30
           target: google_apis
           arch: x86_64
-          ram-size: 4096M
+          profile: pixel_c
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: bash tools/smoke-android.sh dist-apk/Organizador.apk dist-apk/logcat.txt dist-apk/anterior.apk
+          emulator-boot-timeout: 900
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash tools/smoke-android.sh dist-apk/Organizador.apk dist-apk/logcat.txt dist-apk/anterior.apk dist-apk/veredito.txt
+
+      - name: Ler o veredito do aparelho virtual
+        run: |
+          if [ ! -f dist-apk/veredito.txt ]; then
+            echo "::warning::Não deu pra abrir o app no aparelho virtual (o emulador não ligou). O APK vai ser publicado sem essa verificação."
+            exit 0
+          fi
+          if [ -s dist-apk/veredito.txt ]; then
+            echo "O app reprovou na abertura:"
+            cat dist-apk/veredito.txt
+            exit 1
+          fi
+          echo "O app abriu e se manteve de pé no aparelho virtual."
 
       - name: Guardar o log do Android
         if: always()

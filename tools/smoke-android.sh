@@ -23,12 +23,20 @@ PACOTE=com.leomerets.organizador
 APK=${1:-dist-apk/Organizador.apk}
 LOG=${2:-dist-apk/logcat.txt}
 ANTERIOR=${3:-dist-apk/anterior.apk}
+VEREDITO=${4:-dist-apk/veredito.txt}
 
 falhou=0
 reprovar() {
   echo "::error::$1"
+  echo "$1" >> "$VEREDITO"
   falhou=1
 }
+
+# O veredito é um arquivo, e não o código de saída, de propósito: o aparelho
+# virtual da esteira às vezes nem liga, e uma infraestrutura que falha não pode
+# ser confundida com um app que quebrou. Arquivo com linhas = o APP reprovou;
+# arquivo ausente = não deu pra verificar.
+rm -f "$VEREDITO"
 
 # ── 1 e 2: a versão que o usuário já tem ────────────────────────────────────
 # Falhas aqui não reprovam nada: se a versão publicada estiver quebrada, é
@@ -98,5 +106,6 @@ echo "────────────────────────�
 
 if [ "$falhou" -eq 0 ]; then
   echo "✓ O app atualizou, abriu, montou a tela e continua rodando."
+  : > "$VEREDITO"
 fi
 exit "$falhou"

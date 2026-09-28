@@ -50,6 +50,13 @@ só publica se o app abrir, montar a tela e continuar de pé
 (`tools/smoke-android.sh`). O log do Android fica guardado como anexo da
 execução — é por ele que se descobre o que quebrou.
 
+O roteiro escreve um **veredito em arquivo**, e o passo seguinte é quem reprova
+a esteira. Isso separa duas coisas que não podem ser confundidas: *o app
+quebrou* (segura a publicação) e *o aparelho virtual não ligou* (avisa e
+publica assim mesmo). Já aconteceu de o emulador não subir na esteira; deixar
+isso segurar a correção que o usuário está esperando seria trocar um problema
+por outro.
+
 ```bash
 npm install
 npm run dev            # servidor de desenvolvimento
