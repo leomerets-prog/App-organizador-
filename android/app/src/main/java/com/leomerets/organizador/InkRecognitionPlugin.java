@@ -243,8 +243,16 @@ public class InkRecognitionPlugin extends Plugin {
         recognizer.recognize(inkBuilder.build(), contextBuilder.build())
                 .addOnSuccessListener(recognition -> {
                     List<RecognitionCandidate> candidates = recognition.getCandidates();
+                    String texto = candidates.isEmpty() ? "" : candidates.get(0).getText();
+                    // O que entrou e o que saiu, no log: quando o reconhecedor
+                    // devolve vazio sem erro, é só por aqui que se enxerga o
+                    // que ele recebeu.
+                    Log.i(TAG, "organizador: leitura — " + strokes.length()
+                            + " traço(s), área " + width + "x" + height
+                            + ", " + candidates.size() + " candidato(s)"
+                            + (texto.isEmpty() ? "" : ", texto \"" + texto + "\""));
                     JSObject result = new JSObject();
-                    result.put("text", candidates.isEmpty() ? "" : candidates.get(0).getText());
+                    result.put("text", texto);
                     call.resolve(result);
                 })
                 .addOnFailureListener(error ->

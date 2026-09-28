@@ -37,7 +37,7 @@ import {
   recognizerPossible,
   resetRecognizer,
 } from '../ocr/handwriting'
-import type { TranscriptionStatus } from '../ocr/handwriting'
+import type { TranscriptionStatus, WritingArea } from '../ocr/handwriting'
 import { forgetImage, placeNewImage, readImageFile } from '../ink/images'
 import { eraseAlongSegment } from '../ink/erase'
 import type { Pt } from '../lib/geometry'
@@ -280,21 +280,34 @@ let transcribeTimer: ReturnType<typeof setTimeout> | null = null
 let transcribing = false
 
 /**
- * Tamanho da área onde a linha foi escrita.
+ * A área onde a linha foi escrita — POSIÇÃO e tamanho.
  *
- * O reconhecedor usa isto pra dar escala à letra — sem a área, uma palavra
- * grande e uma pequena viram o mesmo borrão pra ele. A zona é a medida certa:
- * é o espaço que o usuário tinha pra escrever ali.
+ * O reconhecedor usa isto pra dar escala à letra, e compara os pontos com essa
+ * área. Por isso a posição importa tanto quanto o tamanho: a linha escrita na
+ * faixa de baixo da folha tem y na casa dos milhares, e descrever isso dentro
+ * de uma área de duzentos e poucos de altura é dizer que a escrita caiu fora do
+ * papel. O reconhecedor devolve vazio, sem erro nenhum. Quem desconta a posição
+ * é `recognizeStrokes`, com os números que saem daqui.
+ *
+ * A zona se repete a cada folha padrão, então a faixa usada é a da folha em que
+ * a linha realmente está — e não a da primeira.
  */
-function writingArea(state: AppState, item: Item): { width: number; height: number } {
+function writingArea(state: AppState, item: Item): WritingArea {
   const zone = item.zoneId ? state.zones.find((z) => z.id === item.zoneId) : undefined
   if (zone) {
     const rect = zoneRectInPage(zone, SHEET)
-    return { width: rect.w, height: rect.h }
+    const folha = Math.floor(((item.bounds.minY + item.bounds.maxY) / 2) / SHEET)
+    return { x: rect.x, y: folha * SHEET + rect.y, width: rect.w, height: rect.h }
   }
+
+  // Sem zona, a própria linha é a área — com uma folga, pra letra não encostar
+  // na borda do que o reconhecedor entende como papel.
+  const folga = 24
   return {
-    width: Math.max(1, item.bounds.maxX - item.bounds.minX),
-    height: Math.max(1, item.bounds.maxY - item.bounds.minY),
+    x: item.bounds.minX - folga,
+    y: item.bounds.minY - folga,
+    width: Math.max(1, item.bounds.maxX - item.bounds.minX + folga * 2),
+    height: Math.max(1, item.bounds.maxY - item.bounds.minY + folga * 2),
   }
 }
 
@@ -1136,6 +1149,10 @@ export const useStore = create<AppState>((set, get) => ({
 
       let lidos = 0
       let feitos = 0
+      // Os números da última tentativa que não deu texto. Sem eles, "não
+      // consegui ler" é um beco: com eles dá pra saber se a letra chegou
+      // pequena demais, grande demais ou fora da área.
+      let ultimoDiagnostico = ''
 
       for (const item of fila) {
         if (get().activePageId !== pageId) return
@@ -1155,23 +1172,25 @@ export const useStore = create<AppState>((set, get) => ({
         const area = writingArea(get(), item)
         let next: Item
         try {
-          const text = await recognizeStrokes(strokes, area)
+          const { text, diagnostico } = await recognizeStrokes(strokes, area)
           if (text) lidos++
+          else ultimoDiagnostico = diagnostico
           next = {
             ...item,
             title: text,
             ocr: text
               ? { status: 'pronto', text, at: Date.now() }
-              : { status: 'falhou', reason: 'Não reconheci nada nesta linha.' },
+              : { status: 'falhou', reason: `Não reconheci nada nesta linha (${diagnostico}).` },
             updatedAt: Date.now(),
           }
         } catch (err) {
+          // O erro do reconhecedor também vai pro aviso da tela: é a única via
+          // que o usuário tem pra contar o que aconteceu no aparelho dele.
+          const motivo = err instanceof Error ? err.message : 'Não consegui transcrever.'
+          ultimoDiagnostico = motivo
           next = {
             ...item,
-            ocr: {
-              status: 'falhou',
-              reason: err instanceof Error ? err.message : 'Não consegui transcrever.',
-            },
+            ocr: { status: 'falhou', reason: motivo },
             updatedAt: Date.now(),
           }
         }
@@ -1192,9 +1211,9 @@ export const useStore = create<AppState>((set, get) => ({
           message:
             lidos > 0
               ? ''
-              : `Não consegui ler nenhuma das ${fila.length} linha(s) desta folha${
-                  status.language ? ` (modelo ${status.language})` : ''
-                }. Segure o dedo sobre a linha pra escrever o texto à mão.`,
+              : `Não consegui ler nenhuma das ${fila.length} linha(s)${
+                  status.language ? ` · modelo ${status.language}` : ''
+                }${ultimoDiagnostico ? ` · ${ultimoDiagnostico}` : ''}. Segure o dedo sobre a linha pra escrever o texto à mão.`,
         },
       })
     } finally {

@@ -1029,7 +1029,10 @@ export function PageCanvas() {
         return
       }
 
-      await commitStroke(points, Date.now())
+      // O instante do INÍCIO do traço, não o do fim: é ele que liga a tinta ao
+      // momento em que foi escrita — e é com ele que o reconhecedor de letra
+      // remonta a ordem dos pontos entre traços.
+      await commitStroke(points, gesture.builder.startedAt)
     } else if (gesture.kind === 'erase') {
       eraserCursorRef.current = null
 

@@ -101,35 +101,136 @@ export function prepareRecognizer(onProgress?: (s: TranscriptionStatus) => void)
   return ready
 }
 
+/** Área onde a linha foi escrita, em px de página. */
+export interface WritingArea {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** O que a tentativa de leitura produziu — inclusive quando não produziu nada. */
+export interface RecognizeResult {
+  text: string
+  /** Números da tentativa, pra explicar na tela por que não saiu texto. */
+  diagnostico: string
+}
+
 /**
  * Transcreve os traços de um campo.
  *
- * `area` é a zona onde se escreveu: passar o tamanho dela melhora bastante o
- * reconhecimento, porque é o que dá escala à letra.
+ * Duas coisas aqui já custaram uma volta de aparelho, e as duas são sobre
+ * SISTEMA DE COORDENADAS:
+ *
+ * 1. Os pontos vão **relativos à área de escrita**, não em coordenadas da
+ *    folha. O reconhecedor compara a letra com a área que recebeu; mandar uma
+ *    linha escrita em y≈1300 dentro de uma área de 246 de altura é descrever
+ *    escrita que cai fora do papel — e ele devolve nada, sem erro nenhum.
+ * 2. Se ainda assim não sair texto, tenta de novo **sem área nenhuma**, deixando
+ *    o reconhecedor se virar com a escala da própria letra. Uma área errada
+ *    atrapalha mais que área nenhuma.
  */
 export async function recognizeStrokes(
   strokes: readonly Stroke[],
-  area: { width: number; height: number },
+  area: WritingArea,
   preContext?: string,
-): Promise<string> {
-  if (!recognizerPossible()) return ''
+): Promise<RecognizeResult> {
+  if (!recognizerPossible()) return { text: '', diagnostico: 'sem reconhecedor' }
 
-  const payload: RecognizePayload = {
-    // O tempo vai absoluto (início do traço + instante do ponto): o
-    // reconhecedor usa a ordem no tempo, e ela precisa valer entre traços, não
-    // só dentro de cada um.
-    strokes: strokes
-      .filter((s) => s.tool !== 'highlighter' && s.points.length > 0)
-      .map((s) => s.points.map((p) => ({ x: p.x, y: p.y, t: Math.round(s.startedAt + p.t) })))
-      .filter((points) => points.length > 0),
-    width: Math.max(1, Math.round(area.width)),
-    height: Math.max(1, Math.round(area.height)),
-    preContext,
+  const uteis = strokes.filter((s) => s.tool !== 'highlighter' && s.points.length > 0)
+  if (uteis.length === 0) return { text: '', diagnostico: 'sem traços de caneta' }
+
+  // O tempo vai absoluto (início do traço + instante do ponto): o reconhecedor
+  // usa a ordem no tempo, e ela precisa valer entre traços, não só dentro de cada um.
+  const naFolha = uteis
+    .map((s) => s.points.map((p) => ({ x: p.x, y: p.y, t: Math.round(s.startedAt + p.t) })))
+    .filter((points) => points.length > 0)
+
+  const caixa = boundingBox(naFolha)
+  const pontos = naFolha.reduce((total, p) => total + p.length, 0)
+
+  /*
+   * Três formas de descrever a MESMA linha, da mais provável pra menos.
+   *
+   * O reconhecedor devolve vazio sem erro quando não gosta do que recebeu, e
+   * não diz o que não gostou — então em vez de adivinhar, tentam-se as três e
+   * fica registrado qual funcionou. Cada tentativa é local e rápida.
+   *
+   *   linha  — a letra sozinha, encostada na origem, numa área do tamanho dela
+   *            (é o formato dos exemplos do próprio ML Kit: a escrita preenche
+   *            a área de escrita)
+   *   sem    — a mesma letra, sem área nenhuma: ele se vira com a escala
+   *   zona   — a faixa da folha como área, que é o que descreve o espaço real
+   */
+  const folga = Math.max(12, caixa.h * 0.4)
+  const tentativas: { nome: string; strokes: typeof naFolha; width: number; height: number }[] = [
+    {
+      nome: 'linha',
+      strokes: mover(naFolha, caixa.minX - folga, caixa.minY - folga),
+      width: Math.round(caixa.w + folga * 2),
+      height: Math.round(caixa.h + folga * 2),
+    },
+    {
+      nome: 'sem área',
+      strokes: mover(naFolha, caixa.minX - folga, caixa.minY - folga),
+      width: 0,
+      height: 0,
+    },
+    {
+      nome: 'zona',
+      strokes: mover(naFolha, area.x, area.y),
+      width: Math.max(1, Math.round(area.width)),
+      height: Math.max(1, Math.round(area.height)),
+    },
+  ]
+
+  const resumo = `${naFolha.length} traço(s), ${pontos} pontos, letra ${Math.round(
+    caixa.w,
+  )}×${Math.round(caixa.h)}`
+
+  for (const tentativa of tentativas) {
+    const resposta = await InkRecognition.recognize({
+      strokes: tentativa.strokes,
+      width: tentativa.width,
+      height: tentativa.height,
+      preContext,
+    })
+    const texto = (resposta.text ?? '').trim()
+    if (texto) return { text: texto, diagnostico: `${resumo} · lido como ${tentativa.nome}` }
   }
-  if (payload.strokes.length === 0) return ''
 
-  const result = await InkRecognition.recognize(payload)
-  return (result.text ?? '').trim()
+  return { text: '', diagnostico: `${resumo} · nada nas 3 tentativas` }
+}
+
+/** Desloca a tinta pra origem da área que vai ser descrita ao reconhecedor. */
+function mover(
+  strokes: { x: number; y: number; t: number }[][],
+  dx: number,
+  dy: number,
+): { x: number; y: number; t: number }[][] {
+  return strokes.map((pontos) => pontos.map((p) => ({ x: p.x - dx, y: p.y - dy, t: p.t })))
+}
+
+function boundingBox(strokes: { x: number; y: number }[][]): {
+  minX: number
+  minY: number
+  w: number
+  h: number
+} {
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const pontos of strokes) {
+    for (const p of pontos) {
+      if (p.x < minX) minX = p.x
+      if (p.y < minY) minY = p.y
+      if (p.x > maxX) maxX = p.x
+      if (p.y > maxY) maxY = p.y
+    }
+  }
+  if (!Number.isFinite(minX)) return { minX: 0, minY: 0, w: 0, h: 0 }
+  return { minX, minY, w: maxX - minX, h: maxY - minY }
 }
 
 /** Esquece o estado de preparo — usado quando o usuário manda tentar de novo. */
