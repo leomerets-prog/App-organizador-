@@ -9,6 +9,7 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import com.google.android.gms.tasks.Task;
 import com.google.mlkit.common.model.DownloadConditions;
 import com.google.mlkit.common.model.RemoteModelManager;
 import com.google.mlkit.vision.digitalink.DigitalInkRecognition;
@@ -19,6 +20,7 @@ import com.google.mlkit.vision.digitalink.DigitalInkRecognizerOptions;
 import com.google.mlkit.vision.digitalink.Ink;
 import com.google.mlkit.vision.digitalink.RecognitionCandidate;
 import com.google.mlkit.vision.digitalink.RecognitionContext;
+import com.google.mlkit.vision.digitalink.RecognitionResult;
 import com.google.mlkit.vision.digitalink.WritingArea;
 
 import org.json.JSONArray;
@@ -241,15 +243,33 @@ public class InkRecognitionPlugin extends Plugin {
         float height = lerNumero(call, "height");
         String preContext = lerTexto(call, "preContext");
 
-        RecognitionContext.Builder contextBuilder = RecognitionContext.builder();
+        /*
+         * O contexto do reconhecedor é tudo ou nada.
+         *
+         * O construtor dele EXIGE todos os campos: deixar `preContext` de fora
+         * faz `build()` estourar com "Missing required properties: preContext"
+         * — antes de a letra ser lida. Era esse o erro que aparecia na tela do
+         * usuário como "não consegui ler", e ele nunca chegava ao ML Kit de
+         * verdade: nenhuma linha foi lida desde o começo por causa disto.
+         *
+         * Então: com área, o contexto vai COMPLETO (com o texto anterior vazio,
+         * que é o normal aqui). Sem área, não se monta contexto nenhum e a
+         * leitura vai pela chamada simples.
+         */
+        Ink ink = inkBuilder.build();
+        Task<RecognitionResult> leitura;
         if (width > 0 && height > 0) {
-            contextBuilder.setWritingArea(new WritingArea(width, height));
-        }
-        if (preContext != null && !preContext.isEmpty()) {
-            contextBuilder.setPreContext(preContext);
+            RecognitionContext context = RecognitionContext
+                    .builder()
+                    .setPreContext(preContext == null ? "" : preContext)
+                    .setWritingArea(new WritingArea(width, height))
+                    .build();
+            leitura = recognizer.recognize(ink, context);
+        } else {
+            leitura = recognizer.recognize(ink);
         }
 
-        recognizer.recognize(inkBuilder.build(), contextBuilder.build())
+        leitura
                 .addOnSuccessListener(recognition -> {
                     List<RecognitionCandidate> candidates = recognition.getCandidates();
                     String texto = candidates.isEmpty() ? "" : candidates.get(0).getText();

@@ -192,23 +192,32 @@ as linhas que falharam).
 Vale como regra pro resto: **todo caminho que pode não acontecer precisa de um
 lugar na tela onde ele conta que não aconteceu.**
 
-### 11. Campo ausente derruba a chamada inteira do plugin
+### 11. O contexto do reconhecedor é tudo ou nada
 
-Mandar `undefined` num campo que o plugin lê faz a ponte do Capacitor recusar a
-chamada com **"Missing required properties: <campo>"** — o erro acontece ANTES
-de o código nativo rodar. Isto segurou a transcrição inteira desde o começo:
-`preContext` ia como `undefined` quando não havia contexto, toda leitura era
-recusada, e na tela isso aparecia como "o reconhecedor não leu nada". Foi
-preciso o erro chegar até a tela do usuário pra que ficasse visível.
+**Isto segurou a transcrição inteira, do primeiro APK até a versão 17.** O erro
+era sempre o mesmo, e chegava na tela como se fosse outra coisa:
 
-Duas defesas, nos dois lados:
+    Missing required properties: preContext
 
-- No app, `RecognizePayload` **não tem campo opcional**: sem valor vai vazio
-  (`''`, `0`), nunca ausente
-- No plugin, cada leitura de argumento passa por `lerTexto`/`lerNumero`, que
-  tratam ausência como vazio em vez de deixar estourar
+Não é a ponte do Capacitor, nem o modelo, nem a letra: é o construtor de
+`RecognitionContext` (ML Kit), que **exige todos os campos**. O código só
+chamava `setPreContext` quando havia texto anterior — e nunca há — então
+`build()` estourava ANTES de o reconhecedor ver a tinta. Nenhuma linha foi lida
+até isso ser corrigido.
 
-**Ao acrescentar um argumento de plugin, acrescente nos dois lados.**
+Hoje: com área de escrita, o contexto vai completo (com `preContext` vazio);
+sem área, não se monta contexto nenhum e usa-se `recognize(ink)` direto.
+
+Duas lições que valem além deste caso:
+
+- **Contrato de execução não aparece na conferência de tipos.** `npm test`
+  compila o plugin contra as sombras, e nenhuma sombra pode impor "preencha
+  todos os campos". Quando existir uma regra dessas, ela fica escrita no
+  comentário da sombra (foi feito em `RecognitionContext`)
+- **Erro de recurso acessório precisa chegar à tela com o texto original.**
+  Enquanto o app dizia "não consegui ler", a investigação foi para escala da
+  letra, área de escrita e idioma do modelo — três rodadas no lado errado. O
+  caso virou quando a mensagem do aparelho apareceu inteira no aviso
 
 ### 12. Transcrição é plugin nativo; o navegador não tem
 
