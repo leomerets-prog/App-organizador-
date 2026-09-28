@@ -264,6 +264,12 @@ palavras na mesma linha depois.
 No navegador não existe nada equivalente que rode offline, então lá a
 transcrição automática não aparece — só a escrita à mão no mesmo editor.
 
+**Como saber o que está acontecendo:** o estado da leitura fica à vista em três
+lugares — uma faixa na folha, um aviso na Central e o botão **Transcrever** na
+barra de ferramentas. Ele diz se o modelo está baixando, se deu erro (e qual) ou
+se nenhuma linha foi reconhecida. Tocar em qualquer um deles manda **ler de
+novo**, inclusive as linhas que já tinham falhado.
+
 Código: `src/ocr/handwriting.ts` (lado web) e
 `android/app/src/main/java/com/leomerets/organizador/InkRecognitionPlugin.java`
 (lado Android).

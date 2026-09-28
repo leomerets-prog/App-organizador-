@@ -152,7 +152,8 @@ export interface AppState {
   setItemText: (id: Id, text: string) => Promise<void>
   /** Manda ler de novo a letra deste campo. */
   retranscribeItem: (id: Id) => Promise<void>
-  transcribePage: () => Promise<void>
+  /** `forcar` refaz o preparo e inclui as linhas que já falharam. */
+  transcribePage: (opts?: { forcar?: boolean }) => Promise<void>
   scheduleTranscription: () => void
 
   stampSelection: (kind: ItemKind) => Promise<void>
@@ -467,6 +468,10 @@ export const useStore = create<AppState>((set, get) => ({
     // Folhas escritas antes desta versão (ou com a identificação desligada)
     // ganham seus campos ao serem abertas.
     get().scheduleFieldSync()
+    // E a leitura da letra também é pedida na abertura: sem isto, linha
+    // escrita antes de o modelo existir ficaria sem texto pra sempre, porque
+    // a transcrição só era agendada quando a identificação mudava alguma coisa.
+    get().scheduleTranscription()
   },
 
   // ─── Criação e remoção ─────────────────────────────────────────────────────
@@ -1083,24 +1088,66 @@ export const useStore = create<AppState>((set, get) => ({
    * com a caneta, e travar a escrita pra transcrever seria trocar o essencial
    * pelo acessório.
    */
-  async transcribePage() {
-    if (!recognizerPossible() || transcribing) return
+  async transcribePage(opts) {
+    const forcar = opts?.forcar === true
+
+    if (!recognizerPossible()) {
+      set({
+        transcription: {
+          state: 'indisponivel',
+          message: 'A leitura automática só roda no aplicativo instalado (APK).',
+        },
+      })
+      return
+    }
+    if (transcribing) return
     const pageId = get().activePageId
     if (!pageId) return
 
     transcribing = true
     try {
+      // "Tentar de novo" tem que tentar de novo de verdade: sem internet na
+      // primeira vez, o preparo falhou e ficaria falhado pra sempre.
+      if (forcar) resetRecognizer()
+
       const status = await prepareRecognizer((partial) => set({ transcription: partial }))
       set({ transcription: status })
       if (status.state !== 'pronto') return
 
-      // Uma cópia da fila: a lista vive muda enquanto se escreve.
-      const pendentes = get().items.filter(
-        (i) => i.pageId === pageId && i.ocr.status === 'pendente' && i.strokeIds.length > 0,
+      // Uma cópia da fila: a lista vive muda enquanto se escreve. No pedido
+      // manual entram também as linhas que já falharam — é o que o usuário
+      // espera de um botão chamado "Transcrever agora".
+      const fila = get().items.filter(
+        (i) =>
+          i.pageId === pageId &&
+          i.strokeIds.length > 0 &&
+          (i.ocr.status === 'pendente' || (forcar && i.ocr.status === 'falhou')),
       )
 
-      for (const item of pendentes) {
+      if (fila.length === 0) {
+        set({
+          transcription: {
+            ...status,
+            message: forcar ? 'Nada novo pra ler nesta folha.' : '',
+          },
+        })
+        return
+      }
+
+      let lidos = 0
+      let feitos = 0
+
+      for (const item of fila) {
         if (get().activePageId !== pageId) return
+
+        feitos++
+        set({
+          transcription: {
+            state: 'lendo',
+            message: `Lendo sua letra… (${feitos} de ${fila.length})`,
+            language: status.language,
+          },
+        })
 
         const strokes = get().strokes.filter((s) => item.strokeIds.includes(s.id))
         if (strokes.length === 0) continue
@@ -1109,6 +1156,7 @@ export const useStore = create<AppState>((set, get) => ({
         let next: Item
         try {
           const text = await recognizeStrokes(strokes, area)
+          if (text) lidos++
           next = {
             ...item,
             title: text,
@@ -1134,6 +1182,21 @@ export const useStore = create<AppState>((set, get) => ({
         await repo.putItem(next)
         set({ items: get().items.map((i) => (i.id === item.id ? next : i)) })
       }
+
+      // O fim tem que dizer o que aconteceu. Ficar em silêncio quando nada foi
+      // reconhecido é o que fez o usuário escrever, esperar e não entender nada.
+      set({
+        transcription: {
+          state: 'pronto',
+          language: status.language,
+          message:
+            lidos > 0
+              ? ''
+              : `Não consegui ler nenhuma das ${fila.length} linha(s) desta folha${
+                  status.language ? ` (modelo ${status.language})` : ''
+                }. Segure o dedo sobre a linha pra escrever o texto à mão.`,
+        },
+      })
     } finally {
       transcribing = false
     }

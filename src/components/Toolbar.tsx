@@ -197,6 +197,8 @@ export function Toolbar() {
         <span className="tool-label">Campos</span>
       </button>
 
+      <TranscriptionButton />
+
       <button className="tool-btn" onClick={toggleTheme}>
         <span className="tool-glyph">{theme === 'dark' ? '☀' : '☾'}</span>
         <span className="tool-label">{theme === 'dark' ? 'Claro' : 'Escuro'}</span>
@@ -218,6 +220,43 @@ export function Toolbar() {
         )}
       </div>
     </aside>
+  )
+}
+
+/**
+ * Botão e estado da leitura da letra.
+ *
+ * Existe porque o recurso falhava calado: o usuário escrevia, nada aparecia, e
+ * não havia em lugar nenhum da tela a informação de que faltava baixar o modelo
+ * — ou de que o aparelho não tem o reconhecedor. Agora o estado fica à vista e
+ * o toque manda ler de novo, que é a primeira coisa que qualquer um tenta.
+ */
+function TranscriptionButton() {
+  const transcription = useStore((s) => s.transcription)
+  const transcribePage = useStore((s) => s.transcribePage)
+
+  const lendo = transcription.state === 'lendo' || transcription.state === 'baixando'
+
+  const glifo =
+    transcription.state === 'erro'
+      ? '!'
+      : transcription.state === 'indisponivel'
+        ? '–'
+        : lendo
+          ? '…'
+          : '✓'
+
+  return (
+    <button
+      className={`tool-btn ${transcription.state === 'erro' ? 'alerta' : ''}`}
+      onClick={() => void transcribePage({ forcar: true })}
+      disabled={lendo}
+      title={transcription.message || 'Ler a letra desta folha agora'}
+    >
+      <span className="tool-glyph">✎T</span>
+      <span className="tool-label">Transcrever</span>
+      <span className="tool-state">{glifo}</span>
+    </button>
   )
 }
 

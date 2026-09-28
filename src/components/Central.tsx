@@ -62,6 +62,8 @@ export function Central({ onClose }: { onClose: () => void }) {
   const toggleItemStatus = useStore((s) => s.toggleItemStatus)
   const setItemStatus = useStore((s) => s.setItemStatus)
   const setItemKind = useStore((s) => s.setItemKind)
+  const transcription = useStore((s) => s.transcription)
+  const transcribePage = useStore((s) => s.transcribePage)
 
   // Recarrega ao abrir e a cada mudança nos itens da página aberta: é por aqui
   // que o que acabou de ser escrito aparece na Central sem recarregar nada.
@@ -142,6 +144,15 @@ export function Central({ onClose }: { onClose: () => void }) {
             {resumo.done > 0 && ` · ${resumo.done} concluído${resumo.done === 1 ? '' : 's'}`}
             {filter.scope === 'pagina' && ' · só esta página'}
           </p>
+
+          {/* O estado da leitura da letra também aparece aqui: é nesta tela que
+              se percebe que falta texto, e é aqui que a explicação tem que estar. */}
+          {transcription.message && (
+            <button className="central-ocr" onClick={() => void transcribePage({ forcar: true })}>
+              {transcription.message}
+              <span>tentar de novo</span>
+            </button>
+          )}
         </div>
 
         <div className="central-tools">

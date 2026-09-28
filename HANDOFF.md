@@ -170,7 +170,21 @@ tarefas de verdade, e a escrita dali caía em outro lugar do painel.
 Hoje `drawZones` desenha uma repetição por folha. **Mexeu num dos dois lados,
 mexa no outro** — e role a página até a segunda folha pra conferir.
 
-### 10. Transcrição é plugin nativo; o navegador não tem
+### 10. Recurso que falha calado é recurso que não existe
+
+O usuário instalou, escreveu, e nenhum texto apareceu. Nada na tela dizia por
+quê: se o modelo ainda não tinha baixado, se o aparelho não tem reconhecedor,
+se a leitura falhou. Tudo o que havia era estado interno.
+
+Hoje o estado da transcrição está em três lugares — faixa na folha, aviso na
+Central e o botão **Transcrever** na barra — sempre com o motivo escrito e um
+toque que manda tentar de novo (`forcar: true` refaz o preparo e reprocessa até
+as linhas que falharam).
+
+Vale como regra pro resto: **todo caminho que pode não acontecer precisa de um
+lugar na tela onde ele conta que não aconteceu.**
+
+### 11. Transcrição é plugin nativo; o navegador não tem
 
 Quem lê a letra é o ML Kit Digital Ink, num plugin Android
 (`InkRecognitionPlugin.java`). Três coisas a saber:
@@ -182,12 +196,16 @@ Quem lê a letra é o ML Kit Digital Ink, num plugin Android
 - Tudo no plugin pega `Throwable`, não `Exception`: aparelho sem o reconhecedor
   devolve `NoClassDefFoundError`/`VerifyError`, que são `Error`. A transcrição é
   acessório; derrubar o caderno por causa dela é inaceitável
+- O idioma **não** é pedido só pelo nome exato: `fromLanguageTag("pt-BR")` pode
+  devolver nulo conforme o catálogo do aparelho, e aí a transcrição morre
+  inteira. `resolveIdentifier()` varre `allModelIdentifiers()` atrás de qualquer
+  português e devolve pro app qual foi escolhido, pra aparecer na tela
 - No navegador não há equivalente offline. A ponte (`src/ocr/handwriting.ts`)
   detecta isso e devolve "indisponível" — o texto escrito à mão continua sendo
   o caminho que funciona em todo lugar, e **nunca é sobrescrito** pela leitura
   automática (é o `ocr.status === 'manual'`)
 
-### 11. Editar zona reclassifica a tinta
+### 12. Editar zona reclassifica a tinta
 
 O traço guarda a zona em que caiu quando foi escrito. Arrastar uma faixa por
 cima de anotação antiga precisa transformar aquilo — a divisão da folha manda, e
@@ -195,7 +213,7 @@ ela acabou de mudar (`reclassifyStrokes`). Pela mesma razão, trocar o
 significado da faixa re-tipa os itens que vieram dela, **exceto** os que o
 usuário tipou à mão no painel (`Item.kindByUser`).
 
-### 12. A identificação mede o vão em alturas de escrita — com piso
+### 13. A identificação mede o vão em alturas de escrita — com piso
 
 O que separa duas colunas na mesma faixa é um vão horizontal medido em alturas
 da escrita. Sem piso, uma linha rasa (letra toda baixa, um traço, um
@@ -207,7 +225,7 @@ Hoje a referência é a maior entre a altura da linha, a altura típica da zona 
 `MIN_WRITING_HEIGHT`. Ao mexer nas medidas de `items/detect.ts`, teste com
 escrita **baixa e miúda**, não só com letra graúda.
 
-### 13. Item automático é reconhecido pela tinta que contém
+### 14. Item automático é reconhecido pela tinta que contém
 
 Enquanto sobrar um traço em comum, o item continua sendo o mesmo — e mantém o
 tipo que o usuário escolheu, o concluído que ele marcou e o arquivado de quando
@@ -216,7 +234,7 @@ posição, ou a recriar itens do zero a cada passada, **cada palavra acrescentad
 à linha apagaria uma decisão do usuário**. `planFieldSync` existe pra isso e
 `tools/fields-test.ts` cerca esse comportamento.
 
-### 14. Itens carimbados precisam sobreviver ao corte
+### 15. Itens carimbados precisam sobreviver ao corte
 
 A borracha é de ponta: corta o traço em pedaços. Um item que apontava para o
 traço original passa a apontar para os pedaços — senão apagar um naco da tinta

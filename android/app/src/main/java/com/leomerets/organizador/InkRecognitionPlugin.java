@@ -50,6 +50,52 @@ public class InkRecognitionPlugin extends Plugin {
 
     private DigitalInkRecognitionModel model;
     private DigitalInkRecognizer recognizer;
+    private String idiomaEscolhido = "";
+
+    /**
+     * Acha o modelo de português na lista do reconhecedor.
+     *
+     * Pedir pelo nome exato ("pt-BR") é o caminho curto, mas ele devolve nulo
+     * quando o catálogo usa outra grafia — e aí a transcrição inteira morre
+     * sem explicação, que foi o que o usuário viu: escreveu, nada apareceu.
+     * Por isso, se o nome exato falhar, a lista de modelos é varrida atrás de
+     * qualquer português; e o idioma escolhido é devolvido pro app, pra que dê
+     * pra ver na tela qual foi.
+     */
+    private DigitalInkRecognitionModelIdentifier resolveIdentifier() {
+        DigitalInkRecognitionModelIdentifier exato = null;
+        try {
+            exato = DigitalInkRecognitionModelIdentifier.fromLanguageTag(LANGUAGE_TAG);
+        } catch (Throwable error) {
+            Log.w(TAG, "organizador: " + LANGUAGE_TAG + " não resolveu direto", error);
+        }
+        if (exato != null) {
+            idiomaEscolhido = LANGUAGE_TAG;
+            return exato;
+        }
+
+        DigitalInkRecognitionModelIdentifier portugues = null;
+        for (DigitalInkRecognitionModelIdentifier candidato :
+                DigitalInkRecognitionModelIdentifier.allModelIdentifiers()) {
+            String tag = candidato.getLanguageTag();
+            if (tag == null) {
+                continue;
+            }
+            if (tag.equalsIgnoreCase(LANGUAGE_TAG)) {
+                idiomaEscolhido = tag;
+                return candidato;
+            }
+            if (portugues == null && tag.toLowerCase().startsWith("pt")) {
+                portugues = candidato;
+            }
+        }
+
+        if (portugues != null) {
+            idiomaEscolhido = portugues.getLanguageTag();
+            Log.i(TAG, "organizador: usando o modelo de escrita " + idiomaEscolhido);
+        }
+        return portugues;
+    }
 
     /**
      * Prepara modelo e reconhecedor uma vez só. Devolve false já tendo recusado
@@ -65,10 +111,9 @@ public class InkRecognitionPlugin extends Plugin {
             return true;
         }
         try {
-            DigitalInkRecognitionModelIdentifier identifier =
-                    DigitalInkRecognitionModelIdentifier.fromLanguageTag(LANGUAGE_TAG);
+            DigitalInkRecognitionModelIdentifier identifier = resolveIdentifier();
             if (identifier == null) {
-                call.reject("O reconhecedor não tem modelo para " + LANGUAGE_TAG);
+                call.reject("O reconhecedor deste aparelho não tem modelo de português.");
                 return false;
             }
             model = DigitalInkRecognitionModel.builder(identifier).build();
@@ -105,6 +150,9 @@ public class InkRecognitionPlugin extends Plugin {
                     JSObject result = new JSObject();
                     result.put("available", true);
                     result.put("downloaded", downloaded.booleanValue());
+                    result.put("language", idiomaEscolhido);
+                    Log.i(TAG, "organizador: modelo " + idiomaEscolhido
+                            + (downloaded.booleanValue() ? " já baixado" : " ainda não baixado"));
                     call.resolve(result);
                 })
                 .addOnFailureListener(error ->
@@ -130,6 +178,8 @@ public class InkRecognitionPlugin extends Plugin {
                 .addOnSuccessListener(nothing -> {
                     JSObject result = new JSObject();
                     result.put("downloaded", true);
+                    result.put("language", idiomaEscolhido);
+                    Log.i(TAG, "organizador: modelo " + idiomaEscolhido + " baixado");
                     call.resolve(result);
                 })
                 .addOnFailureListener(error ->

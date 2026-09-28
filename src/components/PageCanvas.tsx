@@ -140,6 +140,7 @@ export function PageCanvas() {
   const removeZone = useStore((s) => s.removeZone)
   const setItemText = useStore((s) => s.setItemText)
   const retranscribeItem = useStore((s) => s.retranscribeItem)
+  const transcribePage = useStore((s) => s.transcribePage)
 
   const page = pages.find((p) => p.id === activePageId) ?? null
 
@@ -1332,6 +1333,23 @@ export function PageCanvas() {
           <span className="eraser-banner-dot" />
           Borracha ligada — arraste pra apagar
           <strong>2 toques voltam à caneta</strong>
+        </button>
+      )}
+
+      {/* Estado da leitura da letra, na folha.
+          O recurso falhava calado — escrever e não ver nada, sem nenhuma pista
+          de que faltava baixar o modelo. Enquanto houver o que dizer, isto fica
+          à vista; quando tudo está certo, some sozinho. */}
+      {transcription.message && (
+        <button
+          className={`ocr-banner ${transcription.state === 'erro' ? 'erro' : ''}`}
+          onClick={() => void transcribePage({ forcar: true })}
+        >
+          <span className="ocr-banner-dot" />
+          {transcription.message}
+          {transcription.state !== 'lendo' && transcription.state !== 'baixando' && (
+            <strong>tentar de novo</strong>
+          )}
         </button>
       )}
 

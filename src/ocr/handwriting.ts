@@ -26,18 +26,20 @@ export interface RecognizePayload {
 }
 
 interface InkRecognitionPlugin {
-  status(): Promise<{ available: boolean; downloaded: boolean }>
-  prepare(): Promise<{ downloaded: boolean }>
+  status(): Promise<{ available: boolean; downloaded: boolean; language?: string }>
+  prepare(): Promise<{ downloaded: boolean; language?: string }>
   recognize(payload: RecognizePayload): Promise<{ text: string }>
 }
 
 const InkRecognition = registerPlugin<InkRecognitionPlugin>('InkRecognition')
 
-export type TranscriptionState = 'indisponivel' | 'baixando' | 'pronto' | 'erro'
+export type TranscriptionState = 'indisponivel' | 'baixando' | 'lendo' | 'pronto' | 'erro'
 
 export interface TranscriptionStatus {
   state: TranscriptionState
   message: string
+  /** Idioma que o reconhecedor escolheu; aparece na tela pra dar o que conferir. */
+  language?: string
 }
 
 const INDISPONIVEL: TranscriptionStatus = {
@@ -68,22 +70,31 @@ export function prepareRecognizer(onProgress?: (s: TranscriptionStatus) => void)
   ready ??= (async () => {
     try {
       const status = await InkRecognition.status()
+      console.log(
+        `organizador: reconhecedor — disponível=${status.available} baixado=${status.downloaded} idioma=${status.language ?? '?'}`,
+      )
       if (!status.available) return INDISPONIVEL
-      if (status.downloaded) return { state: 'pronto', message: '' } as TranscriptionStatus
+      if (status.downloaded) {
+        return { state: 'pronto', message: '', language: status.language } as TranscriptionStatus
+      }
 
       // O modelo do idioma é baixado uma vez, e só uma. Daí em diante a
       // transcrição acontece no aparelho, sem internet.
       onProgress?.({
         state: 'baixando',
-        message: 'Baixando o modelo de escrita (só desta vez, precisa de internet)…',
+        message: 'Baixando o modelo de escrita — precisa de internet só desta vez…',
+        language: status.language,
       })
-      await InkRecognition.prepare()
-      return { state: 'pronto', message: '' } as TranscriptionStatus
+      const baixado = await InkRecognition.prepare()
+      console.log(`organizador: modelo de escrita baixado (${baixado.language ?? '?'})`)
+      return { state: 'pronto', message: '', language: baixado.language } as TranscriptionStatus
     } catch (err) {
-      return {
-        state: 'erro',
-        message: err instanceof Error ? err.message : 'Não consegui preparar a transcrição.',
-      } as TranscriptionStatus
+      const message = err instanceof Error ? err.message : 'Não consegui preparar a transcrição.'
+      console.warn(`organizador: aviso — transcrição indisponível: ${message}`)
+      // Uma tentativa falha não pode trancar as próximas: sem internet agora,
+      // com internet daqui a pouco, e é pra funcionar sem reinstalar nada.
+      ready = null
+      return { state: 'erro', message } as TranscriptionStatus
     }
   })()
 
