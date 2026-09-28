@@ -10,9 +10,13 @@ quem continuar. Escrito para ser lido inteiro antes do primeiro commit.
 Caderno de trabalho com caneta, para tablet Android (feito para um Lenovo Idea
 Tab). O usuário escreve à mão numa folha dividida em **zonas** que classificam
 o que cai dentro delas: cada linha escrita numa zona com significado vira um
-**item** sozinha (tarefa, pauta, dúvida, pendência…). O que a zona não pegar,
-ele marca com **carimbo** usando o laço. Um **painel com abas** reúne tudo, de
-todos os cadernos, mostrando um recorte da própria letra.
+**item** sozinha (tarefa, pauta, dúvida, pendência…) e é **transcrita ali
+mesmo**, embaixo da própria letra, na folha. As zonas são **editáveis na
+folha**: arrastar, redimensionar, criar, renomear e trocar o significado. O que
+a zona não pegar, ele marca com **carimbo** usando o laço. Um **painel com
+abas** reúne tudo, de todos os cadernos, como resumo — o conteúdo continua na
+página onde foi escrito, que é o pedido explícito do usuário: *"é pra sempre
+ficar lá e não ir saindo e caindo em outra tela"*.
 
 Hierarquia igual OneNote: **Bloco de Anotações → Seção → Página**.
 
@@ -39,7 +43,7 @@ privado do app. Nada sai do aparelho.
 ```bash
 npm install
 npm run dev            # servidor de desenvolvimento
-npm test               # rabisco + borracha + campos (rode sempre)
+npm test               # rabisco + borracha + campos + zonas (rode sempre)
 npm run build:tablet   # regenera tablet/ — COMITAR JUNTO
 npx cap sync android   # leva tablet/ para o projeto Android
 ```
@@ -102,7 +106,40 @@ Não existe exportação. Se a borracha errar e não houver como desfazer, o
 trabalho foi. Por isso existe o passo de desfazer, e por isso o toque parado
 com a borracha **não apaga** (só o arrasto apaga).
 
-### 7. A identificação mede o vão em alturas de escrita — com piso
+### 7. Desenho e classificação das zonas têm que concordar
+
+A divisão em zonas **se repete a cada folha padrão** (1754px) conforme a página
+cresce pra baixo — é assim que `zones/hit.ts` classifica a escrita, com o resto
+da divisão. O desenho, porém, esticava as faixas pela altura inteira da página:
+o que aparecia como "Tarefas" na segunda tela de folha não era a faixa de
+tarefas de verdade, e a escrita dali caía em outro lugar do painel.
+
+Hoje `drawZones` desenha uma repetição por folha. **Mexeu num dos dois lados,
+mexa no outro** — e role a página até a segunda folha pra conferir.
+
+### 8. Transcrição é plugin nativo; o navegador não tem
+
+Quem lê a letra é o ML Kit Digital Ink, num plugin Android
+(`InkRecognitionPlugin.java`). Três coisas a saber:
+
+- `registerPlugin` **antes** do `super.onCreate` no `MainActivity` — depois
+  dele a ponte com a página já foi montada e o plugin não existe pro JavaScript
+- O modelo do idioma é baixado **uma vez** e precisa de internet nessa vez; daí
+  em diante roda offline
+- No navegador não há equivalente offline. A ponte (`src/ocr/handwriting.ts`)
+  detecta isso e devolve "indisponível" — o texto escrito à mão continua sendo
+  o caminho que funciona em todo lugar, e **nunca é sobrescrito** pela leitura
+  automática (é o `ocr.status === 'manual'`)
+
+### 9. Editar zona reclassifica a tinta
+
+O traço guarda a zona em que caiu quando foi escrito. Arrastar uma faixa por
+cima de anotação antiga precisa transformar aquilo — a divisão da folha manda, e
+ela acabou de mudar (`reclassifyStrokes`). Pela mesma razão, trocar o
+significado da faixa re-tipa os itens que vieram dela, **exceto** os que o
+usuário tipou à mão no painel (`Item.kindByUser`).
+
+### 10. A identificação mede o vão em alturas de escrita — com piso
 
 O que separa duas colunas na mesma faixa é um vão horizontal medido em alturas
 da escrita. Sem piso, uma linha rasa (letra toda baixa, um traço, um
@@ -114,7 +151,7 @@ Hoje a referência é a maior entre a altura da linha, a altura típica da zona 
 `MIN_WRITING_HEIGHT`. Ao mexer nas medidas de `items/detect.ts`, teste com
 escrita **baixa e miúda**, não só com letra graúda.
 
-### 8. Item automático é reconhecido pela tinta que contém
+### 11. Item automático é reconhecido pela tinta que contém
 
 Enquanto sobrar um traço em comum, o item continua sendo o mesmo — e mantém o
 tipo que o usuário escolheu, o concluído que ele marcou e o arquivado de quando
@@ -123,7 +160,7 @@ posição, ou a recriar itens do zero a cada passada, **cada palavra acrescentad
 à linha apagaria uma decisão do usuário**. `planFieldSync` existe pra isso e
 `tools/fields-test.ts` cerca esse comportamento.
 
-### 9. Itens carimbados precisam sobreviver ao corte
+### 12. Itens carimbados precisam sobreviver ao corte
 
 A borracha é de ponta: corta o traço em pedaços. Um item que apontava para o
 traço original passa a apontar para os pedaços — senão apagar um naco da tinta
@@ -139,13 +176,14 @@ src/
   domain/      modelo de dados, modelos de folha, medidas e constantes
   ink/         captura da caneta, desenho, gesto do rabisco, zoom, borracha
   items/       identificação dos campos escritos nas zonas
-  zones/       em que zona um ponto caiu
+  ocr/         transcrição da letra (ponte com o plugin Android)
+  zones/       em que zona um ponto caiu, e a edição das faixas
   db/          IndexedDB (versão 2: traços, zonas, itens, áudio, imagens)
   state/       estado e todas as ações que mudam dados; preferências
   update/      verificação de versão
   components/  folha, navegação, barras, painel
   lib/         geometria
-tools/         testes de rabisco, de borracha e de campos
+tools/         testes de rabisco, de borracha, de campos e de zonas
 android/       projeto Capacitor (gerado, mas versionado)
 keystore/      chave de assinatura — não trocar
 ```
@@ -155,8 +193,9 @@ keystore/      chave de assinatura — não trocar
 grava depois. É isso que mantém a escrita fluida.
 
 **O que é puro e testável:** `ink/erase.ts`, `ink/scribble.ts`,
-`ink/viewport.ts`, `items/detect.ts` e `lib/geometry.ts` não sabem nada de
-React nem de banco. Lógica nova de tinta ou de identificação deve nascer ali.
+`ink/viewport.ts`, `items/detect.ts`, `zones/edit.ts` e `lib/geometry.ts` não
+sabem nada de React nem de banco. Lógica nova de tinta, de identificação ou de
+zona deve nascer ali.
 
 **Caminho quente:** o traço em andamento e o estado da janela (zoom/rolagem)
 vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
@@ -178,6 +217,11 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Anotação e folha Livre não geram item | Ali a escrita é a anotação em si; item por linha encheria o painel de lixo e mataria a confiança nele |
 | Identificação só depois que a mão para (800ms) | Rodar no meio da frase criaria e apagaria um item por palavra |
 | "Não era item" arquiva, não apaga | Nenhum caminho novo pode custar tinta do usuário; e o arquivado impede que a identificação recrie o campo |
+| Transcrição aparece NA FOLHA, embaixo da letra | Pedido direto do usuário: o conteúdo não pode migrar pra outra tela. O painel é resumo, não destino |
+| Texto escrito à mão nunca é sobrescrito | Corrigir uma transcrição errada e vê-la voltar ao errado na palavra seguinte destruiria a confiança no recurso |
+| Divisa ⇕ funciona em qualquer ferramenta | "Se a aba ficou pequena, eu expando e continuo escrevendo" — trocar de modo pra isso quebraria o fluxo |
+| Divisa tira de uma pra dar à outra | Crescer sem tirar de ninguém sobreporia faixas, e a mesma linha pertenceria a duas |
+| ML Kit Digital Ink, não OCR de imagem | Ele lê traços com tempo, que é o que o app já guarda; e roda offline depois do primeiro download |
 
 ---
 
@@ -197,34 +241,38 @@ Guardar um token dentro do APK está fora de cogitação.
 galeria dentro da WebView do Capacitor. As permissões estão declaradas no
 `AndroidManifest.xml`, mas a confirmação depende do tablet do usuário.
 
-A identificação de campos foi verificada **no navegador**, com traços
-simulados (linha escrita, palavra acrescentada na mesma linha, arquivar,
-apagar) e pelos casos de `tools/fields-test.ts`. Com letra de gente, num
-tablet, os limites de agrupamento ainda podem precisar de ajuste — eles estão
-todos nomeados no topo de `items/detect.ts`, justamente para isso.
+A identificação de campos e a edição de zonas foram verificadas **no
+navegador**, com traços simulados (linha escrita, palavra acrescentada na mesma
+linha, arquivar, apagar, mover e redimensionar faixa, puxar a divisa ⇕, escrever
+o texto à mão pelo toque longo) e pelos casos de `tools/fields-test.ts` e
+`tools/zones-test.ts`. Com letra de gente, num tablet, os limites de agrupamento
+ainda podem precisar de ajuste — eles estão todos nomeados no topo de
+`items/detect.ts`, justamente para isso.
 
-**OCR não existe.** O campo `Item.ocr` está no modelo, sem implementação. A
-identificação de campos **não lê a letra**: ela usa a zona onde a escrita caiu e
-o agrupamento em linhas. Por isso o item aparece no painel como recorte da
-própria letra, sem título — o título só chega com o OCR.
+**A transcrição não foi vista funcionando.** O plugin Java não compila neste
+ambiente (não há SDK do Android aqui) e não há tablet pra testar: quem prova que
+ele compila é a esteira do GitHub, e quem prova que ele LÊ é o usuário. A
+qualidade do reconhecimento com a letra dele é desconhecida.
 
 **A identificação depende de o usuário escrever dentro das faixas.** Quem
 escreve uma tarefa no meio da zona de anotação não vê nada no painel; para esse
-caso continua existindo o laço. Enquanto as zonas não forem editáveis na folha,
-a única forma de mudar as faixas é escolher outro modelo ao criar a página.
+caso continua existindo o laço.
+
+**A edição de zonas vale só pra página onde foi feita.** Não há como salvar a
+folha ajustada como modelo — é a próxima etapa 2.
 
 ---
 
 ## Próximas etapas
 
 1. **Exportar as anotações** — único caminho de perda real de trabalho
-2. **Transcrição da letra (OCR)** — na fase nativa, ML Kit roda offline e grátis.
-   Com ela, o item identificado ganha título legível em vez de só o recorte
-3. **Zonas editáveis na folha** — arrastar bordas, criar zona à mão. É o passo
-   natural depois da identificação: hoje as faixas só vêm prontas do modelo
-4. **Áudio ligado à tinta** — tocar num traço e ouvir o momento; os instantes
+2. **Salvar a folha ajustada como modelo do usuário** — hoje a edição de zonas
+   vale só pra página onde foi feita
+3. **Áudio ligado à tinta** — tocar num traço e ouvir o momento; os instantes
    já são gravados em cada ponto
-5. **Ícones personalizados** — o usuário cria seus próprios carimbos
+4. **Ícones personalizados** — o usuário cria seus próprios carimbos
+5. ~~Transcrição da letra (OCR)~~ — feita, com ML Kit offline, no APK
+6. ~~Zonas editáveis na folha~~ — feitas
 
 ---
 

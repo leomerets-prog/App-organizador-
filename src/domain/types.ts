@@ -63,7 +63,7 @@ export interface InkPoint {
   t: number
 }
 
-export type ToolKind = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'image'
+export type ToolKind = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'image' | 'zone'
 
 export interface Stroke {
   id: Id
@@ -152,6 +152,13 @@ export interface Item {
   source: ItemSource
   /** Zona de onde o campo saiu; nulo quando foi carimbado fora de qualquer zona. */
   zoneId: Id | null
+  /**
+   * O tipo foi escolhido pelo usuário?
+   *
+   * Ausente quer dizer que ele veio da zona — e então acompanha a zona quando
+   * ela muda de significado. Escolha do usuário não se mexe nunca.
+   */
+  kindByUser?: boolean
   /** Traços que compõem este item. */
   strokeIds: Id[]
   /** Região da página que o item ocupa — usada pro recorte na tela estratificada. */
@@ -164,10 +171,18 @@ export interface Item {
   updatedAt: number
 }
 
+/**
+ * Estado da transcrição.
+ *
+ * `manual` é o texto que o usuário escreveu com o dedo: vale mais que qualquer
+ * leitura automática e nunca é sobrescrito, nem quando a linha ganha palavras
+ * novas depois.
+ */
 export type OcrState =
   | { status: 'pendente' }
   | { status: 'processando' }
   | { status: 'pronto'; text: string; at: number }
+  | { status: 'manual'; text: string; at: number }
   | { status: 'falhou'; reason: string }
 
 // ─── Áudio ───────────────────────────────────────────────────────────────────

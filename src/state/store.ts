@@ -12,8 +12,9 @@ import type {
   Stroke,
   ToolKind,
   Zone,
+  ZoneKind,
 } from '../domain/types'
-import { buildZones } from '../domain/templates'
+import { buildZones, ZONE_ITEM_KIND } from '../domain/templates'
 import { detectFields, planFieldSync } from '../items/detect'
 import type { DetectedField } from '../items/detect'
 import * as repo from '../db/repo'
@@ -27,7 +28,16 @@ import {
   ERASER_MIN,
   ERASER_MAX,
 } from '../domain/constants'
-import { zoneAtPoint } from '../zones/hit'
+import { zoneAtPoint, zoneRectInPage } from '../zones/hit'
+import { SHEET } from '../zones/edit'
+import type { ZoneRectFrac } from '../zones/edit'
+import {
+  prepareRecognizer,
+  recognizeStrokes,
+  recognizerPossible,
+  resetRecognizer,
+} from '../ocr/handwriting'
+import type { TranscriptionStatus } from '../ocr/handwriting'
 import { forgetImage, placeNewImage, readImageFile } from '../ink/images'
 import { eraseAlongSegment } from '../ink/erase'
 import type { Pt } from '../lib/geometry'
@@ -67,6 +77,12 @@ export interface AppState {
   showZones: boolean
   /** Identificar sozinho o que foi escrito dentro das zonas. */
   autoFields: boolean
+  /** Mostrar a transcrição na própria folha, embaixo da letra. */
+  showText: boolean
+  /** Zona em edição, quando a ferramenta de zonas está ativa. */
+  selectedZoneId: Id | null
+  /** Como está a transcrição: disponível, baixando o modelo, pronta ou com erro. */
+  transcription: TranscriptionStatus
   theme: Theme
   /** Aproximação da folha, guardada entre aberturas. */
   zoom: number
@@ -101,6 +117,7 @@ export interface AppState {
   setPenWidth: (width: number) => void
   toggleZones: () => void
   toggleAutoFields: () => void
+  toggleShowText: () => void
   setTheme: (theme: Theme) => void
   toggleTheme: () => void
   setZoom: (zoom: number) => void
@@ -119,6 +136,24 @@ export interface AppState {
   canUndoErase: () => boolean
   setSelection: (ids: Id[]) => void
   clearSelection: () => void
+
+  // Zonas editáveis
+  selectZone: (id: Id | null) => void
+  addZone: (rect: ZoneRectFrac, kind: ZoneKind, label: string) => Promise<void>
+  updateZone: (id: Id, patch: { rect?: ZoneRectFrac; label?: string; kind?: ZoneKind }) => Promise<void>
+  /** Move uma divisa: várias faixas mudam de tamanho de uma vez. */
+  updateZoneRects: (changes: { id: Id; rect: ZoneRectFrac }[]) => Promise<void>
+  removeZone: (id: Id) => Promise<void>
+  /** Reclassifica a tinta da página pelas zonas atuais. Roda ao fim de uma edição. */
+  reclassifyStrokes: () => Promise<void>
+
+  // Transcrição
+  /** Texto escrito à mão pelo usuário; vale mais que a leitura automática. */
+  setItemText: (id: Id, text: string) => Promise<void>
+  /** Manda ler de novo a letra deste campo. */
+  retranscribeItem: (id: Id) => Promise<void>
+  transcribePage: () => Promise<void>
+  scheduleTranscription: () => void
 
   stampSelection: (kind: ItemKind) => Promise<void>
   toggleItemStatus: (id: Id) => Promise<void>
@@ -234,6 +269,34 @@ let fieldSyncTimer: ReturnType<typeof setTimeout> | null = null
 let fieldSyncRunning = false
 let fieldSyncAgain = false
 
+/**
+ * Espera antes de ler a letra. Maior que a da identificação: transcrever é
+ * caro, e ninguém quer o reconhecedor rodando entre duas palavras.
+ */
+const TRANSCRIBE_DELAY = 1500
+
+let transcribeTimer: ReturnType<typeof setTimeout> | null = null
+let transcribing = false
+
+/**
+ * Tamanho da área onde a linha foi escrita.
+ *
+ * O reconhecedor usa isto pra dar escala à letra — sem a área, uma palavra
+ * grande e uma pequena viram o mesmo borrão pra ele. A zona é a medida certa:
+ * é o espaço que o usuário tinha pra escrever ali.
+ */
+function writingArea(state: AppState, item: Item): { width: number; height: number } {
+  const zone = item.zoneId ? state.zones.find((z) => z.id === item.zoneId) : undefined
+  if (zone) {
+    const rect = zoneRectInPage(zone, SHEET)
+    return { width: rect.w, height: rect.h }
+  }
+  return {
+    width: Math.max(1, item.bounds.maxX - item.bounds.minX),
+    height: Math.max(1, item.bounds.maxY - item.bounds.minY),
+  }
+}
+
 /** Um campo identificado vira item novo, sempre em aberto. */
 function itemFromField(pageId: Id, field: DetectedField, now: number): Item {
   return {
@@ -255,6 +318,9 @@ function itemFromField(pageId: Id, field: DetectedField, now: number): Item {
 /**
  * O item cresce junto com a linha, mas só na tinta e no tamanho: tipo, estado e
  * título são decisão do usuário e não se mexem aqui.
+ *
+ * A transcrição volta pra fila quando a linha muda — a letra nova precisa ser
+ * lida. A exceção é o texto escrito à mão pelo usuário, que nunca é refeito.
  */
 function applyField(item: Item, field: DetectedField, now: number): Item {
   return {
@@ -262,7 +328,34 @@ function applyField(item: Item, field: DetectedField, now: number): Item {
     zoneId: field.zoneId,
     strokeIds: [...field.strokeIds],
     bounds: field.bounds,
+    ocr: item.ocr.status === 'manual' ? item.ocr : { status: 'pendente' },
     updatedAt: now,
+  }
+}
+
+/**
+ * A faixa mudou de significado: o que já estava escrito nela muda junto.
+ *
+ * Quem transforma a faixa "Tarefas" em "Dúvidas" está dizendo que aquilo tudo
+ * eram dúvidas — deixar as linhas antigas como tarefa produziria uma faixa com
+ * dois tipos misturados, sem nada na tela explicando por quê. A exceção é o
+ * item cujo tipo o próprio usuário escolheu à mão: esse é palavra dele.
+ */
+async function retypeZoneItems(
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+  zoneId: Id,
+  zoneKind: ZoneKind,
+): Promise<void> {
+  const kind = ZONE_ITEM_KIND[zoneKind]
+  if (!kind) return
+
+  for (const item of get().items) {
+    if (item.source !== 'auto' || item.zoneId !== zoneId) continue
+    if (item.kindByUser || item.kind === kind) continue
+    const updated: Item = { ...item, kind, updatedAt: Date.now() }
+    await repo.putItem(updated)
+    set({ items: get().items.map((i) => (i.id === item.id ? updated : i)) })
   }
 }
 
@@ -284,6 +377,7 @@ function persist(get: () => AppState): void {
     penWidth: s.penWidth,
     showZones: s.showZones,
     autoFields: s.autoFields,
+    showText: s.showText,
     zoom: s.zoom,
     eraserSize: s.eraserSize,
   })
@@ -309,6 +403,9 @@ export const useStore = create<AppState>((set, get) => ({
   penWidth: initialPrefs.penWidth,
   showZones: initialPrefs.showZones,
   autoFields: initialPrefs.autoFields,
+  showText: initialPrefs.showText,
+  selectedZoneId: null,
+  transcription: { state: recognizerPossible() ? 'pronto' : 'indisponivel', message: '' },
   theme: initialPrefs.theme,
   zoom: initialPrefs.zoom,
   eraserSize: initialPrefs.eraserSize,
@@ -354,7 +451,13 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   async selectPage(id) {
-    set({ loadingPage: true, activePageId: id, selection: new Set(), selectedImageId: null })
+    set({
+      loadingPage: true,
+      activePageId: id,
+      selection: new Set(),
+      selectedImageId: null,
+      selectedZoneId: null,
+    })
     lastErase = null
     eraseSession = null
     const content = await repo.loadPageContent(id)
@@ -509,6 +612,11 @@ export const useStore = create<AppState>((set, get) => ({
     set({ autoFields })
     persist(get)
     if (autoFields) get().scheduleFieldSync()
+  },
+
+  toggleShowText() {
+    set({ showText: !get().showText })
+    persist(get)
   },
 
   setTheme(theme) {
@@ -740,7 +848,7 @@ export const useStore = create<AppState>((set, get) => ({
   async setItemKind(id, kind) {
     const item = get().items.find((i) => i.id === id)
     if (!item || item.kind === kind) return
-    const updated: Item = { ...item, kind, updatedAt: Date.now() }
+    const updated: Item = { ...item, kind, kindByUser: true, updatedAt: Date.now() }
     await repo.putItem(updated)
     set({ items: get().items.map((i) => (i.id === id ? updated : i)) })
   },
@@ -824,12 +932,210 @@ export const useStore = create<AppState>((set, get) => ({
       const known = new Set(kept.map((i) => i.id))
 
       set({ items: [...kept, ...created.filter((i) => !known.has(i.id))] })
+      get().scheduleTranscription()
     } finally {
       fieldSyncRunning = false
       if (fieldSyncAgain) {
         fieldSyncAgain = false
         get().scheduleFieldSync()
       }
+    }
+  },
+
+  // ─── Zonas editáveis ───────────────────────────────────────────────────────
+
+  selectZone: (selectedZoneId) => set({ selectedZoneId }),
+
+  async addZone(rect, kind, label) {
+    const pageId = get().activePageId
+    if (!pageId) return
+    const zone: Zone = { id: newId(), pageId, kind, label, rect: { ...rect } }
+    await repo.putZones([zone])
+    set({ zones: [...get().zones, zone], selectedZoneId: zone.id })
+    await get().reclassifyStrokes()
+  },
+
+  async updateZone(id, patch) {
+    const zone = get().zones.find((z) => z.id === id)
+    if (!zone) return
+    const updated: Zone = {
+      ...zone,
+      rect: patch.rect ? { ...patch.rect } : zone.rect,
+      label: patch.label ?? zone.label,
+      kind: patch.kind ?? zone.kind,
+    }
+    set({ zones: get().zones.map((z) => (z.id === id ? updated : z)) })
+    await repo.putZones([updated])
+
+    if (patch.kind && patch.kind !== zone.kind) {
+      await retypeZoneItems(get, set, id, patch.kind)
+    }
+    await get().reclassifyStrokes()
+  },
+
+  /**
+   * Grava várias faixas de uma vez.
+   *
+   * É o que sai de arrastar uma divisa: uma faixa cresce e a outra encolhe, e
+   * as duas precisam chegar juntas ao banco — meia divisa gravada deixaria um
+   * buraco ou uma sobreposição entre elas.
+   */
+  async updateZoneRects(changes) {
+    if (changes.length === 0) return
+    const byId = new Map(changes.map((c) => [c.id, c.rect]))
+    const zones = get().zones.map((z) => {
+      const rect = byId.get(z.id)
+      return rect ? { ...z, rect: { ...rect } } : z
+    })
+    set({ zones })
+    await repo.putZones(zones.filter((z) => byId.has(z.id)))
+    await get().reclassifyStrokes()
+  },
+
+  async removeZone(id) {
+    await repo.deleteZone(id)
+    set({
+      zones: get().zones.filter((z) => z.id !== id),
+      selectedZoneId: get().selectedZoneId === id ? null : get().selectedZoneId,
+    })
+    await get().reclassifyStrokes()
+  },
+
+  /**
+   * Reclassifica a tinta pelas zonas de agora.
+   *
+   * O traço guarda a zona em que caiu quando foi escrito. Se o usuário arrasta
+   * a faixa "Tarefas" por cima de uma anotação antiga, o que ele quer é que
+   * aquilo VIRE tarefa — a divisão da folha manda, e ela acabou de mudar. Sem
+   * isto, a zona nova só valeria pro que fosse escrito depois dela.
+   */
+  async reclassifyStrokes() {
+    const { strokes, zones } = get()
+    const changed: Stroke[] = []
+
+    const next = strokes.map((stroke) => {
+      const center = {
+        x: (stroke.bounds.minX + stroke.bounds.maxX) / 2,
+        y: (stroke.bounds.minY + stroke.bounds.maxY) / 2,
+      }
+      const zoneId = zoneAtPoint(zones, center)?.id ?? null
+      if (zoneId === stroke.zoneId) return stroke
+      const updated = { ...stroke, zoneId }
+      changed.push(updated)
+      return updated
+    })
+
+    if (changed.length > 0) {
+      set({ strokes: next })
+      // Gravação depois da tela: arrastar a borda de uma zona não pode
+      // engasgar esperando o disco.
+      for (const stroke of changed) await repo.putStroke(stroke)
+    }
+    get().scheduleFieldSync()
+  },
+
+  // ─── Transcrição ───────────────────────────────────────────────────────────
+
+  /**
+   * Texto escrito à mão pelo usuário.
+   *
+   * Vira `manual`, e a leitura automática nunca mais mexe nele: quem corrigiu
+   * uma transcrição errada não pode vê-la voltar ao errado na próxima palavra
+   * que escrever na mesma linha.
+   */
+  async setItemText(id, text) {
+    const item = get().items.find((i) => i.id === id)
+    if (!item) return
+    const limpo = text.trim()
+    const updated: Item = {
+      ...item,
+      title: limpo,
+      ocr: limpo ? { status: 'manual', text: limpo, at: Date.now() } : { status: 'pendente' },
+      updatedAt: Date.now(),
+    }
+    await repo.putItem(updated)
+    set({ items: get().items.map((i) => (i.id === id ? updated : i)) })
+  },
+
+  async retranscribeItem(id) {
+    const item = get().items.find((i) => i.id === id)
+    if (!item) return
+    const updated: Item = { ...item, ocr: { status: 'pendente' }, updatedAt: Date.now() }
+    await repo.putItem(updated)
+    set({ items: get().items.map((i) => (i.id === id ? updated : i)) })
+    resetRecognizer()
+    get().scheduleTranscription()
+  },
+
+  scheduleTranscription() {
+    if (!recognizerPossible()) return
+    if (transcribeTimer !== null) clearTimeout(transcribeTimer)
+    transcribeTimer = setTimeout(() => {
+      transcribeTimer = null
+      void get().transcribePage()
+    }, TRANSCRIBE_DELAY)
+  },
+
+  /**
+   * Lê a letra dos campos que ainda não têm texto.
+   *
+   * Um de cada vez, e devagar de propósito: o reconhecedor divide o aparelho
+   * com a caneta, e travar a escrita pra transcrever seria trocar o essencial
+   * pelo acessório.
+   */
+  async transcribePage() {
+    if (!recognizerPossible() || transcribing) return
+    const pageId = get().activePageId
+    if (!pageId) return
+
+    transcribing = true
+    try {
+      const status = await prepareRecognizer((partial) => set({ transcription: partial }))
+      set({ transcription: status })
+      if (status.state !== 'pronto') return
+
+      // Uma cópia da fila: a lista vive muda enquanto se escreve.
+      const pendentes = get().items.filter(
+        (i) => i.pageId === pageId && i.ocr.status === 'pendente' && i.strokeIds.length > 0,
+      )
+
+      for (const item of pendentes) {
+        if (get().activePageId !== pageId) return
+
+        const strokes = get().strokes.filter((s) => item.strokeIds.includes(s.id))
+        if (strokes.length === 0) continue
+
+        const area = writingArea(get(), item)
+        let next: Item
+        try {
+          const text = await recognizeStrokes(strokes, area)
+          next = {
+            ...item,
+            title: text,
+            ocr: text
+              ? { status: 'pronto', text, at: Date.now() }
+              : { status: 'falhou', reason: 'Não reconheci nada nesta linha.' },
+            updatedAt: Date.now(),
+          }
+        } catch (err) {
+          next = {
+            ...item,
+            ocr: {
+              status: 'falhou',
+              reason: err instanceof Error ? err.message : 'Não consegui transcrever.',
+            },
+            updatedAt: Date.now(),
+          }
+        }
+
+        // O item pode ter mudado (ou sumido) enquanto o reconhecedor trabalhava.
+        const atual = get().items.find((i) => i.id === item.id)
+        if (!atual || atual.ocr.status === 'manual') continue
+        await repo.putItem(next)
+        set({ items: get().items.map((i) => (i.id === item.id ? next : i)) })
+      }
+    } finally {
+      transcribing = false
     }
   },
 

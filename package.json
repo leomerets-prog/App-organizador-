@@ -11,10 +11,12 @@
     "typecheck": "tsc -b --noEmit",
     "test:scribble": "esbuild tools/scribble-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/scribble-test.mjs --log-level=error && node node_modules/.cache/scribble-test.mjs",
     "test:erase": "esbuild tools/erase-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/erase-test.mjs --log-level=error && node node_modules/.cache/erase-test.mjs",
-    "test": "npm run test:scribble && npm run test:erase && npm run test:fields",
-    "test:fields": "esbuild tools/fields-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/fields-test.mjs --log-level=error && node node_modules/.cache/fields-test.mjs"
+    "test": "npm run test:scribble && npm run test:erase && npm run test:fields && npm run test:zones",
+    "test:fields": "esbuild tools/fields-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/fields-test.mjs --log-level=error && node node_modules/.cache/fields-test.mjs",
+    "test:zones": "esbuild tools/zones-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/zones-test.mjs --log-level=error && node node_modules/.cache/zones-test.mjs"
   },
   "dependencies": {
+    "@capacitor/core": "^6.2.1",
     "idb": "^8.0.0",
     "perfect-freehand": "^1.2.2",
     "react": "^18.3.1",
@@ -24,7 +26,6 @@
   "devDependencies": {
     "@capacitor/android": "^6.2.1",
     "@capacitor/cli": "^6.2.1",
-    "@capacitor/core": "^6.2.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",

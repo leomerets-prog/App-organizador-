@@ -1,11 +1,12 @@
 # Organizador
 
 Caderno de trabalho com caneta, para tablet. Você escreve à mão numa folha
-dividida em **zonas**, e o app **identifica sozinho** o que você escreveu dentro
-de cada uma: cada linha na faixa "Tarefas" vira uma tarefa, cada linha em
-"Pauta" vira uma pauta. Tudo isso se junta num painel único, separado por abas —
-todas as tarefas, pautas, dúvidas e pendências de todos os cadernos, num lugar
-só. O que a zona não pegar, você carimba à mão com o laço.
+dividida em **zonas**, e o app **identifica e transcreve sozinho** o que você
+escreveu dentro de cada uma: cada linha na faixa "Tarefas" vira uma tarefa, cada
+linha em "Dúvidas" vira uma dúvida — e o texto aparece **ali mesmo, embaixo da
+sua letra**, na própria folha. As faixas são suas: arraste, redimensione, crie
+e renomeie na folha. O painel, com abas, é só o resumo de tudo que foi
+identificado; o conteúdo continua onde você escreveu.
 
 Feito para o Lenovo Idea Tab com caneta, mas roda em qualquer tablet.
 
@@ -20,6 +21,8 @@ Feito para o Lenovo Idea Tab com caneta, mas roda em qualquer tablet.
 - Escrita com caneta sensível à pressão, rolagem infinita para baixo
 - Rejeição de palma: a mão apoiada não risca a folha
 - Zonas nomeadas — o que você escreve dentro de "Dúvidas" já nasce classificado
+- **Zonas editáveis**: arraste a faixa pra mover, os cantos pra redimensionar,
+  renomeie e escolha o que ela significa (ferramenta **Zonas**)
 - Cinco modelos de folha: Reunião, Levantamento, Estudo, Lista de tarefas, Livre
 - Marca-texto, laço e borracha
 
@@ -69,6 +72,21 @@ fora dela para fechar.
 - Tema claro e escuro. Segue o tema do Android na primeira abertura
 - A cor padrão da caneta acompanha o tema: o que você escreveu no escuro
   continua legível no claro
+
+**O texto fica na folha**
+- A transcrição aparece em letra pequena **embaixo da sua escrita**, dentro da
+  própria faixa — não vai pra outra tela
+- **Segure o dedo** sobre uma linha pra escrever ou corrigir o texto dela. O que
+  você escreve à mão nunca é sobrescrito pela leitura automática
+- Botão **Texto** na barra esconde e mostra a transcrição na folha
+- A leitura automática da letra roda **dentro do aplicativo instalado (APK)**;
+  no navegador o texto é escrito à mão
+
+**Faixa apertada, espaço na hora**
+- A bolinha **⇕** na margem direita fica na divisa entre duas faixas
+- Puxe pra baixo ou pra cima e a faixa cresce; funciona **sem trocar de
+  ferramenta**, no meio da escrita
+- A faixa vizinha cede o espaço, então nunca sobra buraco nem sobreposição
 
 **Campos identificados sozinho**
 - Escreva dentro de uma faixa da folha — Pauta, Tarefas, Dúvidas, Pendências,
@@ -130,7 +148,7 @@ contém o app compilado.
 ```bash
 npm install
 npm run dev            # servidor de desenvolvimento
-npm test               # testes do rabisco, da borracha e dos campos
+npm test               # rabisco, borracha, campos e zonas
 npm run build:tablet   # regenera a pasta tablet/ (commitar junto)
 ```
 
@@ -155,6 +173,64 @@ sumir do painel.
 
 A lógica fica em `src/ink/erase.ts`, sem depender de React nem de banco.
 Verificação: `npm run test:erase`.
+
+---
+
+## As faixas da folha
+
+A faixa é a régua: ela diz o que a escrita dentro dela significa. Por isso ela é
+sua pra ajustar.
+
+**A faixa ficou pequena no meio da escrita?** Puxe a bolinha **⇕** na margem
+direita, na divisa entre duas faixas. Ela funciona **em qualquer ferramenta**,
+sem trocar de modo: a faixa de cima cresce, a de baixo dá o espaço, e você
+continua escrevendo. As duas continuam coladas — crescer sem tirar de ninguém
+faria as faixas se sobreporem, e aí a mesma linha pertenceria a duas.
+
+Para mexidas maiores, a ferramenta **Zonas** (▣):
+
+- **Toque numa faixa** para escolhê-la; ela ganha borda cheia e cantos
+- **Arraste o meio** para mover, **os cantos** para redimensionar livremente
+  (aqui a faixa anda por cima das outras; a divisa ⇕ é a que respeita vizinho)
+- **+ Nova faixa** cria uma no meio do que está à vista — arraste-a pro lugar
+- Troque o **nome** e o **significado** (Pauta, Tarefas, Dúvidas, Pendências,
+  Documentos, Tópicos, ou "não vira item")
+- **Excluir** tira a faixa; a tinta escrita nela continua onde está
+
+Duas coisas acontecem quando uma faixa muda:
+
+- **A tinta é reclassificada.** Arrastar "Tarefas" por cima de uma anotação
+  antiga transforma aquilo em tarefa — a divisão da folha manda, e ela acabou de
+  mudar
+- **Os itens seguem o novo significado**, exceto os que você tipou à mão no
+  painel: sua escolha fica
+
+A divisão **se repete a cada folha** conforme a página cresce para baixo, e é
+desenhada assim. Antes ela era esticada pela altura inteira da página enquanto a
+escrita era classificada pela repetição — o que estava desenhado como "Tarefas"
+na segunda tela de folha não era a faixa de tarefas de verdade.
+
+---
+
+## A transcrição
+
+Quem lê a sua letra é o **ML Kit Digital Ink**, dentro do aparelho. Ele recebe
+os **traços** — pontos e tempos —, não uma foto da tela; é exatamente o que o
+app já guarda de cada linha. Depois de baixar o modelo do idioma uma vez (única
+parte que precisa de internet), tudo roda offline e de graça: nenhuma anotação
+sai do tablet.
+
+O texto aparece embaixo da linha, pequeno e apagado: a sua letra é o conteúdo, o
+texto é a legenda dela. Segure o dedo numa linha para corrigir — o que você
+escrever vira "texto seu" e nunca mais é substituído, nem quando você acrescenta
+palavras na mesma linha depois.
+
+No navegador não existe nada equivalente que rode offline, então lá a
+transcrição automática não aparece — só a escrita à mão no mesmo editor.
+
+Código: `src/ocr/handwriting.ts` (lado web) e
+`android/app/src/main/java/com/leomerets/organizador/InkRecognitionPlugin.java`
+(lado Android).
 
 ---
 
@@ -230,13 +306,14 @@ src/
   domain/      modelo de dados, modelos de folha, medidas da página
   ink/         captura da caneta, desenho do traço, gesto do rabisco, zoom
   items/       identificação dos campos escritos nas zonas
-  zones/       em que zona um ponto caiu
+  ocr/         transcrição da letra (ponte com o plugin Android)
+  zones/       em que zona um ponto caiu, e a edição das faixas
   db/          persistência local (IndexedDB)
   state/       estado do app e todas as ações que mudam dados
   audio/       gravação
   components/  a folha, a navegação, as barras, o painel
   lib/         geometria e utilidades
-tools/         testes do gesto do rabisco, da borracha e dos campos
+tools/         testes do rabisco, da borracha, dos campos e das zonas
 ```
 
 Regra da casa: **componente não fala com o banco**. Ele chama uma ação de
@@ -249,15 +326,12 @@ grava no banco em seguida. É isso que mantém a escrita fluida.
 
 1. **Exportar as anotações** para arquivo — hoje elas só existem dentro do
    tablet, e limpar os dados do navegador as apaga
-2. **Transcrição da letra** (OCR) — a peça está desenhada no modelo de dados
-   (`Item.ocr`) mas ainda não ligada. Na fase PWA usa um serviço de visão com
-   internet; quando o app virar Android nativo, passa a usar ML Kit, que roda
-   offline e sem custo.
+2. **Salvar a folha com as faixas ajustadas como modelo seu** — hoje a edição
+   vale só para a página em que foi feita
 3. **Áudio ligado à tinta** — tocar num traço e ouvir o trecho da gravação
    daquele momento. Os dados necessários já estão sendo guardados.
-4. **Zonas editáveis na folha** — arrastar as bordas, criar zona nova à mão.
-   É o passo natural depois da identificação automática: hoje as faixas vêm
-   prontas do modelo de folha.
-5. **Ícones personalizados** — você cria os seus carimbos, com os seus
+4. **Ícones personalizados** — você cria os seus carimbos, com os seus
    significados.
-6. ~~Empacotar como app Android~~ — feito.
+5. ~~Transcrição da letra (OCR)~~ — feito, no APK, com ML Kit offline.
+6. ~~Zonas editáveis na folha~~ — feito.
+7. ~~Empacotar como app Android~~ — feito.

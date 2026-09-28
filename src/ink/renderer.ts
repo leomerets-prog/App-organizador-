@@ -1,5 +1,7 @@
 import type { Item, PageImage, Stroke, Zone } from '../domain/types'
 import { ZONE_COLORS } from '../domain/templates'
+import { SHEET, zoneBoundaries } from '../zones/edit'
+import type { ZoneRectFrac } from '../zones/edit'
 import { highlighterPaint, pathForStroke, strokeToPath } from './stroke'
 import { INK_COLOR, LEGACY_INK_COLOR } from '../domain/constants'
 import type { StrokeStyle } from './stroke'
@@ -47,6 +49,10 @@ export interface RenderInput {
   /** Traços atualmente selecionados pelo laço. */
   selected: Set<string>
   showZones: boolean
+  /** Mostrar a transcrição na folha, embaixo da letra. */
+  showText: boolean
+  /** Edição de zonas em curso: zona escolhida e retângulo sendo desenhado. */
+  zoneEditing: { selectedZoneId: string | null; draft: ZoneRectFrac | null } | null
   theme: Theme
   /** Rótulo do zoom durante a pinça; nulo quando não há pinça em curso. */
   zoomBadge: string | null
@@ -116,12 +122,16 @@ export function render(ctx: CanvasRenderingContext2D, input: RenderInput): void 
   const bottom = vp.scrollY + vp.viewHeight / vp.scale
 
   drawRules(ctx, vp, theme, top, bottom)
-  if (input.showZones) drawZones(ctx, input.zones, vp, theme)
+  if (input.showZones || input.zoneEditing) {
+    drawZones(ctx, input.zones, vp, top, bottom, input.zoneEditing)
+    drawBoundaryHandles(ctx, input.zones, vp, top, bottom)
+  }
   // Imagens ficam sob a tinta: é o que permite anotar por cima de um print.
   drawImages(ctx, input, vp)
   drawStrokes(ctx, input, top, bottom)
   if (input.liveStroke) drawLiveStroke(ctx, input.liveStroke, theme)
   drawItemMarkers(ctx, input.items, vp)
+  if (input.showText) drawItemText(ctx, input.items, vp, theme)
   if (input.lassoPath) drawLasso(ctx, input.lassoPath)
   if (input.eraserCursor) drawEraserCursor(ctx, input.eraserCursor, vp, theme)
 
@@ -225,38 +235,167 @@ function drawRules(
   ctx.stroke()
 }
 
+/**
+ * As zonas, repetidas a cada folha padrão.
+ *
+ * A divisão se repete conforme a página cresce pra baixo — e precisa ser
+ * desenhada assim, porque é assim que a escrita é classificada (`zones/hit.ts`
+ * usa o resto da divisão pela folha). Enquanto isto esticava as faixas pela
+ * altura inteira da página, o que estava desenhado como "Tarefas" na segunda
+ * tela de folha não era a zona de tarefas de verdade.
+ */
 function drawZones(
   ctx: CanvasRenderingContext2D,
   zones: Zone[],
   vp: Viewport,
-  theme: Theme,
+  top: number,
+  bottom: number,
+  editing: RenderInput['zoneEditing'],
 ): void {
-  for (const zone of zones) {
-    if (zone.kind === 'livre' && !zone.label) continue
-    const x = zone.rect.x * vp.pageWidth
-    const y = zone.rect.y * vp.pageHeight
-    const w = zone.rect.w * vp.pageWidth
-    const h = zone.rect.h * vp.pageHeight
-    const color = ZONE_COLORS[zone.kind]
+  const firstSheet = Math.floor(top / SHEET)
+  const lastSheet = Math.floor(bottom / SHEET)
 
-    ctx.save()
-    ctx.strokeStyle = color
-    ctx.globalAlpha = 0.28
-    ctx.lineWidth = 1.5
-    ctx.setLineDash([6, 6])
-    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1)
-    ctx.setLineDash([])
+  for (let sheet = firstSheet; sheet <= lastSheet; sheet++) {
+    const baseY = sheet * SHEET
+    for (const zone of zones) {
+      if (zone.kind === 'livre' && !zone.label && !editing) continue
 
-    if (zone.label) {
-      ctx.globalAlpha = 0.9
-      ctx.fillStyle = color
-      ctx.font = '600 12px ui-sans-serif, system-ui, sans-serif'
-      ctx.textBaseline = 'top'
-      ctx.fillText(zone.label.toUpperCase(), x + 10, y + 8)
+      const x = zone.rect.x * vp.pageWidth
+      const y = baseY + zone.rect.y * SHEET
+      const w = zone.rect.w * vp.pageWidth
+      const h = zone.rect.h * SHEET
+      const color = ZONE_COLORS[zone.kind]
+      const chosen = editing?.selectedZoneId === zone.id
+
+      ctx.save()
+      ctx.strokeStyle = color
+      ctx.globalAlpha = chosen ? 0.95 : 0.28
+      ctx.lineWidth = chosen ? 2.5 : 1.5
+      ctx.setLineDash(chosen ? [] : [6, 6])
+      ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1)
+      ctx.setLineDash([])
+
+      if (chosen) {
+        ctx.globalAlpha = 0.1
+        ctx.fillStyle = color
+        ctx.fillRect(x, y, w, h)
+        ctx.globalAlpha = 1
+        drawZoneHandles(ctx, x, y, w, h, color, vp.scale)
+      }
+
+      if (zone.label) {
+        ctx.globalAlpha = 0.9
+        ctx.fillStyle = color
+        ctx.font = '600 12px ui-sans-serif, system-ui, sans-serif'
+        ctx.textBaseline = 'top'
+        ctx.fillText(zone.label.toUpperCase(), x + 10, y + 8)
+      }
+      ctx.restore()
     }
+  }
+
+  // Retângulo da zona que está sendo criada à mão, no lugar onde o dedo está.
+  if (editing?.draft) {
+    const d = editing.draft
+    const sheet = Math.floor(top / SHEET)
+    ctx.save()
+    ctx.strokeStyle = ZONE_COLORS.anotacao
+    ctx.setLineDash([8, 6])
+    ctx.lineWidth = 2
+    ctx.strokeRect(
+      d.x * vp.pageWidth,
+      sheet * SHEET + d.y * SHEET,
+      d.w * vp.pageWidth,
+      d.h * SHEET,
+    )
     ctx.restore()
   }
-  void theme
+}
+
+/**
+ * Distância da alça de divisa até a borda direita da folha, em px de página.
+ *
+ * Fica na direita porque o carimbo do item mora na margem esquerda — duas
+ * coisas arrastáveis no mesmo lugar seria um alvo disputado.
+ */
+export const BOUNDARY_HANDLE_X = 26
+
+/** Alcance do toque na alça de divisa, em px de página. */
+export function boundaryHandleRadius(scale: number): number {
+  return 20 / Math.max(0.1, scale)
+}
+
+/**
+ * Alças de crescer faixa, na divisa entre duas delas.
+ *
+ * Existem pra quando a faixa fica pequena no meio do trabalho: puxar a divisa
+ * dá espaço à de cima tirando da de baixo, sem trocar de ferramenta e sem
+ * parar de escrever.
+ */
+function drawBoundaryHandles(
+  ctx: CanvasRenderingContext2D,
+  zones: Zone[],
+  vp: Viewport,
+  top: number,
+  bottom: number,
+): void {
+  const boundaries = zoneBoundaries(zones)
+  if (boundaries.length === 0) return
+
+  const x = vp.pageWidth - BOUNDARY_HANDLE_X
+  const r = 13 / Math.max(0.1, vp.scale)
+  const firstSheet = Math.floor(top / SHEET)
+  const lastSheet = Math.floor(bottom / SHEET)
+
+  ctx.save()
+  for (let sheet = firstSheet; sheet <= lastSheet; sheet++) {
+    for (const boundary of boundaries) {
+      const y = sheet * SHEET + boundary.y * SHEET
+      if (y < top || y > bottom) continue
+
+      ctx.globalAlpha = 0.5
+      ctx.beginPath()
+      ctx.arc(x, y, r, 0, Math.PI * 2)
+      ctx.fillStyle = ZONE_COLORS.anotacao
+      ctx.fill()
+
+      ctx.globalAlpha = 0.95
+      ctx.fillStyle = '#ffffff'
+      ctx.font = `${Math.round(15 / Math.max(0.1, vp.scale))}px ui-sans-serif, system-ui, sans-serif`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText('⇕', x, y)
+    }
+  }
+  ctx.restore()
+}
+
+/** Alças de canto da zona escolhida. Tamanho fixo na TELA: dedo não tem zoom. */
+function drawZoneHandles(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  color: string,
+  scale: number,
+): void {
+  const r = 9 / Math.max(0.1, scale)
+  const corners = [
+    [x, y],
+    [x + w, y],
+    [x, y + h],
+    [x + w, y + h],
+  ]
+  ctx.fillStyle = color
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineWidth = 1.5 / Math.max(0.1, scale)
+  for (const [cx, cy] of corners) {
+    ctx.beginPath()
+    ctx.arc(cx, cy, r, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+  }
 }
 
 function drawStrokes(
@@ -493,6 +632,55 @@ function drawItemMarkers(ctx: CanvasRenderingContext2D, items: Item[], vp: Viewp
     ctx.restore()
   }
   void vp
+}
+
+/**
+ * A transcrição, embaixo da própria letra.
+ *
+ * É aqui que o texto FICA — na folha, ao lado do que o usuário escreveu, e não
+ * numa tela à parte. O painel continua existindo como resumo, mas a anotação
+ * transcrita mora no lugar onde ela foi feita.
+ *
+ * Fica pequena e apagada de propósito: a letra do usuário é o conteúdo, o texto
+ * é a legenda dela.
+ */
+function drawItemText(
+  ctx: CanvasRenderingContext2D,
+  items: Item[],
+  vp: Viewport,
+  theme: Theme,
+): void {
+  const top = vp.scrollY
+  const bottom = vp.scrollY + vp.viewHeight / vp.scale
+
+  ctx.save()
+  ctx.textBaseline = 'top'
+  ctx.fillStyle = theme.zoneLabel
+
+  for (const item of items) {
+    if (item.status === 'arquivado' || !item.title) continue
+    if (item.bounds.maxY < top || item.bounds.minY > bottom) continue
+
+    const height = item.bounds.maxY - item.bounds.minY
+    const size = Math.min(22, Math.max(13, height * 0.5))
+    ctx.font = `${size}px ui-sans-serif, system-ui, sans-serif`
+
+    const room = vp.pageWidth - item.bounds.minX - 12
+    ctx.fillText(fitText(ctx, item.title, room), item.bounds.minX, item.bounds.maxY + 4)
+  }
+
+  ctx.restore()
+}
+
+/** Corta o texto com reticências quando ele não cabe na largura disponível. */
+function fitText(ctx: CanvasRenderingContext2D, text: string, room: number): string {
+  if (room <= 0) return ''
+  if (ctx.measureText(text).width <= room) return text
+  let cut = text
+  while (cut.length > 1 && ctx.measureText(`${cut}…`).width > room) {
+    cut = cut.slice(0, -1)
+  }
+  return `${cut}…`
 }
 
 function drawLasso(ctx: CanvasRenderingContext2D, path: Pt[]): void {

@@ -25,6 +25,7 @@ const TOOLS: { kind: ToolKind; glyph: string; label: string }[] = [
   { kind: 'lasso', glyph: '◌', label: 'Laço' },
   { kind: 'eraser', glyph: '⌫', label: 'Borracha' },
   { kind: 'image', glyph: '🖼', label: 'Imagem' },
+  { kind: 'zone', glyph: '▣', label: 'Zonas' },
 ]
 
 const ITEM_KINDS: ItemKind[] = [
@@ -58,6 +59,8 @@ export function Toolbar() {
   const toggleZones = useStore((s) => s.toggleZones)
   const autoFields = useStore((s) => s.autoFields)
   const toggleAutoFields = useStore((s) => s.toggleAutoFields)
+  const showText = useStore((s) => s.showText)
+  const toggleShowText = useStore((s) => s.toggleShowText)
   const theme = useStore((s) => s.theme)
   const toggleTheme = useStore((s) => s.toggleTheme)
   const eraserSize = useStore((s) => s.eraserSize)
@@ -161,7 +164,22 @@ export function Toolbar() {
 
       <button className={`tool-btn ${showZones ? 'active' : ''}`} onClick={toggleZones}>
         <span className="tool-glyph">▦</span>
-        <span className="tool-label">Zonas</span>
+        <span className="tool-label">Ver zonas</span>
+      </button>
+
+      {/* A transcrição na folha, embaixo da letra. Desligar é pra quando a
+          linha de texto atrapalhar a escrita, não pra apagar nada. */}
+      <button
+        className={`tool-btn ${showText ? 'active' : ''}`}
+        onClick={toggleShowText}
+        title={
+          showText
+            ? 'O texto transcrito aparece na folha, embaixo da sua letra'
+            : 'Texto escondido; a transcrição continua guardada'
+        }
+      >
+        <span className="tool-glyph">T</span>
+        <span className="tool-label">Texto</span>
       </button>
 
       {/* O que o app identifica sozinho dentro das zonas. Fica ao lado das
@@ -189,9 +207,13 @@ export function Toolbar() {
           <>
             <strong>2 toques</strong> na folha voltam à caneta
           </>
+        ) : tool === 'zone' ? (
+          <>
+            <strong>arraste</strong> a faixa, os cantos, ou o vazio pra criar
+          </>
         ) : (
           <>
-            <strong>3 voltas</strong> rabiscadas ligam a borracha
+            <strong>segure o dedo</strong> numa linha pra corrigir o texto
           </>
         )}
       </div>

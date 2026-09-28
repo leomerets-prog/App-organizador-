@@ -63,6 +63,14 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
+    /*
+     * Transcrição da letra dentro do aparelho (ML Kit Digital Ink).
+     *
+     * Lê traços, não imagem — que é o que o app guarda. O modelo do idioma é
+     * baixado uma vez, na primeira transcrição, e daí em diante tudo roda
+     * offline: nenhuma anotação sai do tablet.
+     */
+    implementation 'com.google.mlkit:digital-ink-recognition:18.1.0'
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"

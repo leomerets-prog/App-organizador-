@@ -22,8 +22,22 @@ import {
 import type { Layout, ViewState } from '../ink/viewport'
 import { ScribbleToast } from './ScribbleToast'
 import { MIN_IMAGE_SIZE, onImageReady } from '../ink/images'
-import { imageHandleRadius } from '../ink/renderer'
-import type { PageImage } from '../domain/types'
+import { BOUNDARY_HANDLE_X, boundaryHandleRadius, imageHandleRadius } from '../ink/renderer'
+import type { Item, PageImage, Zone, ZoneKind } from '../domain/types'
+import {
+  SHEET,
+  boundaryAt,
+  deltaToFrac,
+  dragBoundary,
+  dragZone,
+  handleAt,
+  pageToFrac,
+  rectFromDrag,
+  zoneAtFrac,
+  zoneBoundaries,
+} from '../zones/edit'
+import type { ZoneBoundary, ZoneHandle, ZoneRectFrac } from '../zones/edit'
+import { ZONE_COLORS } from '../domain/templates'
 
 /**
  * A folha.
@@ -51,12 +65,29 @@ interface PressInfo {
 }
 
 interface Gesture {
-  kind: 'draw' | 'erase' | 'lasso' | 'pan' | 'pinch' | 'moveImage' | 'resizeImage'
+  kind:
+    | 'draw'
+    | 'erase'
+    | 'lasso'
+    | 'pan'
+    | 'pinch'
+    | 'moveImage'
+    | 'resizeImage'
+    | 'zone'
+    | 'boundary'
   pointerId: number
   /** Imagem sendo movida ou redimensionada, e o estado dela ao começar. */
   imageId?: string
   imageStart?: PageImage['rect']
   grabPage?: Pt
+  /** Zona sendo ajustada: qual, por onde, e como ela era ao começar. */
+  zoneId?: string
+  zoneHandle?: ZoneHandle
+  zoneStart?: ZoneRectFrac
+  /** Onde o arrasto começou, em fração da folha — usado pra criar zona nova. */
+  grabFrac?: Pt
+  /** Divisa entre faixas sendo puxada. */
+  boundary?: ZoneBoundary
   builder?: StrokeBuilder
   lasso?: Pt[]
   /** Ponto da tela onde o arrasto começou, e a janela naquele instante. */
@@ -79,6 +110,9 @@ export function PageCanvas() {
   const penColor = useStore((s) => s.penColor)
   const penWidth = useStore((s) => s.penWidth)
   const showZones = useStore((s) => s.showZones)
+  const showText = useStore((s) => s.showText)
+  const selectedZoneId = useStore((s) => s.selectedZoneId)
+  const transcription = useStore((s) => s.transcription)
   const selection = useStore((s) => s.selection)
   const theme = useStore((s) => s.theme)
   const savedZoom = useStore((s) => s.zoom)
@@ -99,6 +133,13 @@ export function PageCanvas() {
   const removeImage = useStore((s) => s.removeImage)
   const selectImage = useStore((s) => s.selectImage)
   const undoErase = useStore((s) => s.undoErase)
+  const selectZone = useStore((s) => s.selectZone)
+  const addZone = useStore((s) => s.addZone)
+  const updateZone = useStore((s) => s.updateZone)
+  const updateZoneRects = useStore((s) => s.updateZoneRects)
+  const removeZone = useStore((s) => s.removeZone)
+  const setItemText = useStore((s) => s.setItemText)
+  const retranscribeItem = useStore((s) => s.retranscribeItem)
 
   const page = pages.find((p) => p.id === activePageId) ?? null
 
@@ -110,6 +151,9 @@ export function PageCanvas() {
   // Confirmação dentro da própria barra: a janela do sistema pode não aparecer
   // dentro do app empacotado, e ali ela fica fora do alcance do polegar.
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmZoneDelete, setConfirmZoneDelete] = useState(false)
+  /** Campo cujo texto está sendo escrito ou corrigido à mão. */
+  const [editingItemId, setEditingItemId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // ─── Estado quente, fora do React ──────────────────────────────────────────
@@ -133,16 +177,25 @@ export function PageCanvas() {
   const lastTapRef = useRef<{ at: number; x: number; y: number } | null>(null)
   /** Início do toque atual, pra saber se foi toque ou arrasto. */
   const pressRef = useRef<PressInfo | null>(null)
-  /** Temporizador do toque longo sobre imagem. */
+  /** Temporizador do toque longo sobre imagem ou campo escrito. */
   const longPressRef = useRef<number | undefined>(undefined)
+  /**
+   * Zona em arrasto, só na memória.
+   *
+   * Gravar a cada quadro do arrasto escreveria no banco dezenas de vezes por
+   * segundo; a gravação acontece uma vez, ao soltar.
+   */
+  const liveZonesRef = useRef<Map<string, ZoneRectFrac> | null>(null)
+  /** Retângulo da zona sendo desenhada à mão. */
+  const zoneDraftRef = useRef<ZoneRectFrac | null>(null)
 
   const stateRef = useRef({
     strokes, zones, items, tool, penColor, penWidth, showZones, selection, theme,
-    images, selectedImageId, eraserSize,
+    images, selectedImageId, eraserSize, showText, selectedZoneId,
   })
   stateRef.current = {
     strokes, zones, items, tool, penColor, penWidth, showZones, selection, theme,
-    images, selectedImageId, eraserSize,
+    images, selectedImageId, eraserSize, showText, selectedZoneId,
   }
 
   layoutRef.current.pageHeight = page?.height ?? layoutRef.current.pageHeight
@@ -151,7 +204,10 @@ export function PageCanvas() {
     dirty.current = true
   }, [])
 
-  useEffect(markDirty, [strokes, zones, items, showZones, selection, theme, images, selectedImageId, markDirty])
+  useEffect(markDirty, [
+    strokes, zones, items, showZones, showText, selection, theme, images,
+    selectedImageId, selectedZoneId, tool, markDirty,
+  ])
 
   // Imagem terminou de decodificar: repinta pra ela aparecer no lugar do vazio.
   useEffect(() => onImageReady(markDirty), [markDirty])
@@ -253,9 +309,18 @@ export function PageCanvas() {
         viewHeight: layout.viewHeight,
       }
 
+      // As zonas em arrasto aparecem no lugar novo antes de serem gravadas.
+      const live = liveZonesRef.current
+      const zones = live
+        ? st.zones.map((z) => {
+            const rect = live.get(z.id)
+            return rect ? { ...z, rect } : z
+          })
+        : st.zones
+
       render(ctx, {
         strokes: st.strokes,
-        zones: st.zones,
+        zones,
         items: st.items,
         viewport,
         liveStroke:
@@ -275,6 +340,11 @@ export function PageCanvas() {
         images: st.images,
         selectedImageId: st.selectedImageId,
         showZones: st.showZones,
+        showText: st.showText,
+        zoneEditing:
+          st.tool === 'zone'
+            ? { selectedZoneId: st.selectedZoneId, draft: zoneDraftRef.current }
+            : null,
         theme: THEMES[st.theme],
         zoomBadge: pinchingRef.current ? formatZoom(viewRef.current.zoom) : null,
         eraserCursor:
@@ -364,6 +434,23 @@ export function PageCanvas() {
   }, [])
 
   /**
+   * Campo escrito sob o ponto.
+   *
+   * A faixa vai um pouco além da tinta e inclui a linha de texto embaixo: é
+   * nela que se toca pra corrigir a transcrição, e ela é fina.
+   */
+  const itemAt = useCallback((pt: Pt): Item | null => {
+    for (const item of stateRef.current.items) {
+      if (item.status === 'arquivado') continue
+      const b = item.bounds
+      if (pt.x < b.minX - 12 || pt.x > b.maxX + 12) continue
+      if (pt.y < b.minY - 10 || pt.y > b.maxY + 34) continue
+      return item
+    }
+    return null
+  }, [])
+
+  /**
    * Segurar o dedo sobre uma imagem abre o ajuste dela.
    *
    * Sem isto, mexer numa imagem já colada dependia de descobrir que existe a
@@ -377,20 +464,27 @@ export function PageCanvas() {
     (pt: Pt) => {
       clearTimeout(longPressRef.current)
       const image = imageAt(pt)
-      if (!image) return
+      // Imagem ganha do campo escrito: ela está por baixo da tinta, e quem
+      // segura o dedo sobre uma foto quer mexer na foto.
+      const item = image ? null : itemAt(pt)
+      if (!image && !item) return
 
       longPressRef.current = window.setTimeout(() => {
         // O arrasto cancela: quem moveu o dedo queria rolar a folha.
         if (gestureRef.current?.kind !== 'pan') return
         gestureRef.current = null
         pressRef.current = null
-        selectImage(image.id)
-        setTool('image')
-        setToolNotice(-Date.now())
+        if (image) {
+          selectImage(image.id)
+          setTool('image')
+          setToolNotice(-Date.now())
+        } else if (item) {
+          setEditingItemId(item.id)
+        }
         dirty.current = true
       }, LONG_PRESS_MS)
     },
-    [imageAt, selectImage, setTool],
+    [imageAt, itemAt, selectImage, setTool],
   )
 
   const cancelLongPress = useCallback(() => {
@@ -453,6 +547,101 @@ export function PageCanvas() {
       if (Math.hypot(pt.x - 18, pt.y - cy) <= reach) return item.id
     }
     return null
+  }, [])
+
+  // ─── Zonas editáveis ───────────────────────────────────────────────────────
+
+  /**
+   * Começa a mexer numa zona.
+   *
+   * Três casos, nesta ordem: alça da zona já escolhida (redimensionar), miolo
+   * de alguma zona (mover) e área livre (desenhar uma zona nova). A alça da
+   * escolhida vem primeiro porque ela fica POR CIMA da borda da vizinha — sem
+   * essa precedência, encostar na divisa entre duas faixas moveria a errada.
+   */
+  const beginZoneGesture = useCallback(
+    (pt: Pt, pointerId: number) => {
+      const st = stateRef.current
+      const scale = computeMetrics(viewRef.current, layoutRef.current).scale
+      const frac = pageToFrac(pt)
+      // Tolerância fixa em px de TELA: o alvo do dedo não encolhe com o zoom.
+      const tol = { x: 16 / scale / PAGE_WIDTH, y: 16 / scale / SHEET }
+
+      const chosen = st.zones.find((z) => z.id === st.selectedZoneId) ?? null
+      let target: Zone | null = null
+      let handle: ZoneHandle | null = null
+
+      if (chosen) {
+        handle = handleAt(chosen.rect, frac, tol)
+        if (handle) target = chosen
+      }
+      if (!target) {
+        const zone = zoneAtFrac(st.zones, frac)
+        if (zone) {
+          target = zone
+          handle = handleAt(zone.rect, frac, tol) ?? 'move'
+        }
+      }
+
+      if (target && handle) {
+        selectZone(target.id)
+        liveZonesRef.current = new Map([[target.id, { ...target.rect }]])
+        gestureRef.current = {
+          kind: 'zone',
+          pointerId,
+          zoneId: target.id,
+          zoneHandle: handle,
+          zoneStart: { ...target.rect },
+          grabPage: pt,
+        }
+      } else {
+        selectZone(null)
+        zoneDraftRef.current = null
+        gestureRef.current = { kind: 'zone', pointerId, grabPage: pt, grabFrac: frac }
+      }
+      dirty.current = true
+    },
+    [selectZone],
+  )
+
+  /**
+   * Cria uma faixa no meio do que está à vista.
+   *
+   * O arrasto em espaço vazio só serve quando SOBRA espaço vazio — e os
+   * modelos de folha cobrem a página inteira, então sem este botão criar uma
+   * faixa nova era impossível sem antes encolher outra. O usuário arrasta ela
+   * pro lugar depois; o que importa é que ela exista e esteja visível.
+   */
+  const addZoneHere = useCallback(() => {
+    const m = computeMetrics(viewRef.current, layoutRef.current)
+    const middleY = m.scrollY + layoutRef.current.viewHeight / m.scale / 2
+    const frac = pageToFrac({ x: 0, y: middleY })
+    const h = 0.12
+    void addZone(
+      { x: 0.06, y: Math.min(1 - h, Math.max(0, frac.y - h / 2)), w: 0.5, h },
+      'anotacao',
+      'Nova faixa',
+    )
+  }, [addZone])
+
+  /**
+   * A alça de divisa sob o ponto.
+   *
+   * Vale em QUALQUER ferramenta, sem trocar de modo: é pra quando a faixa ficou
+   * pequena no meio da escrita e o que se quer é abrir espaço e continuar. O
+   * alvo é a bolinha ⇕ desenhada na margem direita, e só ela — em qualquer
+   * outro lugar o dedo continua rolando a folha e a caneta continua escrevendo.
+   */
+  const hitBoundary = useCallback((pt: Pt): ZoneBoundary | null => {
+    const st = stateRef.current
+    if (!st.showZones && st.tool !== 'zone') return null
+
+    const scale = computeMetrics(viewRef.current, layoutRef.current).scale
+    const reach = boundaryHandleRadius(scale)
+    if (Math.abs(pt.x - (PAGE_WIDTH - BOUNDARY_HANDLE_X)) > reach) return null
+
+    const frac = pageToFrac(pt)
+    return boundaryAt(zoneBoundaries(st.zones), frac.y, reach / SHEET)
   }, [])
 
   // ─── Pinça ─────────────────────────────────────────────────────────────────
@@ -521,6 +710,27 @@ export function PageCanvas() {
         if (gestureRef.current) return
 
         pressRef.current = { at: Date.now(), screen: toScreen(event) }
+
+        // Com a ferramenta de zonas, o dedo ajusta a folha em vez de rolá-la.
+        if (stateRef.current.tool === 'zone') {
+          beginZoneGesture(toPage(event), event.pointerId)
+          return
+        }
+
+        // A alça ⇕ da divisa funciona com o dedo em qualquer ferramenta.
+        const divisaToque = hitBoundary(toPage(event))
+        if (divisaToque) {
+          liveZonesRef.current = null
+          gestureRef.current = {
+            kind: 'boundary',
+            pointerId: event.pointerId,
+            boundary: divisaToque,
+            grabPage: toPage(event),
+          }
+          dirty.current = true
+          return
+        }
+
         gestureRef.current = {
           kind: 'pan',
           pointerId: event.pointerId,
@@ -535,6 +745,12 @@ export function PageCanvas() {
 
       const pt = toPage(event)
       const st = stateRef.current
+
+      if (st.tool === 'zone') {
+        event.currentTarget.setPointerCapture(event.pointerId)
+        beginZoneGesture(pt, event.pointerId)
+        return
+      }
 
       // Ferramenta de imagem: escolher, mover e redimensionar. A caneta só
       // mexe em imagem aqui — nas outras ferramentas ela escreve por cima.
@@ -573,6 +789,22 @@ export function PageCanvas() {
         return
       }
 
+      // Antes do carimbo e antes da escrita: a alça é um alvo pequeno e
+      // explícito, e quem encostou nela queria mexer na faixa.
+      const divisa = hitBoundary(pt)
+      if (divisa) {
+        event.currentTarget.setPointerCapture(event.pointerId)
+        liveZonesRef.current = null
+        gestureRef.current = {
+          kind: 'boundary',
+          pointerId: event.pointerId,
+          boundary: divisa,
+          grabPage: pt,
+        }
+        dirty.current = true
+        return
+      }
+
       const marker = hitItemMarker(pt)
       if (marker) {
         void toggleItemStatus(marker)
@@ -602,6 +834,8 @@ export function PageCanvas() {
       page,
       toPage,
       toScreen,
+      hitBoundary,
+      beginZoneGesture,
       hitItemMarker,
       toggleItemStatus,
       beginPinch,
@@ -652,6 +886,34 @@ export function PageCanvas() {
       }
 
       const pt = toPage(event)
+
+      if (gesture.kind === 'boundary' && gesture.boundary && gesture.grabPage) {
+        const d = deltaToFrac(0, pt.y - gesture.grabPage.y)
+        const changes = dragBoundary(stateRef.current.zones, gesture.boundary, d.dy)
+        liveZonesRef.current = changes.size > 0 ? changes : null
+        dirty.current = true
+        return
+      }
+
+      if (gesture.kind === 'zone' && gesture.grabPage) {
+        // O deslocamento é medido em px de página e só depois vira fração: a
+        // fração dá a volta ao passar de uma folha pra outra, e a diferença
+        // entre 0,99 e 0,01 jogaria a zona pro topo no meio do arrasto.
+        const d = deltaToFrac(pt.x - gesture.grabPage.x, pt.y - gesture.grabPage.y)
+
+        if (gesture.zoneId && gesture.zoneHandle && gesture.zoneStart) {
+          liveZonesRef.current = new Map([
+            [gesture.zoneId, dragZone(gesture.zoneStart, gesture.zoneHandle, d.dx, d.dy)],
+          ])
+        } else if (gesture.grabFrac) {
+          zoneDraftRef.current = rectFromDrag(gesture.grabFrac, {
+            x: gesture.grabFrac.x + d.dx,
+            y: gesture.grabFrac.y + d.dy,
+          })
+        }
+        dirty.current = true
+        return
+      }
 
       if (gesture.kind === 'moveImage' && gesture.imageStart && gesture.grabPage) {
         void updateImageRect(gesture.imageId!, {
@@ -785,10 +1047,37 @@ export function PageCanvas() {
       if (apagados > 0) setErasedCount(apagados)
     } else if (gesture.kind === 'lasso' && gesture.lasso && gesture.lasso.length > 2) {
       setSelection(strokesInsideLasso(stateRef.current.strokes, gesture.lasso))
+    } else if (gesture.kind === 'boundary') {
+      const live = liveZonesRef.current
+      liveZonesRef.current = null
+      if (live && live.size > 0) {
+        await updateZoneRects([...live].map(([id, rect]) => ({ id, rect })))
+      }
+    } else if (gesture.kind === 'zone') {
+      const live = liveZonesRef.current
+      const draft = zoneDraftRef.current
+      liveZonesRef.current = null
+      zoneDraftRef.current = null
+      const rect = gesture.zoneId ? live?.get(gesture.zoneId) : undefined
+
+      if (rect && gesture.zoneId && gesture.zoneStart) {
+        // Toque sem arrasto só escolhe a zona; gravar aqui refaria a
+        // classificação da tinta inteira à toa.
+        if (!sameRect(rect, gesture.zoneStart)) {
+          await updateZone(gesture.zoneId, { rect })
+        }
+      } else if (draft) {
+        // Nasce sem significado: o que ela quer dizer é a próxima escolha do
+        // usuário, na barra — e chutar por ele encheria o painel de surpresa.
+        await addZone(draft, 'anotacao', 'Nova zona')
+      }
     }
 
     dirty.current = true
-  }, [commitStroke, endErase, setSelection, setTool, wasTap, wasDoubleTap])
+  }, [
+    commitStroke, endErase, setSelection, setTool, wasTap, wasDoubleTap,
+    updateZone, updateZoneRects, addZone,
+  ])
 
   const onPointerUp = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -876,6 +1165,8 @@ export function PageCanvas() {
   useEffect(() => {
     applyView({ ...viewRef.current, scrollX: 0, scrollY: 0 })
   }, [activePageId, applyView])
+
+  const editingItem = editingItemId ? (items.find((i) => i.id === editingItemId) ?? null) : null
 
   if (!page) {
     return (
@@ -976,6 +1267,49 @@ export function PageCanvas() {
         </div>
       )}
 
+      {tool === 'zone' && (
+        <ZoneBar
+          zone={zones.find((z) => z.id === selectedZoneId) ?? null}
+          confirming={confirmZoneDelete}
+          onAdd={addZoneHere}
+          onRename={(label) => {
+            if (selectedZoneId) void updateZone(selectedZoneId, { label })
+          }}
+          onKind={(kind) => {
+            if (selectedZoneId) void updateZone(selectedZoneId, { kind })
+          }}
+          onAskDelete={() => setConfirmZoneDelete(true)}
+          onCancelDelete={() => setConfirmZoneDelete(false)}
+          onDelete={() => {
+            if (selectedZoneId) void removeZone(selectedZoneId)
+            setConfirmZoneDelete(false)
+          }}
+          onDone={() => {
+            selectZone(null)
+            setConfirmZoneDelete(false)
+            setTool('pen')
+          }}
+        />
+      )}
+
+      {editingItem && (
+        <TextEditor
+          key={editingItem.id}
+          item={editingItem}
+          aviso={transcription.state === 'pronto' ? '' : transcription.message}
+          onSave={(text) => {
+            void setItemText(editingItem.id, text)
+            setEditingItemId(null)
+          }}
+          onRetranscribe={
+            transcription.state === 'indisponivel'
+              ? undefined
+              : () => void retranscribeItem(editingItem.id)
+          }
+          onClose={() => setEditingItemId(null)}
+        />
+      )}
+
       {imageError && (
         <div className="image-error" role="alert" onClick={() => setImageError(null)}>
           {imageError}
@@ -1008,6 +1342,193 @@ export function PageCanvas() {
           onDone={() => setToolNotice(0)}
         />
       )}
+    </div>
+  )
+}
+
+function sameRect(a: ZoneRectFrac, b: ZoneRectFrac): boolean {
+  return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h
+}
+
+/** O que cada tipo de zona significa, na hora de escolher. */
+const ZONE_KIND_LABEL: Record<ZoneKind, string> = {
+  anotacao: 'Anotação (não vira item)',
+  pautas: 'Pauta',
+  topicos: 'Tópicos',
+  tarefas: 'Tarefas',
+  duvidas: 'Dúvidas',
+  pendencias: 'Pendências',
+  documentos: 'Documentos',
+  livre: 'Livre (não vira item)',
+}
+
+/**
+ * Barra da ferramenta de zonas.
+ *
+ * Mora embaixo, junto do polegar, pelo mesmo motivo da barra de imagem: a
+ * janela do sistema pode não aparecer dentro do app empacotado, e o alto da
+ * tela fica longe da mão que segura o tablet.
+ */
+function ZoneBar({
+  zone,
+  confirming,
+  onAdd,
+  onRename,
+  onKind,
+  onAskDelete,
+  onCancelDelete,
+  onDelete,
+  onDone,
+}: {
+  zone: Zone | null
+  confirming: boolean
+  onAdd: () => void
+  onRename: (label: string) => void
+  onKind: (kind: ZoneKind) => void
+  onAskDelete: () => void
+  onCancelDelete: () => void
+  onDelete: () => void
+  onDone: () => void
+}) {
+  return (
+    <div className="image-bar zone-bar">
+      {!confirming && (
+        <button className="image-add" onClick={onAdd}>
+          + Nova faixa
+        </button>
+      )}
+      {zone ? (
+        confirming ? (
+          <>
+            <span className="image-hint">Excluir a faixa "{zone.label || 'sem nome'}"?</span>
+            <button className="image-delete" onClick={onDelete}>
+              Sim, excluir
+            </button>
+            <button className="image-done" onClick={onCancelDelete}>
+              Cancelar
+            </button>
+          </>
+        ) : (
+          <>
+            <ZoneNameField key={zone.id} value={zone.label} onSave={onRename} />
+            <select
+              className="zone-kind"
+              value={zone.kind}
+              onChange={(e) => onKind(e.target.value as ZoneKind)}
+              style={{ color: ZONE_COLORS[zone.kind] }}
+              aria-label="O que esta faixa significa"
+            >
+              {(Object.keys(ZONE_KIND_LABEL) as ZoneKind[]).map((kind) => (
+                <option key={kind} value={kind}>
+                  {ZONE_KIND_LABEL[kind]}
+                </option>
+              ))}
+            </select>
+            <span className="image-hint">arraste a faixa ou os cantos</span>
+            <button className="image-delete" onClick={onAskDelete}>
+              Excluir
+            </button>
+          </>
+        )
+      ) : (
+        <span className="image-hint">toque numa faixa pra ajustar e mover</span>
+      )}
+      <button className="image-done" onClick={onDone}>
+        Pronto
+      </button>
+    </div>
+  )
+}
+
+/** Nome da faixa. Guardado num rascunho local pra não gravar a cada letra. */
+function ZoneNameField({ value, onSave }: { value: string; onSave: (v: string) => void }) {
+  const [draft, setDraft] = useState(value)
+  return (
+    <input
+      className="zone-name"
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        if (draft.trim() !== value) onSave(draft.trim())
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+      }}
+      placeholder="Nome da faixa"
+      aria-label="Nome da faixa"
+    />
+  )
+}
+
+/**
+ * Editor do texto de um campo, aberto segurando o dedo sobre a linha escrita.
+ *
+ * É o conserto da transcrição errada e a saída pra quando não há transcrição
+ * nenhuma (no navegador, e enquanto o modelo de escrita não foi baixado): o
+ * texto escrito aqui é do usuário e nunca mais é sobrescrito pela leitura
+ * automática.
+ */
+function TextEditor({
+  item,
+  aviso,
+  onSave,
+  onRetranscribe,
+  onClose,
+}: {
+  item: Item
+  aviso: string
+  onSave: (text: string) => void
+  onRetranscribe?: () => void
+  onClose: () => void
+}) {
+  const [draft, setDraft] = useState(item.title)
+
+  const estado =
+    item.ocr.status === 'manual'
+      ? 'texto escrito por você'
+      : item.ocr.status === 'pronto'
+        ? 'lido da sua letra'
+        : item.ocr.status === 'falhou'
+          ? item.ocr.reason
+          : 'ainda não transcrito'
+
+  return (
+    <div className="text-editor" role="dialog" aria-label="Texto deste campo">
+      <textarea
+        className="text-editor-field"
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') onClose()
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault()
+            onSave(draft)
+          }
+        }}
+        placeholder="O que está escrito aqui"
+        rows={2}
+      />
+      <div className="text-editor-row">
+        <span className="text-editor-state">{aviso || estado}</span>
+        {onRetranscribe && (
+          <button
+            className="image-done"
+            onClick={() => {
+              onRetranscribe()
+              onClose()
+            }}
+          >
+            Ler de novo
+          </button>
+        )}
+        <button className="image-done" onClick={onClose}>
+          Fechar
+        </button>
+        <button className="image-add" onClick={() => onSave(draft)}>
+          Salvar
+        </button>
+      </div>
     </div>
   )
 }

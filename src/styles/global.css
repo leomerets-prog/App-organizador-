@@ -1097,6 +1097,82 @@ input {
   padding: 0 6px;
 }
 
+/* ── Zonas editáveis e texto na folha ─────────────────────────────────────── */
+
+.zone-bar {
+  gap: 8px;
+}
+
+.zone-name {
+  height: 36px;
+  width: 150px;
+  padding: 0 10px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.zone-kind {
+  height: 36px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 13px;
+  font-family: inherit;
+  padding: 0 8px;
+  max-width: 190px;
+}
+
+/*
+ * Editor do texto do campo. Ancorado embaixo, como as outras barras: é onde o
+ * polegar alcança com o tablet na mão, e onde o teclado do Android não cobre.
+ */
+.text-editor {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 24px));
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.4);
+  z-index: 6;
+}
+
+.text-editor-field {
+  width: 100%;
+  resize: vertical;
+  padding: 10px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 15px;
+  font-family: inherit;
+  line-height: 1.4;
+}
+
+.text-editor-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.text-editor-state {
+  flex: 1;
+  min-width: 120px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
 /* ── Abas do painel ───────────────────────────────────────────────────────── */
 
 /*
