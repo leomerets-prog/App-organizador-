@@ -100,6 +100,10 @@ if grep -q "organizador: erro" "$LOG"; then
   reprovar "Erro de JavaScript no arranque do app."
 fi
 
+# Foto da tela: prova visual de que a folha pintou, e o primeiro lugar pra
+# olhar quando a verificação reprovar sem dizer o porquê.
+adb exec-out screencap -p > "${LOG%.txt}.png" 2>/dev/null || true
+
 echo "── O que o Android disse ──"
 grep -E "FATAL|AndroidRuntime|Organizador|organizador|Capacitor|chromium: \[ERROR" "$LOG" | tail -60
 echo "───────────────────────────"

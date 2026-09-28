@@ -29,6 +29,19 @@ export default defineConfig({
        * É legado — o APK é o caminho real, e nele nada disso faz falta.
        */
       selfDestroying: true,
+      /*
+       * E nem chega a registrar.
+       *
+       * Medido no log do Android: dentro do APK o registro SEMPRE falhou
+       * ("Failed to register a ServiceWorker ... unknown error"), porque quem
+       * serve os arquivos é a ponte do Capacitor, não um servidor comum. O
+       * registro não fazia nada além de um erro por abertura — e um erro por
+       * abertura é exatamente o que engana quem procura defeito de verdade.
+       *
+       * Quem tiver um service worker de versões antigas é limpo por
+       * `limparCacheAntigo()`, no arranque do app.
+       */
+      injectRegister: false,
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg'],
       // O servidor simples do Termux (python -m http.server) não conhece a

@@ -7,6 +7,7 @@ import { Toolbar } from './components/Toolbar'
 import { AudioBar } from './components/AudioBar'
 import { Central } from './components/Central'
 import { UpdatePanel } from './components/UpdatePanel'
+import { marcarPronto } from './crash'
 
 export default function App() {
   const ready = useStore((s) => s.ready)
@@ -24,7 +25,9 @@ export default function App() {
   // Marca de que a folha chegou à tela. É esta linha que a verificação
   // automática procura no log do Android: sem ela, o app abriu branco.
   useEffect(() => {
-    if (ready) console.log('organizador: pronto')
+    if (!ready) return
+    marcarPronto()
+    console.log('organizador: pronto')
   }, [ready])
 
   if (!ready) {

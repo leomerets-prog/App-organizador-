@@ -16,6 +16,21 @@ import type { ErrorInfo, ReactNode } from 'react'
 
 const ID = 'crash-screen'
 
+/**
+ * A tela já montou?
+ *
+ * Antes disso, qualquer erro é fatal na prática: o usuário fica olhando pra
+ * nada. Depois, uma promessa rejeitada solta (uma gravação que falhou, um
+ * plugin que recusou) é aviso, não motivo pra cobrir o app inteiro com uma
+ * tela de erro. Cobrir o app funcionando seria transformar um problema pequeno
+ * num grande.
+ */
+let montou = false
+
+export function marcarPronto(): void {
+  montou = true
+}
+
 export function showCrash(error: unknown, origem: string): void {
   const mensagem = descrever(error)
 
@@ -49,7 +64,14 @@ export function installCrashScreen(): void {
   window.addEventListener('error', (event) => {
     showCrash(event.error ?? event.message, 'erro na tela')
   })
+
   window.addEventListener('unhandledrejection', (event) => {
+    if (montou) {
+      // App de pé: registra e segue. O marcador é outro de propósito — a
+      // verificação da esteira reprova em "erro", não em "aviso".
+      console.warn(`organizador: aviso (promessa sem tratamento) — ${descrever(event.reason)}`)
+      return
+    }
     showCrash(event.reason, 'promessa sem tratamento')
   })
 }
