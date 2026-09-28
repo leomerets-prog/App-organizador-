@@ -226,11 +226,20 @@ public class InkRecognitionPlugin extends Plugin {
             return;
         }
 
-        // A área de escrita dá escala à letra: sem ela, uma palavra graúda e
-        // uma miúda chegam iguais ao reconhecedor.
-        float width = call.getFloat("width", 0f);
-        float height = call.getFloat("height", 0f);
-        String preContext = call.getString("preContext", "");
+        /*
+         * A área de escrita dá escala à letra: sem ela, uma palavra graúda e
+         * uma miúda chegam iguais ao reconhecedor.
+         *
+         * Cada leitura vem embrulhada porque a ponte do Capacitor recusa a
+         * chamada inteira quando um campo esperado não veio ("Missing required
+         * properties"). Foi isso que segurou a transcrição desde o começo: o
+         * erro acontecia ANTES de o reconhecedor ver a letra, e chegava na tela
+         * como se ele não tivesse conseguido ler. Campo ausente aqui vale como
+         * campo vazio, e a leitura acontece assim mesmo.
+         */
+        float width = lerNumero(call, "width");
+        float height = lerNumero(call, "height");
+        String preContext = lerTexto(call, "preContext");
 
         RecognitionContext.Builder contextBuilder = RecognitionContext.builder();
         if (width > 0 && height > 0) {
@@ -257,6 +266,28 @@ public class InkRecognitionPlugin extends Plugin {
                 })
                 .addOnFailureListener(error ->
                         call.reject("Não consegui ler esta linha: " + error.getMessage()));
+    }
+
+    /** Número que pode não ter vindo: ausente vale zero, e a leitura segue. */
+    private float lerNumero(PluginCall call, String nome) {
+        try {
+            Float valor = call.getFloat(nome);
+            return valor == null ? 0f : valor;
+        } catch (Throwable error) {
+            Log.w(TAG, "organizador: campo " + nome + " não veio; seguindo com zero");
+            return 0f;
+        }
+    }
+
+    /** Texto que pode não ter vindo: ausente vale vazio, e a leitura segue. */
+    private String lerTexto(PluginCall call, String nome) {
+        try {
+            String valor = call.getString(nome, "");
+            return valor == null ? "" : valor;
+        } catch (Throwable error) {
+            Log.w(TAG, "organizador: campo " + nome + " não veio; seguindo com vazio");
+            return "";
+        }
     }
 
     /** Nenhuma falha da transcrição pode virar app fechado: vira recusa e log. */

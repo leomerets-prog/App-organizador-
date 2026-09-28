@@ -192,7 +192,25 @@ as linhas que falharam).
 Vale como regra pro resto: **todo caminho que pode não acontecer precisa de um
 lugar na tela onde ele conta que não aconteceu.**
 
-### 11. Transcrição é plugin nativo; o navegador não tem
+### 11. Campo ausente derruba a chamada inteira do plugin
+
+Mandar `undefined` num campo que o plugin lê faz a ponte do Capacitor recusar a
+chamada com **"Missing required properties: <campo>"** — o erro acontece ANTES
+de o código nativo rodar. Isto segurou a transcrição inteira desde o começo:
+`preContext` ia como `undefined` quando não havia contexto, toda leitura era
+recusada, e na tela isso aparecia como "o reconhecedor não leu nada". Foi
+preciso o erro chegar até a tela do usuário pra que ficasse visível.
+
+Duas defesas, nos dois lados:
+
+- No app, `RecognizePayload` **não tem campo opcional**: sem valor vai vazio
+  (`''`, `0`), nunca ausente
+- No plugin, cada leitura de argumento passa por `lerTexto`/`lerNumero`, que
+  tratam ausência como vazio em vez de deixar estourar
+
+**Ao acrescentar um argumento de plugin, acrescente nos dois lados.**
+
+### 12. Transcrição é plugin nativo; o navegador não tem
 
 Quem lê a letra é o ML Kit Digital Ink, num plugin Android
 (`InkRecognitionPlugin.java`). Três coisas a saber:
@@ -213,7 +231,7 @@ Quem lê a letra é o ML Kit Digital Ink, num plugin Android
   o caminho que funciona em todo lugar, e **nunca é sobrescrito** pela leitura
   automática (é o `ocr.status === 'manual'`)
 
-### 12. Editar zona reclassifica a tinta
+### 13. Editar zona reclassifica a tinta
 
 O traço guarda a zona em que caiu quando foi escrito. Arrastar uma faixa por
 cima de anotação antiga precisa transformar aquilo — a divisão da folha manda, e
@@ -221,7 +239,7 @@ ela acabou de mudar (`reclassifyStrokes`). Pela mesma razão, trocar o
 significado da faixa re-tipa os itens que vieram dela, **exceto** os que o
 usuário tipou à mão no painel (`Item.kindByUser`).
 
-### 13. A identificação mede o vão em alturas de escrita — com piso
+### 14. A identificação mede o vão em alturas de escrita — com piso
 
 O que separa duas colunas na mesma faixa é um vão horizontal medido em alturas
 da escrita. Sem piso, uma linha rasa (letra toda baixa, um traço, um
@@ -233,7 +251,7 @@ Hoje a referência é a maior entre a altura da linha, a altura típica da zona 
 `MIN_WRITING_HEIGHT`. Ao mexer nas medidas de `items/detect.ts`, teste com
 escrita **baixa e miúda**, não só com letra graúda.
 
-### 14. Item automático é reconhecido pela tinta que contém
+### 15. Item automático é reconhecido pela tinta que contém
 
 Enquanto sobrar um traço em comum, o item continua sendo o mesmo — e mantém o
 tipo que o usuário escolheu, o concluído que ele marcou e o arquivado de quando
@@ -242,7 +260,7 @@ posição, ou a recriar itens do zero a cada passada, **cada palavra acrescentad
 à linha apagaria uma decisão do usuário**. `planFieldSync` existe pra isso e
 `tools/fields-test.ts` cerca esse comportamento.
 
-### 15. Itens carimbados precisam sobreviver ao corte
+### 16. Itens carimbados precisam sobreviver ao corte
 
 A borracha é de ponta: corta o traço em pedaços. Um item que apontava para o
 traço original passa a apontar para os pedaços — senão apagar um naco da tinta

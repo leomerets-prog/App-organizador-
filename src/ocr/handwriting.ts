@@ -15,14 +15,23 @@ import type { Stroke } from '../domain/types'
  * mão pelo usuário, que é o caminho que funciona em todo lugar.
  */
 
+/**
+ * O que vai pro plugin.
+ *
+ * **Nenhum campo é opcional, de propósito.** Mandar `undefined` faz a ponte do
+ * Capacitor recusar a chamada inteira com "Missing required properties" — e o
+ * app via isso como "o reconhecedor não leu nada", quando na verdade a leitura
+ * nunca chegou a acontecer. Foi o que segurou a transcrição desde o começo.
+ * Campo sem valor vai como vazio (`''` ou `0`), nunca ausente.
+ */
 export interface RecognizePayload {
   /** Um traço por lista de pontos; `t` em ms, crescente. */
   strokes: { x: number; y: number; t: number }[][]
-  /** Tamanho da área onde se escreveu, nas mesmas unidades dos pontos. */
+  /** Tamanho da área onde se escreveu, nas mesmas unidades dos pontos. 0 = sem área. */
   width: number
   height: number
-  /** Texto que vem antes, quando houver: ajuda o reconhecedor a decidir. */
-  preContext?: string
+  /** Texto que vem antes; vazio quando não houver, nunca ausente. */
+  preContext: string
 }
 
 interface InkRecognitionPlugin {
@@ -193,7 +202,8 @@ export async function recognizeStrokes(
       strokes: tentativa.strokes,
       width: tentativa.width,
       height: tentativa.height,
-      preContext,
+      // Sempre uma string: ver o comentário de `RecognizePayload`.
+      preContext: preContext ?? '',
     })
     const texto = (resposta.text ?? '').trim()
     if (texto) return { text: texto, diagnostico: `${resumo} · lido como ${tentativa.nome}` }
