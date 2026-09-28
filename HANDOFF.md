@@ -140,17 +140,24 @@ worker velho. Hoje `visibleSheets()` (em `zones/edit.ts`, testado) limita a
 
 ### 8. Service worker não entra no APK
 
-Dentro do app os arquivos já estão no aparelho: o cache do service worker não
-acrescenta nada e ainda guarda a tela inteira. Depois de instalar a atualização,
-ele continuava servindo a versão antiga — medido: o app abria com o código velho
-na primeira abertura e só trocava na segunda.
+Duas medições, as duas guardadas aqui porque a segunda corrige a leitura da
+primeira:
 
-Hoje o `vite.config.ts` usa `selfDestroying: true`: quem tinha um service worker
-registrado recebe um que se apaga e limpa os caches, e ninguém mais registra um.
-O `main.tsx` ainda varre registros e caches na abertura, por garantia.
+- **No navegador**, o service worker segurava a atualização: depois de trocar os
+  arquivos, a primeira abertura ainda rodava o código VELHO; só a segunda trazia
+  o novo.
+- **Dentro do APK**, ele nunca chegou a existir. O log do Android mostra
+  `Failed to register a ServiceWorker ... unknown error` em toda abertura,
+  porque quem serve os arquivos é a ponte do Capacitor, não um servidor comum.
+  Ou seja: ele nunca serviu versão velha no app — produzia só um erro por
+  abertura, que é o tipo de ruído que engana quem procura defeito de verdade.
 
-**Não volte a ligar o service worker** sem resolver o que acontece com quem
-atualiza.
+Hoje: `selfDestroying: true` (quem tinha um recebe um que se apaga) e
+`injectRegister: false` (ninguém mais tenta registrar). `limparCacheAntigo()`,
+no `main.tsx`, varre registros e caches na abertura.
+
+**Não volte a ligar o service worker** — nem para o caminho por navegador — sem
+resolver antes o que acontece com quem atualiza.
 
 ### 9. Desenho e classificação das zonas têm que concordar
 
@@ -277,6 +284,7 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | A esteira abre o app antes de publicar | Compilar não prova que abre. A versão 8 saiu verde e fechava no tablet; cada volta dessas custa uma instalação do usuário |
 | A verificação instala a versão publicada e a nova POR CIMA | Instalação limpa não reproduz o que quebra em quem atualiza: banco antigo e service worker já registrado |
 | Erro de JavaScript vira tela legível | Tela branca não dá ao usuário nem o que contar pra quem vai consertar |
+| Promessa rejeitada com o app já de pé é AVISO, não tela de erro | Cobrir um app que está funcionando por causa de uma falha de fundo transforma um problema pequeno num grande. Antes de montar, o mesmo erro é fatal na prática e vira tela |
 
 ---
 
