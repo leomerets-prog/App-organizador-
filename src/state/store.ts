@@ -176,6 +176,8 @@ export interface AppState {
   addRecording: (rec: Recording, blob: Blob) => Promise<void>
   removeRecording: (id: Id) => Promise<void>
   setActiveRecording: (id: Id | null) => void
+  /** Guarda onde a escuta parou, pra retomar dali na próxima vez. */
+  setRecordingPosition: (id: Id, positionMs: number) => Promise<void>
 
   addImage: (file: File | Blob, visible: { x: number; y: number; w: number; h: number }) => Promise<void>
   updateImageRect: (id: Id, rect: PageImage['rect']) => Promise<void>
@@ -1274,6 +1276,14 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setActiveRecording: (activeRecordingId) => set({ activeRecordingId }),
+
+  async setRecordingPosition(id, positionMs) {
+    const rec = get().recordings.find((r) => r.id === id)
+    if (!rec) return
+    const atualizado = { ...rec, positionMs }
+    set({ recordings: get().recordings.map((r) => (r.id === id ? atualizado : r)) })
+    await repo.updateRecording(atualizado)
+  },
 
   // ─── Imagens ───────────────────────────────────────────────────────────────
 

@@ -42,6 +42,20 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <!--
+      Salvar a gravação na pasta Downloads.
+
+      Do Android 10 em diante isso NÃO precisa de permissão nenhuma: o app
+      escreve pelo MediaStore, que só deixa mexer no que ele mesmo criou. Por
+      isso a permissão para em 28 — pedi-la nos aparelhos novos seria pedir
+      acesso ao armazenamento inteiro para um botão de salvar um arquivo.
+      Onde ela não valer, o plugin cai na pasta do próprio app e diz isso na
+      tela, em vez de falhar.
+    -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
+    <!--
       A internet fica declarada porque a WebView do Capacitor a exige pra
       carregar a si mesma. O app não busca nada na rede: a folha, as anotações
       e as imagens vivem todas dentro do aparelho.

@@ -26,6 +26,13 @@ public class MainActivity extends BridgeActivity {
         } catch (Throwable error) {
             Log.e(TAG, "organizador: transcrição indisponível neste aparelho", error);
         }
+        // Em try separado de propósito: se um dos dois acessórios faltar no
+        // aparelho, o outro continua existindo.
+        try {
+            registerPlugin(FileSaverPlugin.class);
+        } catch (Throwable error) {
+            Log.e(TAG, "organizador: salvar arquivo indisponível neste aparelho", error);
+        }
         super.onCreate(savedInstanceState);
     }
 }

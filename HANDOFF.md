@@ -71,7 +71,7 @@ por outro.
 ```bash
 npm install
 npm run dev            # servidor de desenvolvimento
-npm test               # rabisco + borracha + campos + zonas + Central (rode sempre)
+npm test               # rabisco + borracha + campos + zonas + Central + áudio (rode sempre)
 npm run build:tablet   # regenera tablet/ — COMITAR JUNTO
 npx cap sync android   # leva tablet/ para o projeto Android
 ```
@@ -297,7 +297,60 @@ número de cima) foi resolvido separando as contas, não voltando a ignorar:
 Ao criar um tipo novo de registro, decida as duas coisas junto: **ele conta como
 trabalho em aberto? ele merece um símbolo na margem?**
 
-### 18. Prazo é dia do calendário, no fuso de casa
+### 18. O áudio gravado pelo navegador não sabe quanto dura
+
+`MediaRecorder` escreve o arquivo em fluxo e nunca volta ao começo pra anotar a
+duração no cabeçalho. O elemento `<audio>` então informa `duration = Infinity`
+— e tudo que depende disso morre em silêncio: a barra de posição fica parada em
+zero, o tempo na tela vira `Infinity` ou `NaN`, e o navegador recusa pular pro
+meio. Nada disso dá erro; simplesmente não anda.
+
+Duas defesas, as duas necessárias:
+
+- **A medida certa está no app.** `Recording.durationMs` vem do cronômetro da
+  gravação, marcado pelo relógio. `reliableDuration()` usa a do elemento só
+  quando ela é finita e positiva, e cai pra essa
+- **`destravarDuracao()`** (em `AudioBar.tsx`) manda o áudio pra um ponto
+  absurdamente à frente. O navegador percorre o arquivo pra descobrir que
+  aquilo não existe e, no caminho, aprende o tamanho de verdade. Tem prazo de 2
+  segundos: barra travada é ruim, ficar esperando sem tocar nada é pior
+
+A posição trunca (`formatPosition`) e a duração arredonda (`formatLength`), de
+propósito: o cronômetro (6,0s) e a medida do arquivo (5,9s) nunca batem no
+décimo, e truncando os dois o total pulava de `0:06` pra `0:05` no instante em
+que se apertava tocar.
+
+### 19. Arquivo grande não atravessa a ponte de uma vez
+
+A ponte do Capacitor carrega texto. Uma gravação de uma hora vira dezenas de
+megabytes de base64 — mandar isso numa chamada só é o caminho conhecido pra
+derrubar a WebView por falta de memória, e derrubar a WebView aqui significa
+derrubar o caderno.
+
+Por isso `FileSaverPlugin` é `abrir` → `escrever` (em pedaços de 192 KB) →
+`fechar`. Enquanto não fecha, o arquivo fica marcado como **pendente** no
+Android e nenhum outro app o enxerga pela metade; se algo falhar no meio,
+`cancelar` apaga o pedaço já escrito. Arquivo pela metade é pior que nenhum:
+parece salvo e não toca.
+
+Vale pra qualquer coisa que venha depois (exportar as anotações, por exemplo):
+**se o tamanho depende do que o usuário produziu, não cabe numa chamada só.**
+
+### 20. Salvar arquivo no Android: a pasta certa mudou de regra
+
+Do Android 10 em diante não se escreve mais em pasta pública por caminho: é o
+**MediaStore** que abre o arquivo, e aí não é preciso permissão nenhuma — o app
+só mexe no que ele mesmo criou. Pedir `WRITE_EXTERNAL_STORAGE` num aparelho
+novo seria pedir acesso ao armazenamento inteiro por causa de um botão de
+salvar; por isso a permissão no manifesto tem `maxSdkVersion="28"`.
+
+`FileSaverPlugin.criar()` tenta três caminhos, nessa ordem, e o app **sempre
+diz na tela qual deles pegou**: MediaStore → pasta Downloads direta (Android
+antigo) → pasta do próprio app. A última some se o app for desinstalado, e é
+por isso que ela é a última — mas devolver "não deu" e deixar o usuário sem
+cópia nenhuma seria pior.
+
+### 21. Prazo é dia do calendário, no fuso de casa
 
 `new Date('2026-09-30')` é lido como **UTC** e, no Brasil, volta como dia 29. Um
 prazo que anda um dia pra trás sozinho destrói a confiança na lista inteira — e
@@ -318,6 +371,7 @@ src/
   ink/         captura da caneta, desenho, gesto do rabisco, zoom, borracha
   items/       identificação dos campos (detect) e a lógica da Central —
                filtro, busca, resumo, ordem e faixas de prazo (central)
+  audio/       gravação, contas do tocador (playback) e salvar pra fora (export)
   ocr/         transcrição da letra (ponte com o plugin Android)
   zones/       em que zona um ponto caiu, e a edição das faixas
   db/          IndexedDB (versão 2: traços, zonas, itens, áudio, imagens)
@@ -325,7 +379,7 @@ src/
   update/      verificação de versão
   components/  folha, navegação, barras, painel
   lib/         geometria
-tools/         testes de rabisco, borracha, campos, zonas, Central e o
+tools/         testes de rabisco, borracha, campos, zonas, Central, áudio e o
                roteiro que abre o app num Android de verdade
 android/       projeto Capacitor (gerado, mas versionado)
 keystore/      chave de assinatura — não trocar
@@ -336,8 +390,8 @@ keystore/      chave de assinatura — não trocar
 grava depois. É isso que mantém a escrita fluida.
 
 **O que é puro e testável:** `ink/erase.ts`, `ink/scribble.ts`,
-`ink/viewport.ts`, `items/detect.ts`, `items/central.ts`, `zones/edit.ts` e
-`lib/geometry.ts` não sabem nada de React nem de banco. Lógica nova de tinta, de
+`ink/viewport.ts`, `items/detect.ts`, `items/central.ts`, `audio/playback.ts`,
+`zones/edit.ts` e `lib/geometry.ts` não sabem nada de React nem de banco. Lógica nova de tinta, de
 identificação, de zona ou de filtro deve nascer ali.
 
 **Caminho quente:** o traço em andamento e o estado da janela (zoom/rolagem)
@@ -363,6 +417,12 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Ficha é terceira coluna deitado, tela cheia em pé | Passar de um registro ao outro sem perder o lugar na lista; em pé não cabe coluna nenhuma |
 | Tocar de novo na prioridade marcada tira a prioridade | Sem isso, escolher errado vira um estado do qual não se sai |
 | A ordem da lista nunca empata solto | Sem prazo (ou sem prioridade) vai pro fim, e o desempate final é sempre o mais recente. Lista que dança a cada abertura não dá pra confiar |
+| Campo novo em registro já existente nasce OPCIONAL | `positionMs`, `dueAt`, `priority` entraram assim: `DB_VERSION` não sobe, nenhuma migração roda e o que o usuário já tinha continua exatamente como estava. Migração é o lugar onde se perde o caderno de alguém |
+| A posição da escuta vive no BANCO, não na tela | Uma conversa de uma hora se ouve em pedaços, ao longo de dias. Guardar só em memória perderia a posição ao trocar de página, que é justamente quando ela importa |
+| Parado no fim, ▶ recomeça do zero | "Continuar de onde parou" a 200ms do fim é não tocar nada; quem aperta ▶ ali quer ouvir de novo |
+| A posição também é gravada de 5 em 5 segundos | Se o app fechar sozinho no meio da escuta, a posição não volta pro começo |
+| O áudio salvo vai pra pasta Downloads | É onde o gerenciador de arquivos vê, o backup do Android pega e outro app consegue abrir pra mandar adiante — dentro do app, o arquivo morre com o app |
+| O app sempre diz ONDE salvou | São três caminhos possíveis conforme a versão do Android, e um deles (a pasta do app) some na desinstalação. "Salvo" sem lugar não dá ao usuário como conferir |
 | Identificação só depois que a mão para (800ms) | Rodar no meio da frase criaria e apagaria um item por palavra |
 | "Não era item" arquiva, não apaga | Nenhum caminho novo pode custar tinta do usuário; e o arquivado impede que a identificação recrie o campo |
 | A Central é o destino do que foi escrito | Pedido direto do usuário: uma tela tipo CRM com visão geral, dúvidas e ações. A folha é onde se escreve; a Central é onde se trabalha |
@@ -381,8 +441,15 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 
 ## Limites conhecidos
 
-**Não há exportação.** As anotações só existem dentro do app. Desinstalar apaga
-tudo. É o item 1 da lista de próximas etapas por esse motivo.
+**Só o áudio tem saída.** O botão **Salvar** de cada gravação escreve o arquivo
+na pasta Downloads do tablet, fora do aplicativo. A tinta, o texto transcrito e
+os itens continuam só dentro do app: desinstalar apaga tudo isso. É o item 1 da
+lista de próximas etapas por esse motivo.
+
+**Salvar no Android não foi visto funcionando.** O caminho do navegador (o
+download comum) foi verificado; o `FileSaverPlugin` compila contra as sombras e
+é montado pela esteira, mas quem prova que ele escreve na pasta Downloads do
+aparelho é o usuário. A esteira só abre o app — ela não toca em botão nenhum.
 
 **A verificação de atualização não funciona automaticamente.** O repositório é
 privado e a API do GitHub responde 404 para quem não está autenticado. O app
@@ -430,11 +497,13 @@ pra transcrição importar.
 
 ## Próximas etapas
 
-1. **Exportar as anotações** — único caminho de perda real de trabalho
+1. **Exportar as anotações** — o áudio já sai (botão Salvar); a tinta, o texto e
+   os itens continuam sem saída nenhuma, e é aí que a perda seria real
 2. **Salvar a folha ajustada como modelo do usuário** — hoje a edição de zonas
    vale só pra página onde foi feita
 3. **Áudio ligado à tinta** — tocar num traço e ouvir o momento; os instantes
-   já são gravados em cada ponto
+   já são gravados em cada ponto, e agora o tocador já sabe pular pra uma
+   posição qualquer (`seekTarget`), que era a peça que faltava
 4. **Ícones personalizados** — o usuário cria seus próprios carimbos
 5. ~~Transcrição da letra (OCR)~~ — feita, com ML Kit offline, no APK
 6. ~~Zonas editáveis na folha~~ — feitas

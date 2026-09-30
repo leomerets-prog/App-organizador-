@@ -219,6 +219,14 @@ export interface Recording {
   anchor: { x: number; y: number }
   /** Rótulo opcional dado pelo usuário. */
   label: string
+  /**
+   * Onde a escuta parou, em ms.
+   *
+   * Guardado no banco, e não só na tela: uma conversa de uma hora se ouve em
+   * pedaços, ao longo de dias. Opcional — gravação antiga simplesmente não tem,
+   * e começa do zero como sempre começou.
+   */
+  positionMs?: number
 }
 
 /** O blob de áudio vive numa store separada pra não pesar as consultas de metadados. */
