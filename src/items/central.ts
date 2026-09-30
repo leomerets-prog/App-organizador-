@@ -1,4 +1,4 @@
-import type { Id, Item, ItemKind } from '../domain/types'
+import type { Id, Item, ItemKind, Priority } from '../domain/types'
 
 /**
  * A Central: o que aparece na tela que reúne tudo que foi escrito.
@@ -93,9 +93,13 @@ export function selectItems(
 }
 
 export interface CentralSummary {
-  /** Em aberto: nem concluído nem arquivado. */
+  /** Em aberto: nem concluído, nem arquivado, nem anotação. */
   open: number
   done: number
+  /** Anotações vivas: são registro, não trabalho — contam à parte. */
+  notas: number
+  /** Em aberto com prazo vencido ou pra hoje. */
+  correndo: number
   byKind: Record<ItemKind, number>
   byNotebook: { id: Id; name: string; open: number }[]
   /** Quantos ainda estão sem texto — é o que falta transcrever ou escrever. */
@@ -110,6 +114,7 @@ const KINDS: ItemKind[] = [
   'topico',
   'documento',
   'importante',
+  'nota',
 ]
 
 /**
@@ -117,10 +122,15 @@ const KINDS: ItemKind[] = [
  *
  * Conta só o que está vivo (nem concluído, nem arquivado): a pergunta que a
  * tela responde de relance é "o que falta", não "o que já passou".
+ *
+ * Anotação não entra no "em aberto": ela é registro, não trabalho. Misturar as
+ * duas contas faria o número de cima crescer a cada linha escrita na folha e
+ * parar de significar qualquer coisa.
  */
 export function summarize(
   items: readonly Item[],
   origins: ReadonlyMap<Id, Origin>,
+  hoje = Date.now(),
 ): CentralSummary {
   const byKind = {} as Record<ItemKind, number>
   for (const kind of KINDS) byKind[kind] = 0
@@ -128,7 +138,10 @@ export function summarize(
   const porCaderno = new Map<Id, { id: Id; name: string; open: number }>()
   let open = 0
   let done = 0
+  let notas = 0
+  let correndo = 0
   let semTexto = 0
+  const fimDeHoje = fimDoDia(hoje)
 
   for (const item of items) {
     if (item.status === 'arquivado') continue
@@ -137,9 +150,16 @@ export function summarize(
       continue
     }
 
-    open++
     byKind[item.kind]++
     if (!item.title) semTexto++
+
+    if (item.kind === 'nota') {
+      notas++
+      continue
+    }
+
+    open++
+    if (item.dueAt != null && item.dueAt <= fimDeHoje) correndo++
 
     const origin = origins.get(item.pageId)
     if (!origin) continue
@@ -155,8 +175,104 @@ export function summarize(
   return {
     open,
     done,
+    notas,
+    correndo,
     byKind,
     byNotebook: [...porCaderno.values()].sort((a, b) => b.open - a.open),
     semTexto,
   }
+}
+
+// ─── Ordem e faixas de prazo ─────────────────────────────────────────────────
+
+/** Por onde a lista é ordenada. */
+export type SortKey = 'prazo' | 'prioridade' | 'recentes'
+
+const PESO_PRIORIDADE: Record<Priority, number> = { alta: 0, media: 1, baixa: 2 }
+
+/** Sem prioridade vai depois de quem tem; sem prazo, idem. */
+function pesoPrioridade(item: Item): number {
+  return item.priority ? PESO_PRIORIDADE[item.priority] : 3
+}
+
+export function fimDoDia(instante: number): number {
+  const d = new Date(instante)
+  d.setHours(23, 59, 59, 999)
+  return d.getTime()
+}
+
+export function inicioDoDia(instante: number): number {
+  const d = new Date(instante)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+
+/**
+ * Ordena a lista.
+ *
+ * O empate nunca fica solto: quem não tem prazo (ou prioridade) vai pro fim, e
+ * o desempate final é sempre o mais recente primeiro. Sem isso a lista dança a
+ * cada abertura, e uma lista que dança não dá pra confiar.
+ */
+export function sortItems(items: readonly Item[], key: SortKey): Item[] {
+  const fora = [...items]
+  if (key === 'prazo') {
+    return fora.sort(
+      (a, b) =>
+        (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity) ||
+        pesoPrioridade(a) - pesoPrioridade(b) ||
+        b.createdAt - a.createdAt,
+    )
+  }
+  if (key === 'prioridade') {
+    return fora.sort(
+      (a, b) =>
+        pesoPrioridade(a) - pesoPrioridade(b) ||
+        (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity) ||
+        b.createdAt - a.createdAt,
+    )
+  }
+  return fora.sort((a, b) => b.createdAt - a.createdAt)
+}
+
+export type DueBucket = 'atrasado' | 'hoje' | 'amanha' | 'semana' | 'depois' | 'semPrazo'
+
+export const DUE_BUCKET_TITLE: Record<DueBucket, string> = {
+  atrasado: 'Atrasadas',
+  hoje: 'Hoje',
+  amanha: 'Amanhã',
+  semana: 'Próximos 7 dias',
+  depois: 'Mais pra frente',
+  semPrazo: 'Sem prazo',
+}
+
+const DIA = 24 * 60 * 60 * 1000
+
+/** Em que faixa de prazo o item cai, visto de `hoje`. */
+export function dueBucket(item: Item, hoje = Date.now()): DueBucket {
+  if (item.dueAt == null) return 'semPrazo'
+  const fimHoje = fimDoDia(hoje)
+  if (item.dueAt < inicioDoDia(hoje)) return 'atrasado'
+  if (item.dueAt <= fimHoje) return 'hoje'
+  if (item.dueAt <= fimHoje + DIA) return 'amanha'
+  if (item.dueAt <= fimHoje + 7 * DIA) return 'semana'
+  return 'depois'
+}
+
+/** A lista repartida por prazo, na ordem em que se olha. */
+export function groupByDue(
+  items: readonly Item[],
+  hoje = Date.now(),
+): { bucket: DueBucket; items: Item[] }[] {
+  const ordem: DueBucket[] = ['atrasado', 'hoje', 'amanha', 'semana', 'depois', 'semPrazo']
+  const mapa = new Map<DueBucket, Item[]>()
+  for (const item of items) {
+    const faixa = dueBucket(item, hoje)
+    const lista = mapa.get(faixa) ?? []
+    lista.push(item)
+    mapa.set(faixa, lista)
+  }
+  return ordem
+    .map((bucket) => ({ bucket, items: mapa.get(bucket) ?? [] }))
+    .filter((g) => g.items.length > 0)
 }

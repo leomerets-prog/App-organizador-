@@ -67,8 +67,8 @@ export interface DetectOptions {
 /**
  * Os campos escritos na folha, em ordem de leitura (de cima pra baixo).
  *
- * Só olha zonas que significam alguma coisa: o corpo da anotação e a folha
- * livre não geram campo nenhum, de propósito (ver `ZONE_ITEM_KIND`).
+ * Toda zona gera campo: no corpo da anotação e na folha livre a linha vira
+ * `nota` (ver `ZONE_ITEM_KIND`) — que tem texto e ficha, mas não é trabalho.
  */
 export function detectFields(
   strokes: readonly Stroke[],
@@ -84,7 +84,7 @@ export function detectFields(
   for (const stroke of strokes) {
     if (ignore.has(stroke.id)) continue
     const zone = resolveZone(stroke, zoneById, zones, pageHeight)
-    if (!zone || !ZONE_ITEM_KIND[zone.kind]) continue
+    if (!zone) continue
     const list = byZone.get(zone.id)
     if (list) list.push(stroke)
     else byZone.set(zone.id, [stroke])
@@ -94,7 +94,7 @@ export function detectFields(
 
   for (const [zoneId, group] of byZone) {
     const zone = zoneById.get(zoneId)!
-    const kind = ZONE_ITEM_KIND[zone.kind]!
+    const kind = ZONE_ITEM_KIND[zone.kind]
 
     const lines = clusterLines(group)
     const typical = typicalHeight(lines)

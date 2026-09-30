@@ -9,17 +9,20 @@ quem continuar. Escrito para ser lido inteiro antes do primeiro commit.
 
 Caderno de trabalho com caneta, para tablet Android (feito para um Lenovo Idea
 Tab). O usuário escreve à mão numa folha dividida em **zonas** que classificam
-o que cai dentro delas: cada linha escrita numa zona com significado vira um
-**item** sozinha (tarefa, pauta, dúvida, pendência…) e é **transcrita**. As
-zonas são **editáveis na folha**: arrastar, redimensionar, criar, renomear e
-trocar o significado. O que a zona não pegar, ele marca com **carimbo** usando o
-laço.
+o que cai dentro delas: **toda** linha escrita vira um **registro** sozinha
+(tarefa, pauta, dúvida, pendência… e `nota` no corpo da folha) e é
+**transcrita**. As zonas são **editáveis na folha**: arrastar, redimensionar,
+criar, renomear e trocar o significado. O que a zona não pegar, ele marca com
+**carimbo** usando o laço.
 
 O destino de tudo isso é a **Central**: *"como se fosse um CRM profissional
 onde eu vejo minha central, dúvidas, ações etc"*, nas palavras dele. Trilho de
-módulos, visão geral, busca no texto, filtro por caderno, e as ações de cada
-item. O texto também fica na folha, embaixo da letra — os dois lugares mostram
-o MESMO item, e marcar concluído num risca no outro.
+módulos, visão geral, busca no texto, filtro por caderno, e — pedido depois —
+uma **ficha por registro**, onde se põe prazo, prioridade, com quem e uma
+observação, com a lista se organizando sozinha por isso: *"assim eu consigo me
+organizar sem precisar voltar nas anotações"*. O texto também fica na folha,
+embaixo da letra — os dois lugares mostram o MESMO registro, e marcar concluído
+num risca no outro.
 
 Hierarquia igual OneNote: **Bloco de Anotações → Seção → Página**.
 
@@ -276,6 +279,35 @@ traço original passa a apontar para os pedaços — senão apagar um naco da ti
 de uma tarefa a faria sumir do painel. A linhagem sobrevive a cortes sucessivos
 (ver `reconcileItems` em `state/store.ts`).
 
+### 17. Toda zona vira registro — e `nota` é registro que não é trabalho
+
+Até a versão 17, Anotação e folha Livre **não geravam item**: quem escrevesse
+ali não via texto nenhum na Central nem embaixo da própria letra, porque só
+linha virada item é transcrita. O usuário pediu o contrário em uma frase —
+*"transcreve tudo, inclusive a anotação"*.
+
+Hoje `ZONE_ITEM_KIND` cobre **todas** as zonas, e o corpo da folha produz itens
+de tipo `nota`. O risco original (encher o painel de lixo e matar a confiança no
+número de cima) foi resolvido separando as contas, não voltando a ignorar:
+
+- `nota` **não entra** no `open` do resumo — sai em `notas`, contado à parte
+- `drawItemMarkers` **não** desenha carimbo na margem pra `nota`: a folha
+  ficaria listrada de símbolo em cada linha de anotação
+
+Ao criar um tipo novo de registro, decida as duas coisas junto: **ele conta como
+trabalho em aberto? ele merece um símbolo na margem?**
+
+### 18. Prazo é dia do calendário, no fuso de casa
+
+`new Date('2026-09-30')` é lido como **UTC** e, no Brasil, volta como dia 29. Um
+prazo que anda um dia pra trás sozinho destrói a confiança na lista inteira — e
+é o tipo de defeito que só aparece à tarde, no aparelho do usuário.
+
+Por isso a conversão do campo de data é feita a dedo, campo a campo, em
+`components/ItemPanel.tsx` (`paraCampo`/`doCampo`), e as faixas de prazo usam
+`inicioDoDia`/`fimDoDia` (em `items/central.ts`), nunca comparação de instantes
+crus. **Não troque nada disso por `toISOString()` nem por `Date.parse`.**
+
 ---
 
 ## Mapa do código
@@ -284,7 +316,8 @@ de uma tarefa a faria sumir do painel. A linhagem sobrevive a cortes sucessivos
 src/
   domain/      modelo de dados, modelos de folha, medidas e constantes
   ink/         captura da caneta, desenho, gesto do rabisco, zoom, borracha
-  items/       identificação dos campos (detect) e o filtro da Central (central)
+  items/       identificação dos campos (detect) e a lógica da Central —
+               filtro, busca, resumo, ordem e faixas de prazo (central)
   ocr/         transcrição da letra (ponte com o plugin Android)
   zones/       em que zona um ponto caiu, e a edição das faixas
   db/          IndexedDB (versão 2: traços, zonas, itens, áudio, imagens)
@@ -324,7 +357,12 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Cor padrão da caneta é símbolo, não valor | Anotação escrita no escuro continua legível no claro |
 | Zoom em módulo isolado | Zoom toca em tudo que envolve posição |
 | Uma linha escrita = um campo | Numa faixa de tarefas se escreve uma por linha; juntar linhas faria uma tarefa gigante que não dá pra concluir em separado |
-| Anotação e folha Livre não geram item | Ali a escrita é a anotação em si; item por linha encheria o painel de lixo e mataria a confiança nele |
+| ~~Anotação e folha Livre não geram item~~ → **toda zona gera registro** | Pedido direto: *"transcreve tudo, inclusive a anotação"*. O medo antigo (encher o painel) virou separação de contas: `nota` não entra no "em aberto" e não ganha carimbo na margem |
+| A ficha é onde entra o que a letra não disse | Prazo, prioridade, com quem e observação não se escrevem à mão numa faixa; e é por eles que a lista se organiza sozinha — *"sem precisar voltar nas anotações"* |
+| Clicar na linha abre a FICHA, não a folha | Voltar à folha continua existindo, num botão dentro da ficha. Era o contrário antes, e obrigava a sair da Central pra ver um registro |
+| Ficha é terceira coluna deitado, tela cheia em pé | Passar de um registro ao outro sem perder o lugar na lista; em pé não cabe coluna nenhuma |
+| Tocar de novo na prioridade marcada tira a prioridade | Sem isso, escolher errado vira um estado do qual não se sai |
+| A ordem da lista nunca empata solto | Sem prazo (ou sem prioridade) vai pro fim, e o desempate final é sempre o mais recente. Lista que dança a cada abertura não dá pra confiar |
 | Identificação só depois que a mão para (800ms) | Rodar no meio da frase criaria e apagaria um item por palavra |
 | "Não era item" arquiva, não apaga | Nenhum caminho novo pode custar tinta do usuário; e o arquivado impede que a identificação recrie o campo |
 | A Central é o destino do que foi escrito | Pedido direto do usuário: uma tela tipo CRM com visão geral, dúvidas e ações. A folha é onde se escreve; a Central é onde se trabalha |
@@ -371,8 +409,15 @@ ele compila é a esteira do GitHub, e quem prova que ele LÊ é o usuário. A
 qualidade do reconhecimento com a letra dele é desconhecida.
 
 **A identificação depende de o usuário escrever dentro das faixas.** Quem
-escreve uma tarefa no meio da zona de anotação não vê nada no painel; para esse
-caso continua existindo o laço.
+escreve uma tarefa no meio da zona de anotação vê ela chegar como `nota` — e aí
+troca o tipo na ficha (a escolha à mão sobrevive às passadas seguintes, pelo
+`kindByUser`). Para cercar várias linhas de uma vez continua existindo o laço.
+
+**A ficha foi verificada no navegador, não no tablet.** Abrir pela linha, gravar
+prazo pelos atalhos e pelo calendário, prioridade, com quem e observação, os
+selos aparecendo na linha, as faixas de prazo e a tela estreita — tudo em
+`chromium`, com traços simulados. Com a caneta e o teclado do tablet, o campo de
+data do Android pode se comportar diferente do `input[type=date]` do navegador.
 
 **A edição de zonas vale só pra página onde foi feita.** Não há como salvar a
 folha ajustada como modelo — é a próxima etapa 2.
@@ -393,6 +438,9 @@ pra transcrição importar.
 4. **Ícones personalizados** — o usuário cria seus próprios carimbos
 5. ~~Transcrição da letra (OCR)~~ — feita, com ML Kit offline, no APK
 6. ~~Zonas editáveis na folha~~ — feitas
+7. ~~Ficha por registro, com prazo e prioridade~~ — feita
+8. **Lembrete de prazo** — hoje o prazo só ordena e colore; nada avisa o usuário
+   no dia. É o passo natural depois da ficha
 
 ---
 

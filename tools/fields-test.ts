@@ -147,13 +147,18 @@ const casos: { nome: string; rodar: () => string | null }[] = [
     },
   },
   {
-    nome: 'o corpo da anotação não vira item',
+    // "transcreve tudo, inclusive a anotação": o corpo da folha também vira
+    // registro — como 'nota', que é registro sem ser trabalho. Antes ele era
+    // ignorado, e o que se escrevia ali sumia da Central e da transcrição.
+    nome: 'o corpo da anotação vira nota, uma por linha',
     rodar() {
       const campos = detectFields(
         [palavra('a', 40, 1200, 120, 30, NOTA.id), palavra('b', 40, 1260, 120, 30, NOTA.id)],
         ZONAS,
       )
-      if (campos.length !== 0) return `a anotação livre gerou ${campos.length} campo(s)`
+      if (campos.length !== 2) return `esperava 2 notas, veio ${campos.length}`
+      const fora = campos.filter((c) => c.kind !== 'nota')
+      if (fora.length) return `nota saiu como ${fora.map((c) => c.kind).join(', ')}`
       return null
     },
   },

@@ -106,17 +106,22 @@ export const ZONE_COLORS: Record<ZoneKind, string> = {
 /**
  * O que a escrita vira quando cai dentro da zona.
  *
- * `null` é escolha, não esquecimento: no corpo da anotação e na folha livre a
- * escrita é a anotação em si. Transformar cada linha dali em item encheria o
- * painel de lixo e faria o usuário perder a confiança no que aparece lá.
+ * **Toda linha escrita vira registro, em qualquer zona** — inclusive no corpo
+ * da anotação e na folha livre, onde ela vira `nota`. Foi pedido assim:
+ * "transcreve tudo, inclusive a anotação".
+ *
+ * A diferença entre `nota` e o resto não é ser ou não ser registro: é ser ou
+ * não ser trabalho. Nota tem texto e ficha, mas não conta como coisa em aberto
+ * e não ganha carimbo na margem — senão o corpo da folha viraria uma parede de
+ * marcas e a Central, um depósito.
  */
-export const ZONE_ITEM_KIND: Record<ZoneKind, ItemKind | null> = {
-  anotacao: null,
+export const ZONE_ITEM_KIND: Record<ZoneKind, ItemKind> = {
+  anotacao: 'nota',
   pautas: 'pauta',
   topicos: 'topico',
   tarefas: 'tarefa',
   duvidas: 'duvida',
   pendencias: 'pendencia',
   documentos: 'documento',
-  livre: null,
+  livre: 'nota',
 }

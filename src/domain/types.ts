@@ -126,6 +126,11 @@ export type ItemKind =
   | 'documento'
   | 'pendencia'
   | 'importante'
+  /** Linha escrita no corpo da folha: vira texto e ficha, mas não é trabalho. */
+  | 'nota'
+
+/** Quanto corre. Fica vazio até o usuário dizer. */
+export type Priority = 'alta' | 'media' | 'baixa'
 
 /**
  * `arquivado` é o "não era item": guarda a decisão do usuário pra que a
@@ -165,6 +170,22 @@ export interface Item {
   bounds: Bounds
   /** Título legível. Vem do OCR ou digitado à mão; vazio até ser reconhecido. */
   title: string
+
+  /*
+   * A ficha do registro.
+   *
+   * É o que permite trabalhar na Central sem voltar à folha: prazo pra saber
+   * o que corre, prioridade pra saber o que vem antes, responsável pra saber
+   * com quem, e uma observação pro que a letra não disse. Tudo opcional — a
+   * anotação continua valendo sozinha, sem nada disso preenchido.
+   */
+  /** Prazo, em epoch ms do início do dia. Nulo = sem prazo. */
+  dueAt?: number | null
+  priority?: Priority | null
+  /** Com quem: nome livre, do jeito que o usuário escreve. */
+  assignee?: string
+  /** Observação digitada, além do que está escrito à mão. */
+  note?: string
   /** Estado da transcrição da letra manuscrita. */
   ocr: OcrState
   createdAt: number

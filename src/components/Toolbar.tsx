@@ -36,6 +36,7 @@ const ITEM_KINDS: ItemKind[] = [
   'pendencia',
   'documento',
   'importante',
+  'nota',
 ]
 
 const ITEM_LABEL: Record<ItemKind, string> = {
@@ -46,6 +47,7 @@ const ITEM_LABEL: Record<ItemKind, string> = {
   pendencia: 'Pendência',
   documento: 'Documento',
   importante: 'Importante',
+  nota: 'Anotação',
 }
 
 export function Toolbar() {

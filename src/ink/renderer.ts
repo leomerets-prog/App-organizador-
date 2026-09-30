@@ -584,6 +584,7 @@ const ITEM_GLYPH: Record<Item['kind'], string> = {
   documento: '¶',
   pendencia: '⚑',
   importante: '★',
+  nota: '·',
 }
 
 const ITEM_COLOR: Record<Item['kind'], string> = {
@@ -594,6 +595,7 @@ const ITEM_COLOR: Record<Item['kind'], string> = {
   documento: '#06b6d4',
   pendencia: '#ef4444',
   importante: '#eab308',
+  nota: '#8a8a96',
 }
 
 /** Carimbo do item na margem esquerda, alinhado com a tinta que ele marca. */
@@ -601,6 +603,9 @@ function drawItemMarkers(ctx: CanvasRenderingContext2D, items: Item[], vp: Viewp
   for (const item of items) {
     // Arquivado é o "isto não era item": some da folha e do painel.
     if (item.status === 'arquivado') continue
+    // Nota não ganha carimbo: o corpo da folha é onde se escreve solto, e uma
+    // marca por linha ali viraria uma parede de marcas na margem.
+    if (item.kind === 'nota') continue
     const y = item.bounds.minY + (item.bounds.maxY - item.bounds.minY) / 2
     const x = 18
     const color = ITEM_COLOR[item.kind]

@@ -11,7 +11,16 @@
  */
 
 import type { Item, ItemKind } from '../src/domain/types'
-import { DEFAULT_FILTER, normalize, selectItems, summarize } from '../src/items/central'
+import {
+  DEFAULT_FILTER,
+  dueBucket,
+  groupByDue,
+  inicioDoDia,
+  normalize,
+  selectItems,
+  sortItems,
+  summarize,
+} from '../src/items/central'
 import type { Origin } from '../src/items/central'
 
 const origens = new Map<string, Origin>([
@@ -155,6 +164,108 @@ const casos: { nome: string; rodar: () => string | null }[] = [
     },
   },
 ]
+
+// ─── Ficha: prazo e prioridade ──────────────────────────────────────────────
+
+const HOJE = new Date('2026-09-30T10:00:00').getTime()
+const DIA = 24 * 60 * 60 * 1000
+
+casos.push(
+  {
+    nome: 'anotação não conta como coisa em aberto',
+    rodar() {
+      const r = summarize([item({ kind: 'nota' }), item({ kind: 'tarefa' })], origens, HOJE)
+      if (r.open !== 1) return `em aberto ${r.open}, esperava 1`
+      if (r.notas !== 1) return `anotações ${r.notas}, esperava 1`
+      return null
+    },
+  },
+  {
+    nome: 'prazo vencido e prazo de hoje entram no "correndo"',
+    rodar() {
+      const r = summarize(
+        [
+          item({ dueAt: inicioDoDia(HOJE) - DIA }),
+          item({ dueAt: inicioDoDia(HOJE) }),
+          item({ dueAt: inicioDoDia(HOJE) + 3 * DIA }),
+          item({}),
+        ],
+        origens,
+        HOJE,
+      )
+      return r.correndo === 2 ? null : `correndo ${r.correndo}, esperava 2`
+    },
+  },
+  {
+    nome: 'ordem por prazo põe o mais apertado primeiro, e sem prazo por último',
+    rodar() {
+      const sem = item({ title: 'sem prazo' })
+      const longe = item({ title: 'longe', dueAt: inicioDoDia(HOJE) + 9 * DIA })
+      const perto = item({ title: 'perto', dueAt: inicioDoDia(HOJE) + DIA })
+      const ordem = sortItems([sem, longe, perto], 'prazo').map((i) => i.title)
+      const esperado = ['perto', 'longe', 'sem prazo']
+      return ordem.join('|') === esperado.join('|') ? null : `veio ${ordem.join(' > ')}`
+    },
+  },
+  {
+    nome: 'ordem por prioridade respeita alta, média, baixa e depois sem',
+    rodar() {
+      const itens = [
+        item({ title: 'sem' }),
+        item({ title: 'baixa', priority: 'baixa' }),
+        item({ title: 'alta', priority: 'alta' }),
+        item({ title: 'media', priority: 'media' }),
+      ]
+      const ordem = sortItems(itens, 'prioridade').map((i) => i.title)
+      const esperado = ['alta', 'media', 'baixa', 'sem']
+      return ordem.join('|') === esperado.join('|') ? null : `veio ${ordem.join(' > ')}`
+    },
+  },
+  {
+    nome: 'empate de prazo cai na prioridade, e depois no mais recente',
+    rodar() {
+      const prazo = inicioDoDia(HOJE) + DIA
+      const a = item({ title: 'a', dueAt: prazo, priority: 'baixa', createdAt: 100 })
+      const b = item({ title: 'b', dueAt: prazo, priority: 'alta', createdAt: 1 })
+      const c = item({ title: 'c', dueAt: prazo, priority: 'baixa', createdAt: 200 })
+      const ordem = sortItems([a, b, c], 'prazo').map((i) => i.title)
+      return ordem.join('|') === 'b|c|a' ? null : `veio ${ordem.join(' > ')}`
+    },
+  },
+  {
+    nome: 'cada prazo cai na sua faixa',
+    rodar() {
+      const casos: [number | null, string][] = [
+        [inicioDoDia(HOJE) - DIA, 'atrasado'],
+        [inicioDoDia(HOJE), 'hoje'],
+        [inicioDoDia(HOJE) + DIA, 'amanha'],
+        [inicioDoDia(HOJE) + 4 * DIA, 'semana'],
+        [inicioDoDia(HOJE) + 30 * DIA, 'depois'],
+        [null, 'semPrazo'],
+      ]
+      for (const [prazo, esperado] of casos) {
+        const veio = dueBucket(item({ dueAt: prazo }), HOJE)
+        if (veio !== esperado) return `prazo ${prazo} caiu em ${veio}, esperava ${esperado}`
+      }
+      return null
+    },
+  },
+  {
+    nome: 'as faixas saem na ordem de quem olha, sem faixa vazia',
+    rodar() {
+      const grupos = groupByDue(
+        [
+          item({ dueAt: inicioDoDia(HOJE) + 30 * DIA }),
+          item({ dueAt: inicioDoDia(HOJE) - DIA }),
+          item({}),
+        ],
+        HOJE,
+      )
+      const ordem = grupos.map((g) => g.bucket).join('|')
+      return ordem === 'atrasado|depois|semPrazo' ? null : `veio ${ordem}`
+    },
+  },
+)
 
 console.log('\n  Central — o destino do que foi escrito\n')
 let falhas = 0

@@ -150,6 +150,11 @@ export interface AppState {
   // Transcrição
   /** Texto escrito à mão pelo usuário; vale mais que a leitura automática. */
   setItemText: (id: Id, text: string) => Promise<void>
+  /** A ficha do registro: prazo, prioridade, responsável, observação. */
+  updateItemFields: (
+    id: Id,
+    patch: Partial<Pick<Item, 'dueAt' | 'priority' | 'assignee' | 'note'>>,
+  ) => Promise<void>
   /** Manda ler de novo a letra deste campo. */
   retranscribeItem: (id: Id) => Promise<void>
   /** `forcar` refaz o preparo e inclui as linhas que já falharam. */
@@ -362,7 +367,6 @@ async function retypeZoneItems(
   zoneKind: ZoneKind,
 ): Promise<void> {
   const kind = ZONE_ITEM_KIND[zoneKind]
-  if (!kind) return
 
   for (const item of get().items) {
     if (item.source !== 'auto' || item.zoneId !== zoneId) continue
@@ -1071,6 +1075,21 @@ export const useStore = create<AppState>((set, get) => ({
       ocr: limpo ? { status: 'manual', text: limpo, at: Date.now() } : { status: 'pendente' },
       updatedAt: Date.now(),
     }
+    await repo.putItem(updated)
+    set({ items: get().items.map((i) => (i.id === id ? updated : i)) })
+  },
+
+  /**
+   * Preenche a ficha.
+   *
+   * Nada aqui toca a tinta nem o texto: prazo e prioridade são o que o usuário
+   * acrescenta DEPOIS de escrever, na Central, pra poder se organizar sem
+   * voltar à folha.
+   */
+  async updateItemFields(id, patch) {
+    const item = get().items.find((i) => i.id === id)
+    if (!item) return
+    const updated: Item = { ...item, ...patch, updatedAt: Date.now() }
     await repo.putItem(updated)
     set({ items: get().items.map((i) => (i.id === id ? updated : i)) })
   },

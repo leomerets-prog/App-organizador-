@@ -1151,6 +1151,287 @@ input {
   font-size: 12px;
 }
 
+/* Segunda linha do registro: prazo, prioridade, com quem, e só então de onde
+   veio. A ordem é a da urgência — o caminho na folha é o que menos corre. */
+.row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.chip {
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.chip.prazo.atrasado {
+  background: rgba(239, 68, 68, 0.16);
+  color: #f87171;
+  font-weight: 600;
+}
+
+.chip.prazo.hoje {
+  background: rgba(245, 158, 11, 0.16);
+  color: #f59e0b;
+  font-weight: 600;
+}
+
+.chip.prio.alta {
+  background: rgba(239, 68, 68, 0.14);
+  color: #f87171;
+}
+
+.chip.prio.media {
+  background: rgba(245, 158, 11, 0.14);
+  color: #f59e0b;
+}
+
+.chip.prio.baixa {
+  background: rgba(34, 197, 94, 0.14);
+  color: #4ade80;
+}
+
+/* ── Faixas de prazo ──────────────────────────────────────────────────────── */
+
+.faixa {
+  margin-bottom: 18px;
+}
+
+.faixa-titulo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+.faixa-titulo span {
+  font-size: 11px;
+  letter-spacing: 0;
+  background: var(--surface-3);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.faixa.atrasado .faixa-titulo {
+  color: #f87171;
+}
+
+.faixa.hoje .faixa-titulo {
+  color: #f59e0b;
+}
+
+/* ── Ficha do registro ────────────────────────────────────────────────────── */
+
+/* Deitado, a ficha é uma TERCEIRA COLUNA: a lista continua inteira ao lado,
+   porque o trabalho é passar de um registro ao outro sem perder o lugar. */
+.ficha {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 0;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+}
+
+.central.com-ficha .central-body {
+  grid-template-columns: 212px minmax(0, 1fr) minmax(340px, 420px);
+}
+
+/* Em pé não cabe coluna nenhuma: a ficha vira a tela toda e o trilho some. */
+@media (max-width: 860px) {
+  .ficha {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    border-left: none;
+  }
+
+  .central.com-ficha .central-body {
+    grid-template-columns: 212px minmax(0, 1fr);
+  }
+}
+
+.ficha-topo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ficha-kind {
+  flex: 1;
+  height: var(--tap);
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: 14px;
+  font-family: inherit;
+  padding: 0 10px;
+}
+
+.ficha-fechar {
+  width: var(--tap);
+  height: var(--tap);
+  border-radius: 9px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--text-dim);
+}
+
+.ficha-corpo {
+  overflow-y: auto;
+  padding: 14px 12px 20px;
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+.ficha-campo {
+  display: grid;
+  gap: 6px;
+}
+
+.ficha-campo > span {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+.ficha-campo input,
+.ficha-campo textarea {
+  width: 100%;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 15px;
+  padding: 10px;
+  resize: vertical;
+}
+
+.ficha-campo input[type='date'] {
+  height: var(--tap);
+}
+
+.ficha-texto {
+  font-size: 16px;
+}
+
+.ficha-letra {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--paper);
+  padding: 6px;
+}
+
+.ficha-letra .ink-thumb {
+  height: 72px;
+}
+
+.ficha-prazo {
+  display: grid;
+  gap: 8px;
+}
+
+.ficha-atalhos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ficha-atalhos button {
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.ficha-prioridade {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.ficha-prioridade button {
+  height: var(--tap);
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+.ficha-prioridade button.active {
+  border-color: var(--p);
+  color: var(--p);
+  background: color-mix(in srgb, var(--p) 14%, transparent);
+  font-weight: 600;
+}
+
+.ficha-origem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-faint);
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.ficha-origem button {
+  flex-shrink: 0;
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.ficha-rodape {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.ficha-acao {
+  height: var(--tap);
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.ficha-acao.feito {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 600;
+}
+
 /* ── Visão geral ──────────────────────────────────────────────────────────── */
 
 .overview {

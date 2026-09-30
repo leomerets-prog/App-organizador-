@@ -1,11 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../state/store'
 import { listAllItems, listAllPages, listAllSections } from '../db/repo'
-import type { Item, ItemKind, Notebook, Page, Section } from '../domain/types'
+import type { Item, ItemKind, Notebook, Page, Priority, Section } from '../domain/types'
 import { ITEM_COLOR, ITEM_GLYPH } from '../ink/renderer'
 import { InkThumbnail } from './InkThumbnail'
-import { DEFAULT_FILTER, selectItems, summarize } from '../items/central'
-import type { CentralFilter, CentralView, Origin } from '../items/central'
+import {
+  DEFAULT_FILTER,
+  DUE_BUCKET_TITLE,
+  dueBucket,
+  groupByDue,
+  selectItems,
+  sortItems,
+  summarize,
+} from '../items/central'
+import type { CentralFilter, CentralView, Origin, SortKey } from '../items/central'
+import { ItemPanel } from './ItemPanel'
 
 /**
  * A Central.
@@ -27,6 +36,7 @@ const ORDER: ItemKind[] = [
   'topico',
   'documento',
   'importante',
+  'nota',
 ]
 
 const PLURAL: Record<ItemKind, string> = {
@@ -37,6 +47,36 @@ const PLURAL: Record<ItemKind, string> = {
   topico: 'Tópicos',
   documento: 'Documentos',
   importante: 'Importantes',
+  nota: 'Anotações',
+}
+
+const PRIO_LABEL: Record<Priority, string> = { alta: 'Alta', media: 'Média', baixa: 'Baixa' }
+
+/** Por onde a lista pode ser ordenada, com o nome que aparece no botão. */
+const ORDENS: { key: SortKey; nome: string }[] = [
+  { key: 'recentes', nome: 'Recentes' },
+  { key: 'prazo', nome: 'Prazo' },
+  { key: 'prioridade', nome: 'Prioridade' },
+]
+
+/**
+ * A data como se fala.
+ *
+ * "ontem", "hoje", "amanhã" dizem mais de relance que 29/09 — e é de relance
+ * que essa lista é lida. Fora dessa janela, a data escrita, que é exata.
+ */
+function rotuloPrazo(prazo: number): string {
+  const dia = 24 * 60 * 60 * 1000
+  const hoje = new Date()
+  hoje.setHours(0, 0, 0, 0)
+  const alvo = new Date(prazo)
+  alvo.setHours(0, 0, 0, 0)
+  const dias = Math.round((alvo.getTime() - hoje.getTime()) / dia)
+  if (dias === 0) return 'hoje'
+  if (dias === 1) return 'amanhã'
+  if (dias === -1) return 'ontem'
+  if (dias < 0) return `${-dias} dias atrás`
+  return alvo.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
 }
 
 const SINGULAR: Record<ItemKind, string> = {
@@ -47,6 +87,7 @@ const SINGULAR: Record<ItemKind, string> = {
   topico: 'Tópico',
   documento: 'Documento',
   importante: 'Importante',
+  nota: 'Anotação',
 }
 
 export function Central({ onClose }: { onClose: () => void }) {
@@ -62,8 +103,14 @@ export function Central({ onClose }: { onClose: () => void }) {
   const toggleItemStatus = useStore((s) => s.toggleItemStatus)
   const setItemStatus = useStore((s) => s.setItemStatus)
   const setItemKind = useStore((s) => s.setItemKind)
+  const setItemText = useStore((s) => s.setItemText)
+  const updateItemFields = useStore((s) => s.updateItemFields)
   const transcription = useStore((s) => s.transcription)
   const transcribePage = useStore((s) => s.transcribePage)
+
+  /** Registro com a ficha aberta. */
+  const [fichaId, setFichaId] = useState<string | null>(null)
+  const [ordem, setOrdem] = useState<SortKey>('recentes')
 
   // Recarrega ao abrir e a cada mudança nos itens da página aberta: é por aqui
   // que o que acabou de ser escrito aparece na Central sem recarregar nada.
@@ -97,9 +144,17 @@ export function Central({ onClose }: { onClose: () => void }) {
   }, [items, origins, filter.scope, filter.notebookId, activePageId])
 
   const lista = useMemo(
-    () => selectItems(items, origins, { ...filter, pageId: activePageId }),
-    [items, origins, filter, activePageId],
+    () => sortItems(selectItems(items, origins, { ...filter, pageId: activePageId }), ordem),
+    [items, origins, filter, activePageId, ordem],
   )
+
+  /** Por prazo a lista sai repartida em faixas; nas outras ordens, corrida. */
+  const faixas = useMemo(
+    () => (ordem === 'prazo' ? groupByDue(lista) : null),
+    [ordem, lista],
+  )
+
+  const ficha = fichaId ? (items.find((i) => i.id === fichaId) ?? null) : null
 
   const arquivados = useMemo(
     () => items.filter((i) => i.status === 'arquivado').length,
@@ -128,12 +183,12 @@ export function Central({ onClose }: { onClose: () => void }) {
       onKind={(kind) => void setItemKind(item.id, kind)}
       onArchive={() => void setItemStatus(item.id, 'arquivado')}
       onRestore={() => void setItemStatus(item.id, 'aberto')}
-      onGo={() => abrir(item)}
+      onOpen={() => setFichaId(item.id)}
     />
   )
 
   return (
-    <div className="central">
+    <div className={`central ${ficha ? 'com-ficha' : ''}`}>
       <header className="central-top">
         <div className="central-title">
           <h1>Central</h1>
@@ -141,6 +196,8 @@ export function Central({ onClose }: { onClose: () => void }) {
             {resumo.open === 0
               ? 'Nada em aberto'
               : `${resumo.open} em aberto`}
+            {resumo.correndo > 0 && ` · ${resumo.correndo} vencendo`}
+            {resumo.notas > 0 && ` · ${resumo.notas} anotação(ões)`}
             {resumo.done > 0 && ` · ${resumo.done} concluído${resumo.done === 1 ? '' : 's'}`}
             {filter.scope === 'pagina' && ' · só esta página'}
           </p>
@@ -178,6 +235,20 @@ export function Central({ onClose }: { onClose: () => void }) {
               </option>
             ))}
           </select>
+
+          {/* A ordem da lista. Em "Prazo" ela sai repartida em faixas (atrasadas,
+              hoje, amanhã…), que é a leitura que responde "o que corre agora". */}
+          <div className="scope-switch ordem-switch">
+            {ORDENS.map((o) => (
+              <button
+                key={o.key}
+                className={ordem === o.key ? 'active' : ''}
+                onClick={() => setOrdem(o.key)}
+              >
+                {o.nome}
+              </button>
+            ))}
+          </div>
 
           <div className="scope-switch">
             <button
@@ -262,10 +333,38 @@ export function Central({ onClose }: { onClose: () => void }) {
                     ? 'Arquivados'
                     : PLURAL[filter.view]}
               </div>
-              <div className="central-list">{lista.map(linha)}</div>
+              {faixas ? (
+                faixas.map((faixa) => (
+                  <div key={faixa.bucket} className={`faixa ${faixa.bucket}`}>
+                    <h3 className="faixa-titulo">
+                      {DUE_BUCKET_TITLE[faixa.bucket]}
+                      <span>{faixa.items.length}</span>
+                    </h3>
+                    <div className="central-list">{faixa.items.map(linha)}</div>
+                  </div>
+                ))
+              ) : (
+                <div className="central-list">{lista.map(linha)}</div>
+              )}
             </>
           )}
         </section>
+
+        {/* A ficha do registro aberto. Fica ao lado da lista no tablet deitado e
+            toma a tela inteira em pé — nos dois casos a lista atrás continua
+            sendo a mesma, e fechar volta exatamente pro lugar onde se estava. */}
+        {ficha && (
+          <ItemPanel
+            item={ficha}
+            origin={origins.get(ficha.pageId)}
+            onClose={() => setFichaId(null)}
+            onText={(text) => void setItemText(ficha.id, text)}
+            onKind={(kind) => void setItemKind(ficha.id, kind)}
+            onStatus={(status) => void setItemStatus(ficha.id, status)}
+            onFields={(patch) => void updateItemFields(ficha.id, patch)}
+            onGo={() => abrir(ficha)}
+          />
+        )}
       </div>
     </div>
   )
@@ -373,7 +472,7 @@ function ItemRow({
   onKind,
   onArchive,
   onRestore,
-  onGo,
+  onOpen,
 }: {
   item: Item
   origin: Origin | undefined
@@ -381,9 +480,10 @@ function ItemRow({
   onKind: (kind: ItemKind) => void
   onArchive: () => void
   onRestore: () => void
-  onGo: () => void
+  onOpen: () => void
 }) {
   const arquivado = item.status === 'arquivado'
+  const faixa = item.dueAt != null ? dueBucket(item) : null
 
   return (
     <article className={`central-row ${item.status === 'concluido' ? 'done' : ''}`}>
@@ -402,15 +502,29 @@ function ItemRow({
         </button>
       )}
 
-      {/* Clicar no texto abre a página onde ele foi escrito — é o "abrir o
-          registro" de um CRM, e aqui o registro é a folha. */}
-      <button className="row-main" onClick={onGo}>
+      {/* Clicar no texto abre a FICHA do registro, não a folha. Foi o pedido em
+          uma frase: "assim eu me organizo sem precisar voltar nas anotações" —
+          voltar à folha continua existindo, mas dentro da ficha, num botão. */}
+      <button className="row-main" onClick={onOpen}>
         <span className={`row-text ${item.title ? '' : 'sem-texto'}`}>
           {item.title || 'sem texto ainda'}
         </span>
-        <span className="row-origin">
-          {origin ? `${origin.notebook} › ${origin.section} › ${origin.page}` : 'página apagada'} ·{' '}
-          {new Date(item.createdAt).toLocaleDateString('pt-BR')}
+        <span className="row-meta">
+          {/* Prazo e prioridade aparecem na linha pra não obrigar a abrir cada
+              ficha só pra saber o que corre. */}
+          {faixa && (
+            <span className={`chip prazo ${faixa}`}>
+              {faixa === 'atrasado' ? '⚠ ' : ''}
+              {rotuloPrazo(item.dueAt!)}
+            </span>
+          )}
+          {item.priority && (
+            <span className={`chip prio ${item.priority}`}>{PRIO_LABEL[item.priority]}</span>
+          )}
+          {item.assignee && <span className="chip quem">{item.assignee}</span>}
+          <span className="row-origin">
+            {origin ? `${origin.notebook} › ${origin.section} › ${origin.page}` : 'página apagada'}
+          </span>
         </span>
       </button>
 
