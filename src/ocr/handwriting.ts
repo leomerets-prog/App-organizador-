@@ -49,6 +49,14 @@ export interface TranscriptionStatus {
   message: string
   /** Idioma que o reconhecedor escolheu; aparece na tela pra dar o que conferir. */
   language?: string
+  /**
+   * O que dá pra fazer a respeito, num toque.
+   *
+   * Aviso que explica o problema mas deixa o conserto longe ainda custa uma
+   * caçada pela barra de ferramentas — e o motivo mais comum de não haver o que
+   * ler é justamente um interruptor desligado.
+   */
+  acao?: 'ligarCampos'
 }
 
 const INDISPONIVEL: TranscriptionStatus = {

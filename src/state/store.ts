@@ -1127,12 +1127,31 @@ export const useStore = create<AppState>((set, get) => ({
       set({ transcription: status })
       if (status.state !== 'pronto') return
 
+      /*
+       * Não há o que ler sem campo identificado — e dizer só "nada novo pra
+       * ler" nessa hora é enganar: o usuário escreveu a folha inteira e o app
+       * responde que não tem nada. O motivo verdadeiro é um dos três abaixo, e
+       * cada um tem uma saída diferente.
+       */
+      const daPagina = get().items.filter((i) => i.pageId === pageId)
+      if (daPagina.length === 0) {
+        set({
+          transcription: {
+            ...status,
+            message: get().autoFields
+              ? 'Nenhuma linha identificada nesta folha. A leitura acontece no que você escreve DENTRO das faixas (Pauta, Tarefas, Dúvidas, Pendências) — a faixa "Anotação" não vira item de propósito.'
+              : 'A identificação de campos está desligada, então não há linhas pra ler.',
+            acao: get().autoFields ? undefined : 'ligarCampos',
+          },
+        })
+        return
+      }
+
       // Uma cópia da fila: a lista vive muda enquanto se escreve. No pedido
       // manual entram também as linhas que já falharam — é o que o usuário
       // espera de um botão chamado "Transcrever agora".
-      const fila = get().items.filter(
+      const fila = daPagina.filter(
         (i) =>
-          i.pageId === pageId &&
           i.strokeIds.length > 0 &&
           (i.ocr.status === 'pendente' || (forcar && i.ocr.status === 'falhou')),
       )
@@ -1141,7 +1160,9 @@ export const useStore = create<AppState>((set, get) => ({
         set({
           transcription: {
             ...status,
-            message: forcar ? 'Nada novo pra ler nesta folha.' : '',
+            message: forcar
+              ? `As ${daPagina.length} linha(s) desta folha já estão transcritas. Ligue o "Texto" na barra pra vê-las embaixo da letra.`
+              : '',
           },
         })
         return

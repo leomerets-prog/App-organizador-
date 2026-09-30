@@ -141,6 +141,7 @@ export function PageCanvas() {
   const setItemText = useStore((s) => s.setItemText)
   const retranscribeItem = useStore((s) => s.retranscribeItem)
   const transcribePage = useStore((s) => s.transcribePage)
+  const toggleAutoFields = useStore((s) => s.toggleAutoFields)
 
   const page = pages.find((p) => p.id === activePageId) ?? null
 
@@ -1346,12 +1347,20 @@ export function PageCanvas() {
       {transcription.message && (
         <button
           className={`ocr-banner ${transcription.state === 'erro' ? 'erro' : ''}`}
-          onClick={() => void transcribePage({ forcar: true })}
+          onClick={() => {
+            // O conserto vem junto do aviso: se o que falta é o interruptor dos
+            // campos, o mesmo toque liga e já manda ler.
+            if (transcription.acao === 'ligarCampos') toggleAutoFields()
+            void transcribePage({ forcar: true })
+          }}
         >
           <span className="ocr-banner-dot" />
           {transcription.message}
-          {transcription.state !== 'lendo' && transcription.state !== 'baixando' && (
-            <strong>tentar de novo</strong>
+          {transcription.acao === 'ligarCampos' ? (
+            <strong>ligar Campos</strong>
+          ) : (
+            transcription.state !== 'lendo' &&
+            transcription.state !== 'baixando' && <strong>tentar de novo</strong>
           )}
         </button>
       )}
