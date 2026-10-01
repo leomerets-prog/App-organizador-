@@ -44,6 +44,15 @@ export interface Page {
   templateId: string
   /** Altura da folha em unidades de página; cresce conforme se escreve pra baixo. */
   height: number
+  /**
+   * Altura de UMA repetição da divisão em zonas, em px de página.
+   *
+   * Era uma constante (1754, o A4). Virou campo da página porque isso era o
+   * limite que impedia esticar uma faixa pra baixo: a divisão se repete a cada
+   * folha, então nenhuma zona podia passar do fim dela. Agora a folha estica
+   * junto. Opcional — página antiga simplesmente usa o padrão.
+   */
+  sheetHeight?: number
   createdAt: number
   updatedAt: number
   order: number

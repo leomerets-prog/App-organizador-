@@ -1,6 +1,6 @@
 import type { Item, PageImage, Stroke, Zone } from '../domain/types'
 import { ZONE_COLORS } from '../domain/templates'
-import { SHEET, visibleSheets, zoneBoundaries } from '../zones/edit'
+import { visibleSheets, zoneBoundaries } from '../zones/edit'
 import type { ZoneRectFrac } from '../zones/edit'
 import { highlighterPaint, pathForStroke, strokeToPath } from './stroke'
 import { INK_COLOR, LEGACY_INK_COLOR } from '../domain/constants'
@@ -58,6 +58,8 @@ export interface RenderInput {
   zoomBadge: string | null
   /** Onde a borracha está e qual o alcance dela, em coordenadas de página. */
   eraserCursor: { x: number; y: number; radius: number } | null
+  /** Altura de uma repetição da divisão em zonas, nesta página. */
+  sheetHeight: number
 }
 
 export interface Theme {
@@ -129,8 +131,8 @@ export function render(ctx: CanvasRenderingContext2D, input: RenderInput): void 
 
   drawRules(ctx, vp, theme, top, bottom)
   if (input.showZones || input.zoneEditing) {
-    drawZones(ctx, input.zones, vp, top, bottom, input.zoneEditing)
-    drawBoundaryHandles(ctx, input.zones, vp, top, bottom)
+    drawZones(ctx, input.zones, vp, top, bottom, input.zoneEditing, input.sheetHeight)
+    drawBoundaryHandles(ctx, input.zones, vp, top, bottom, input.sheetHeight)
   }
   // Imagens ficam sob a tinta: é o que permite anotar por cima de um print.
   drawImages(ctx, input, vp)
@@ -262,18 +264,19 @@ function drawZones(
   top: number,
   bottom: number,
   editing: RenderInput['zoneEditing'],
+  alto: number,
 ): void {
-  const { first: firstSheet, last: lastSheet } = visibleSheets(top, bottom)
+  const { first: firstSheet, last: lastSheet } = visibleSheets(top, bottom, alto)
 
   for (let sheet = firstSheet; sheet <= lastSheet; sheet++) {
-    const baseY = sheet * SHEET
+    const baseY = sheet * alto
     for (const zone of zones) {
       if (zone.kind === 'livre' && !zone.label && !editing) continue
 
       const x = zone.rect.x * vp.pageWidth
-      const y = baseY + zone.rect.y * SHEET
+      const y = baseY + zone.rect.y * alto
       const w = zone.rect.w * vp.pageWidth
-      const h = zone.rect.h * SHEET
+      const h = zone.rect.h * alto
       const color = ZONE_COLORS[zone.kind]
       const chosen = editing?.selectedZoneId === zone.id
 
@@ -307,16 +310,16 @@ function drawZones(
   // Retângulo da zona que está sendo criada à mão, no lugar onde o dedo está.
   if (editing?.draft) {
     const d = editing.draft
-    const sheet = Math.floor(top / SHEET)
+    const sheet = Math.floor(top / alto)
     ctx.save()
     ctx.strokeStyle = ZONE_COLORS.anotacao
     ctx.setLineDash([8, 6])
     ctx.lineWidth = 2
     ctx.strokeRect(
       d.x * vp.pageWidth,
-      sheet * SHEET + d.y * SHEET,
+      sheet * alto + d.y * alto,
       d.w * vp.pageWidth,
-      d.h * SHEET,
+      d.h * alto,
     )
     ctx.restore()
   }
@@ -348,18 +351,19 @@ function drawBoundaryHandles(
   vp: Viewport,
   top: number,
   bottom: number,
+  alto: number,
 ): void {
   const boundaries = zoneBoundaries(zones)
   if (boundaries.length === 0) return
 
   const x = vp.pageWidth - BOUNDARY_HANDLE_X
   const r = 13 / Math.max(0.1, vp.scale)
-  const { first: firstSheet, last: lastSheet } = visibleSheets(top, bottom)
+  const { first: firstSheet, last: lastSheet } = visibleSheets(top, bottom, alto)
 
   ctx.save()
   for (let sheet = firstSheet; sheet <= lastSheet; sheet++) {
     for (const boundary of boundaries) {
-      const y = sheet * SHEET + boundary.y * SHEET
+      const y = sheet * alto + boundary.y * alto
       if (y < top || y > bottom) continue
 
       ctx.globalAlpha = 0.5

@@ -17,8 +17,23 @@ import { PAGE_WIDTH, PAGE_MIN_HEIGHT } from '../domain/constants'
  * Módulo puro: sem React, sem banco. Verificado em `tools/zones-test.ts`.
  */
 
-/** Altura de uma "folha" padrão; é nela que a divisão em zonas se repete. */
+/**
+ * Altura PADRÃO de uma folha — a medida em que a divisão em zonas se repete.
+ *
+ * É só o ponto de partida: cada página guarda a sua (`Page.sheetHeight`), e
+ * esticar uma faixa pra baixo estica a folha junto. Antes isto era uma
+ * constante, e era ela que travava a faixa no fim da folha.
+ */
 export const SHEET = PAGE_MIN_HEIGHT
+
+/**
+ * Até onde a folha pode esticar.
+ *
+ * Não é medo de número grande: é que cada folha a mais é uma repetição a mais
+ * pra desenhar e pra classificar. Seis folhas de altura já é uma faixa de mais
+ * de dez mil px — muito além de qualquer desenho de uma sentada.
+ */
+export const SHEET_MAX = PAGE_MIN_HEIGHT * 6
 
 export interface ZoneRectFrac {
   x: number
@@ -81,6 +96,8 @@ export function dragZone(
   handle: ZoneHandle,
   dx: number,
   dy: number,
+  /** Até onde a borda de baixo pode ir. Acima de 1 significa esticar a folha. */
+  limiteBaixo = 1,
 ): ZoneRectFrac {
   if (handle === 'move') {
     return {
@@ -109,10 +126,79 @@ export function dragZone(
     y = nextY
   }
   if (handle.includes('s')) {
-    h = clamp(bottom + dy, y + MIN_ZONE_H, 1) - y
+    // O teto aqui é 1 por padrão, mas `limiteBaixo` solta a trava: puxar a
+    // alça de baixo além do fim da folha é o gesto que ESTICA a folha.
+    h = clamp(bottom + dy, y + MIN_ZONE_H, limiteBaixo) - y
   }
 
   return { x, y, w, h }
+}
+
+/**
+ * Estica uma faixa pra baixo, esticando a FOLHA junto.
+ *
+ * Era aqui que o usuário batia na parede: a faixa é guardada em fração de uma
+ * folha, a divisão se repete a cada folha, e por isso nenhuma faixa podia
+ * passar do fim dela. "Não consegui estender muito pra baixo" era exatamente
+ * esse teto.
+ *
+ * A saída não é deixar a faixa vazar da folha — isso quebraria a repetição, e
+ * a escrita passaria a cair numa faixa diferente da desenhada (ver HANDOFF,
+ * armadilha 9). A saída é a folha crescer:
+ *
+ * - a faixa puxada fica com a altura nova
+ * - **as de baixo descem junto**, com a mesma altura de antes, em vez de serem
+ *   cobertas — faixa sobreposta faz a mesma linha pertencer a duas
+ * - as que estão AO LADO (começam acima do fim da puxada) não se mexem
+ * - a folha fica mais alta na mesma medida, e todas as frações são recalculadas
+ *
+ * Tudo em px absolutos no meio do caminho, de propósito: fração de uma folha
+ * que está mudando de tamanho é a receita pra todo mundo escorregar junto.
+ */
+export function extendDown(
+  zones: readonly Zone[],
+  zoneId: Id,
+  sheet: number,
+  /** Onde o dedo soltou, em fração da folha ATUAL. Pode passar de 1. */
+  novoFundo: number,
+): { sheet: number; rects: Map<Id, ZoneRectFrac> } | null {
+  const alvo = zones.find((z) => z.id === zoneId)
+  if (!alvo) return null
+  const alto = sheet > 0 && Number.isFinite(sheet) ? sheet : SHEET
+  if (!Number.isFinite(novoFundo)) return null
+
+  const fundoAntigo = (alvo.rect.y + alvo.rect.h) * alto
+  const fundoNovo = Math.min(novoFundo * alto, SHEET_MAX)
+  const cresce = fundoNovo - fundoAntigo
+  // Encolher não estica folha nenhuma: é o redimensionamento de sempre.
+  if (cresce <= 0.5) return null
+
+  const novaFolha = Math.min(SHEET_MAX, alto + cresce)
+  const passo = novaFolha - alto
+  if (passo <= 0.5) return null
+
+  const rects = new Map<Id, ZoneRectFrac>()
+  for (const zone of zones) {
+    const topo = zone.rect.y * alto
+    const altura = zone.rect.h * alto
+
+    let topoNovo = topo
+    let alturaNova = altura
+    if (zone.id === zoneId) {
+      alturaNova = altura + passo
+    } else if (topo >= fundoAntigo - 0.5) {
+      topoNovo = topo + passo
+    }
+
+    rects.set(zone.id, {
+      x: zone.rect.x,
+      w: zone.rect.w,
+      y: clamp(topoNovo / novaFolha, 0, 1),
+      h: clamp(alturaNova / novaFolha, MIN_ZONE_H, 1),
+    })
+  }
+
+  return { sheet: novaFolha, rects }
 }
 
 /** Retângulo desenhado à mão. Devolve nulo quando ficou pequeno demais pra valer. */
@@ -162,13 +248,18 @@ export function zoneAtFrac(zones: readonly Zone[], p: Pt): Zone | null {
 export const MAX_SHEETS = 12
 
 /** Faixa de folhas visível, protegida contra medida degenerada. */
-export function visibleSheets(top: number, bottom: number): { first: number; last: number } {
+export function visibleSheets(
+  top: number,
+  bottom: number,
+  sheet = SHEET,
+): { first: number; last: number } {
+  const alto = sheet > 0 && Number.isFinite(sheet) ? sheet : SHEET
   if (!Number.isFinite(top) || !Number.isFinite(bottom) || bottom <= top) {
-    const only = Number.isFinite(top) ? Math.floor(top / SHEET) : 0
+    const only = Number.isFinite(top) ? Math.floor(top / alto) : 0
     return { first: only, last: only }
   }
-  const first = Math.floor(top / SHEET)
-  const last = Math.min(Math.floor(bottom / SHEET), first + MAX_SHEETS)
+  const first = Math.floor(top / alto)
+  const last = Math.min(Math.floor(bottom / alto), first + MAX_SHEETS)
   return { first, last }
 }
 
@@ -288,16 +379,18 @@ export function boundaryAt(
  * mostrar a mesma divisão da primeira — e é o mesmo cálculo que classifica a
  * escrita em `zones/hit.ts`.
  */
-export function pageToFrac(p: Pt): Pt {
+export function pageToFrac(p: Pt, sheet = SHEET): Pt {
+  const alto = sheet > 0 && Number.isFinite(sheet) ? sheet : SHEET
   return {
     x: p.x / PAGE_WIDTH,
-    y: (((p.y % SHEET) + SHEET) % SHEET) / SHEET,
+    y: (((p.y % alto) + alto) % alto) / alto,
   }
 }
 
 /** Distância em px de página convertida em fração (sem o resto da divisão). */
-export function deltaToFrac(dx: number, dy: number): { dx: number; dy: number } {
-  return { dx: dx / PAGE_WIDTH, dy: dy / SHEET }
+export function deltaToFrac(dx: number, dy: number, sheet = SHEET): { dx: number; dy: number } {
+  const alto = sheet > 0 && Number.isFinite(sheet) ? sheet : SHEET
+  return { dx: dx / PAGE_WIDTH, dy: dy / alto }
 }
 
 function clamp(value: number, min: number, max: number): number {

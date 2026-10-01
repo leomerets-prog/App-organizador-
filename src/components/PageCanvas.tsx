@@ -25,7 +25,7 @@ import { MIN_IMAGE_SIZE, onImageReady } from '../ink/images'
 import { BOUNDARY_HANDLE_X, boundaryHandleRadius, imageHandleRadius } from '../ink/renderer'
 import type { Item, PageImage, Zone, ZoneKind } from '../domain/types'
 import {
-  SHEET,
+  SHEET_MAX,
   boundaryAt,
   deltaToFrac,
   dragBoundary,
@@ -132,11 +132,12 @@ export function PageCanvas() {
   const updateImageRect = useStore((s) => s.updateImageRect)
   const removeImage = useStore((s) => s.removeImage)
   const selectImage = useStore((s) => s.selectImage)
-  const undoErase = useStore((s) => s.undoErase)
   const selectZone = useStore((s) => s.selectZone)
   const addZone = useStore((s) => s.addZone)
   const updateZone = useStore((s) => s.updateZone)
   const updateZoneRects = useStore((s) => s.updateZoneRects)
+  const extendZoneDown = useStore((s) => s.extendZoneDown)
+  const sheetHeight = useStore((s) => s.sheetHeight)
   const removeZone = useStore((s) => s.removeZone)
   const setItemText = useStore((s) => s.setItemText)
   const retranscribeItem = useStore((s) => s.retranscribeItem)
@@ -147,7 +148,6 @@ export function PageCanvas() {
 
   const [gestureNotice, setGestureNotice] = useState(0)
   const [zoomLabel, setZoomLabel] = useState(() => formatZoom(savedZoom))
-  const [erasedCount, setErasedCount] = useState(0)
   const [imageError, setImageError] = useState<string | null>(null)
   const [toolNotice, setToolNotice] = useState(0)
   // Confirmação dentro da própria barra: a janela do sistema pode não aparecer
@@ -193,11 +193,11 @@ export function PageCanvas() {
 
   const stateRef = useRef({
     strokes, zones, items, tool, penColor, penWidth, showZones, selection, theme,
-    images, selectedImageId, eraserSize, showText, selectedZoneId,
+    images, selectedImageId, eraserSize, showText, selectedZoneId, sheetHeight,
   })
   stateRef.current = {
     strokes, zones, items, tool, penColor, penWidth, showZones, selection, theme,
-    images, selectedImageId, eraserSize, showText, selectedZoneId,
+    images, selectedImageId, eraserSize, showText, selectedZoneId, sheetHeight,
   }
 
   layoutRef.current.pageHeight = page?.height ?? layoutRef.current.pageHeight
@@ -208,7 +208,7 @@ export function PageCanvas() {
 
   useEffect(markDirty, [
     strokes, zones, items, showZones, showText, selection, theme, images,
-    selectedImageId, selectedZoneId, tool, markDirty,
+    selectedImageId, selectedZoneId, tool, sheetHeight, markDirty,
   ])
 
   // Imagem terminou de decodificar: repinta pra ela aparecer no lugar do vazio.
@@ -325,6 +325,7 @@ export function PageCanvas() {
         zones,
         items: st.items,
         viewport,
+        sheetHeight: st.sheetHeight,
         liveStroke:
           gesture?.kind === 'draw' && gesture.builder
             ? {
@@ -565,9 +566,10 @@ export function PageCanvas() {
     (pt: Pt, pointerId: number) => {
       const st = stateRef.current
       const scale = computeMetrics(viewRef.current, layoutRef.current).scale
-      const frac = pageToFrac(pt)
+      const alto = st.sheetHeight
+      const frac = pageToFrac(pt, alto)
       // Tolerância fixa em px de TELA: o alvo do dedo não encolhe com o zoom.
-      const tol = { x: 16 / scale / PAGE_WIDTH, y: 16 / scale / SHEET }
+      const tol = { x: 16 / scale / PAGE_WIDTH, y: 16 / scale / alto }
 
       const chosen = st.zones.find((z) => z.id === st.selectedZoneId) ?? null
       let target: Zone | null = null
@@ -617,7 +619,7 @@ export function PageCanvas() {
   const addZoneHere = useCallback(() => {
     const m = computeMetrics(viewRef.current, layoutRef.current)
     const middleY = m.scrollY + layoutRef.current.viewHeight / m.scale / 2
-    const frac = pageToFrac({ x: 0, y: middleY })
+    const frac = pageToFrac({ x: 0, y: middleY }, stateRef.current.sheetHeight)
     const h = 0.12
     void addZone(
       { x: 0.06, y: Math.min(1 - h, Math.max(0, frac.y - h / 2)), w: 0.5, h },
@@ -642,8 +644,8 @@ export function PageCanvas() {
     const reach = boundaryHandleRadius(scale)
     if (Math.abs(pt.x - (PAGE_WIDTH - BOUNDARY_HANDLE_X)) > reach) return null
 
-    const frac = pageToFrac(pt)
-    return boundaryAt(zoneBoundaries(st.zones), frac.y, reach / SHEET)
+    const frac = pageToFrac(pt, st.sheetHeight)
+    return boundaryAt(zoneBoundaries(st.zones), frac.y, reach / st.sheetHeight)
   }, [])
 
   // ─── Pinça ─────────────────────────────────────────────────────────────────
@@ -890,7 +892,7 @@ export function PageCanvas() {
       const pt = toPage(event)
 
       if (gesture.kind === 'boundary' && gesture.boundary && gesture.grabPage) {
-        const d = deltaToFrac(0, pt.y - gesture.grabPage.y)
+        const d = deltaToFrac(0, pt.y - gesture.grabPage.y, stateRef.current.sheetHeight)
         const changes = dragBoundary(stateRef.current.zones, gesture.boundary, d.dy)
         liveZonesRef.current = changes.size > 0 ? changes : null
         dirty.current = true
@@ -901,11 +903,23 @@ export function PageCanvas() {
         // O deslocamento é medido em px de página e só depois vira fração: a
         // fração dá a volta ao passar de uma folha pra outra, e a diferença
         // entre 0,99 e 0,01 jogaria a zona pro topo no meio do arrasto.
-        const d = deltaToFrac(pt.x - gesture.grabPage.x, pt.y - gesture.grabPage.y)
+        const d = deltaToFrac(
+          pt.x - gesture.grabPage.x,
+          pt.y - gesture.grabPage.y,
+          stateRef.current.sheetHeight,
+        )
 
         if (gesture.zoneId && gesture.zoneHandle && gesture.zoneStart) {
+          // A alça de baixo pode passar do fim da folha: é o gesto que ESTICA
+          // a folha, e era exatamente aí que a faixa batia na parede antes.
+          const limite = gesture.zoneHandle.includes('s')
+            ? SHEET_MAX / stateRef.current.sheetHeight
+            : 1
           liveZonesRef.current = new Map([
-            [gesture.zoneId, dragZone(gesture.zoneStart, gesture.zoneHandle, d.dx, d.dy)],
+            [
+              gesture.zoneId,
+              dragZone(gesture.zoneStart, gesture.zoneHandle, d.dx, d.dy, limite),
+            ],
           ])
         } else if (gesture.grabFrac) {
           zoneDraftRef.current = rectFromDrag(gesture.grabFrac, {
@@ -1048,8 +1062,7 @@ export function PageCanvas() {
         return
       }
 
-      const apagados = await endErase()
-      if (apagados > 0) setErasedCount(apagados)
+      await endErase()
     } else if (gesture.kind === 'lasso' && gesture.lasso && gesture.lasso.length > 2) {
       setSelection(strokesInsideLasso(stateRef.current.strokes, gesture.lasso))
     } else if (gesture.kind === 'boundary') {
@@ -1069,7 +1082,13 @@ export function PageCanvas() {
         // Toque sem arrasto só escolhe a zona; gravar aqui refaria a
         // classificação da tinta inteira à toa.
         if (!sameRect(rect, gesture.zoneStart)) {
-          await updateZone(gesture.zoneId, { rect })
+          if (rect.y + rect.h > 1.0001) {
+            // Passou do fim da folha: a folha estica e as faixas de baixo
+            // descem junto, em vez de a faixa puxada cobrir as outras.
+            await extendZoneDown(gesture.zoneId, rect.y + rect.h)
+          } else {
+            await updateZone(gesture.zoneId, { rect })
+          }
         }
       } else if (draft) {
         // Nasce sem significado: o que ela quer dizer é a próxima escolha do
@@ -1081,7 +1100,7 @@ export function PageCanvas() {
     dirty.current = true
   }, [
     commitStroke, endErase, setSelection, setTool, wasTap, wasDoubleTap,
-    updateZone, updateZoneRects, addZone,
+    updateZone, updateZoneRects, addZone, extendZoneDown,
   ])
 
   const onPointerUp = useCallback(
@@ -1321,17 +1340,6 @@ export function PageCanvas() {
         </div>
       )}
 
-      {erasedCount > 0 && (
-        <UndoBar
-          count={erasedCount}
-          onUndo={async () => {
-            await undoErase()
-            setErasedCount(0)
-          }}
-          onDone={() => setErasedCount(0)}
-        />
-      )}
-
       {tool === 'eraser' && (
         <button className="eraser-banner" onClick={() => setTool('pen')}>
           <span className="eraser-banner-dot" />
@@ -1382,15 +1390,15 @@ function sameRect(a: ZoneRectFrac, b: ZoneRectFrac): boolean {
 
 /** O que cada tipo de zona significa, na hora de escolher. */
 const ZONE_KIND_LABEL: Record<ZoneKind, string> = {
-  anotacao: 'Anotação (não vira item)',
+  anotacao: 'Anotação (vira anotação)',
   pautas: 'Pauta',
   topicos: 'Tópicos',
   tarefas: 'Tarefas',
   duvidas: 'Dúvidas',
   pendencias: 'Pendências',
   documentos: 'Documentos',
-  fluxograma: 'Fluxograma',
-  livre: 'Livre (não vira item)',
+  fluxograma: 'Fluxograma (vira desenho)',
+  livre: 'Livre (vira anotação)',
 }
 
 /**
@@ -1583,37 +1591,6 @@ function ToolNotice({
     <div className="scribble-toast" role="status">
       <span className="scribble-toast-icon">{trigger > 0 ? '✎' : '🖼'}</span>
       {texto}
-    </div>
-  )
-}
-
-/**
- * Aviso do que foi apagado, com volta.
- *
- * Apagar é o único caminho do app onde se perde trabalho sem recuperação. O
- * aviso some sozinho, mas enquanto está na tela cobre o engano percebido na
- * hora — que é quando quase todo engano é percebido.
- */
-function UndoBar({
-  count,
-  onUndo,
-  onDone,
-}: {
-  count: number
-  onUndo: () => void
-  onDone: () => void
-}) {
-  useEffect(() => {
-    const timer = setTimeout(onDone, 5000)
-    return () => clearTimeout(timer)
-  }, [count, onDone])
-
-  return (
-    <div className="undo-bar" role="status">
-      {/* Sem contagem de traços: a borracha corta pedaços, e dizer "1 traço
-          apagado" depois de tirar um naco do meio de uma palavra confunde. */}
-      Trecho apagado
-      <button onClick={onUndo}>Desfazer</button>
     </div>
   )
 }

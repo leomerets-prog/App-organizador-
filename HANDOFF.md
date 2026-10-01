@@ -71,7 +71,8 @@ por outro.
 ```bash
 npm install
 npm run dev            # servidor de desenvolvimento
-npm test               # rabisco, borracha, campos, zonas, Central, áudio, fluxograma
+npm test               # rabisco, borracha, campos, zonas, Central, áudio,
+                       # fluxograma e voltar/avançar
 npm run build:tablet   # regenera tablet/ — COMITAR JUNTO
 npx cap sync android   # leva tablet/ para o projeto Android
 ```
@@ -350,7 +351,51 @@ antigo) → pasta do próprio app. A última some se o app for desinstalado, e �
 por isso que ela é a última — mas devolver "não deu" e deixar o usuário sem
 cópia nenhuma seria pior.
 
-### 21. Área não separa retângulo de redondo — canto separa
+### 21. A altura da folha é da PÁGINA, não uma constante
+
+`SHEET` (1754, o A4) era constante, e por isso a divisão em zonas se repetia a
+cada 1754px — o que também queria dizer que **nenhuma faixa podia passar do fim
+da folha**. O usuário bateu nisso: *"não consegui estender ele muito pra
+baixo"*.
+
+A saída NÃO foi deixar a faixa vazar da folha. Isso quebraria a repetição e a
+escrita passaria a cair numa faixa diferente da desenhada — a armadilha 9, que
+já custou uma volta. A saída foi a folha esticar: `Page.sheetHeight` (opcional,
+sem migração), e `extendDown()` recalcula TODAS as frações pra altura nova.
+
+Três coisas acontecem juntas e **precisam** acontecer juntas: a faixa puxada
+fica maior, as de baixo descem com o mesmo tamanho (em vez de serem cobertas —
+faixa sobreposta faz a mesma linha pertencer a duas), e a página guarda a
+altura nova. Gravar uma sem a outra deixa o desenho e a classificação
+discordando.
+
+Por isso tudo que mede a folha passou a receber a altura: `pageToFrac`,
+`deltaToFrac`, `visibleSheets`, `zoneAtPoint`, `drawZones`, `detectFields`,
+`writingArea`. **Se aparecer um lugar novo que divide por 1754, está errado** —
+pega a altura da página.
+
+### 22. Voltar e avançar guardam os DOIS lados
+
+O desfazer antigo era uma faixa que aparecia por cinco segundos depois de
+apagar. Virou pilha de verdade (`ink/history.ts`), com botões sempre à vista.
+
+Cada passo guarda o que a folha tinha antes **e** o que passou a ter. Voltar
+aplica um lado, avançar o outro — nada é recalculado ao contrário, que é onde
+esse tipo de código erra e devolve a folha num estado que nunca existiu.
+
+Dois detalhes que não são enfeite:
+
+- `applyPatch` **não duplica** traço que já está lá. Dois toques no voltar
+  (acontece, com pressa) devolveriam a mesma tinta duas vezes
+- a borrachada carrega a **lista de itens inteira** nos dois sentidos. A
+  borracha corta traços em pedaços e os itens são religados por linhagem, uma
+  conta que não se faz ao contrário
+
+A pilha cobre a TINTA (traço e borracha) e é esvaziada ao trocar de página.
+Zona, item e ficha não entram: são mudanças que a própria tela desfaz num
+toque, e misturá-las faria "voltar" significar coisas diferentes a cada vez.
+
+### 23. Área não separa retângulo de redondo — canto separa
 
 A primeira ideia pra ler a forma de uma caixa desenhada à mão é comparar a
 área do traço com a da caixa envolvente. Não funciona: um círculo preenche 78%
@@ -369,7 +414,7 @@ não é caixa; preenche pouco → losango; tem canto → retângulo; não tem �
 redondo. **Começar pelos cantos faria todo losango virar retângulo**, porque
 os dois têm quatro.
 
-### 22. A direção da seta é um palpite, a não ser que haja ponta
+### 24. A direção da seta é um palpite, a não ser que haja ponta
 
 Sem cabeça desenhada, a única pista de pra onde a seta aponta é a ordem em que
 a mão fez o traço — e muita gente desenha a seta de trás pra frente. O leitor
@@ -382,7 +427,7 @@ Vale a regra geral: **palpite que não se anuncia vira erro silencioso.** Um
 fluxograma com uma seta invertida parece certo e está errado — e quem recebe
 não tem como saber.
 
-### 23. Fluxograma não se lê linha por linha
+### 25. Fluxograma não se lê linha por linha
 
 A zona de fluxograma é a única que `items/detect.ts` ignora (`ZONES_SEM_LINHA`).
 Lá uma caixa e a seta ao lado estão na mesma altura: a identificação por linha
@@ -392,7 +437,7 @@ leria as duas como um campo só, e um desenho de dez traços viraria quatro
 A leitura daquela zona é outra, mora em `flow/`, e o resultado é **um** registro
 — o desenho montado — em vez de um por linha.
 
-### 24. Prazo é dia do calendário, no fuso de casa
+### 26. Prazo é dia do calendário, no fuso de casa
 
 `new Date('2026-09-30')` é lido como **UTC** e, no Brasil, volta como dia 29. Um
 prazo que anda um dia pra trás sozinho destrói a confiança na lista inteira — e
@@ -410,7 +455,8 @@ crus. **Não troque nada disso por `toISOString()` nem por `Date.parse`.**
 ```
 src/
   domain/      modelo de dados, modelos de folha, medidas e constantes
-  ink/         captura da caneta, desenho, gesto do rabisco, zoom, borracha
+  ink/         captura da caneta, desenho, gesto do rabisco, zoom, borracha,
+               pilha de voltar/avançar (history)
   items/       identificação dos campos (detect) e a lógica da Central —
                filtro, busca, resumo, ordem e faixas de prazo (central)
   audio/       gravação, contas do tocador (playback) e salvar pra fora (export)
@@ -424,7 +470,8 @@ src/
   components/  folha, navegação, barras, painel
   lib/         geometria
 tools/         testes de rabisco, borracha, campos, zonas, Central, áudio,
-               fluxograma, e o roteiro que abre o app num Android de verdade
+               fluxograma, voltar/avançar, e o roteiro que abre o app num
+               Android de verdade
 android/       projeto Capacitor (gerado, mas versionado)
 keystore/      chave de assinatura — não trocar
 ```
@@ -435,8 +482,8 @@ grava depois. É isso que mantém a escrita fluida.
 
 **O que é puro e testável:** `ink/erase.ts`, `ink/scribble.ts`,
 `ink/viewport.ts`, `items/detect.ts`, `items/central.ts`, `audio/playback.ts`,
-`flow/shapes.ts`, `flow/graph.ts`, `flow/layout.ts`, `zones/edit.ts` e
-`lib/geometry.ts` não sabem nada de React nem de banco. Lógica nova de tinta, de
+`flow/shapes.ts`, `flow/graph.ts`, `flow/layout.ts`, `ink/history.ts`,
+`zones/edit.ts` e `lib/geometry.ts` não sabem nada de React nem de banco. Lógica nova de tinta, de
 identificação, de zona ou de filtro deve nascer ali.
 
 **Caminho quente:** o traço em andamento e o estado da janela (zoom/rolagem)
@@ -462,6 +509,10 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Ficha é terceira coluna deitado, tela cheia em pé | Passar de um registro ao outro sem perder o lugar na lista; em pé não cabe coluna nenhuma |
 | Tocar de novo na prioridade marcada tira a prioridade | Sem isso, escolher errado vira um estado do qual não se sai |
 | A ordem da lista nunca empata solto | Sem prazo (ou sem prioridade) vai pro fim, e o desempate final é sempre o mais recente. Lista que dança a cada abertura não dá pra confiar |
+| Esticar a faixa estica a FOLHA, não deixa a faixa vazar | A divisão se repete a cada folha; faixa vazando faria a escrita cair numa faixa diferente da desenhada |
+| Esticar empurra as de baixo, não as cobre | Faixa sobreposta faz a mesma linha pertencer a duas, e aí o painel começa a mentir |
+| Voltar/avançar cobrem só a tinta | Zona, item e ficha a tela já desfaz num toque. "Voltar" precisa significar a mesma coisa toda vez |
+| A pilha é esvaziada ao trocar de página | Voltar numa folha e ver sumir algo de outra seria pior que não ter voltar |
 | O fluxograma montado é OUTRA coisa, ao lado do desenho | A tinta na folha nunca é apagada nem substituída. Quem desenhou quer poder continuar desenhando, e o leitor erra — se ele comesse o original, errar custaria o trabalho |
 | Nome corrigido à mão sobrevive à remontagem | Mesmo motivo da transcrição: ver a própria correção sumir é o que faz alguém parar de confiar no recurso |
 | O fluxograma sai como PNG, não SVG | Vai ser aberto por outra pessoa, provavelmente no celular. PNG abre em qualquer lugar; SVG abre numa tela de código em metade dos aparelhos |
@@ -575,6 +626,8 @@ pra transcrição importar.
    no dia. É o passo natural depois da ficha
 9. ~~Acelerador do áudio e barra de posição~~ — feitos
 10. ~~Zona de fluxograma, lida e remontada~~ — feita
+11. ~~Voltar e avançar~~ — feitos, cobrindo a tinta
+12. ~~Faixa que estica além do fim da folha~~ — feita, esticando a folha junto
 
 ---
 

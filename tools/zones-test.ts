@@ -15,7 +15,9 @@ import {
   MIN_ZONE_H,
   MIN_ZONE_W,
   SHEET,
+  SHEET_MAX,
   MAX_SHEETS,
+  extendDown,
   boundaryAt,
   dragBoundary,
   dragZone,
@@ -241,6 +243,111 @@ const casos: { nome: string; rodar: () => string | null }[] = [
       ]
       if (boundaryAt(divisas, 0.41, 0.02)?.y !== 0.4) return 'não pegou a divisa de perto'
       if (boundaryAt(divisas, 0.6, 0.02) !== null) return 'pegou uma divisa longe demais'
+      return null
+    },
+  },
+  // ── Esticar a folha ───────────────────────────────────────────────────────
+  {
+    // Era ESTE o limite que o usuário encontrou: a faixa parava no fim da
+    // folha porque a divisão se repete ali.
+    nome: 'puxar a faixa além do fim da folha estica a folha',
+    rodar() {
+      const zonas = [
+        zona('topo', { x: 0, y: 0, w: 1, h: 0.2 }),
+        zona('meio', { x: 0, y: 0.2, w: 1, h: 0.5 }),
+        zona('pe', { x: 0, y: 0.7, w: 1, h: 0.3 }),
+      ]
+      // Puxa o fim do "meio" (hoje em 0,7) pra 1,3 da folha atual.
+      const r = extendDown(zonas, 'meio', SHEET, 1.3)
+      if (!r) return 'não esticou nada'
+
+      const cresceu = 1.3 * SHEET - 0.7 * SHEET
+      if (Math.abs(r.sheet - (SHEET + cresceu)) > 1) {
+        return `folha ficou ${Math.round(r.sheet)}, esperava ${Math.round(SHEET + cresceu)}`
+      }
+      const meio = r.rects.get('meio')!
+      if (Math.abs(meio.h * r.sheet - (0.5 * SHEET + cresceu)) > 1) {
+        return 'a faixa puxada não ficou com a altura nova'
+      }
+      return null
+    },
+  },
+  {
+    nome: 'as faixas de baixo descem junto, do mesmo tamanho',
+    rodar() {
+      const zonas = [
+        zona('meio', { x: 0, y: 0.2, w: 1, h: 0.5 }),
+        zona('pe', { x: 0, y: 0.7, w: 1, h: 0.3 }),
+      ]
+      const r = extendDown(zonas, 'meio', SHEET, 1.1)!
+      const pe = r.rects.get('pe')!
+      // Mesma altura em px, só que mais embaixo.
+      if (Math.abs(pe.h * r.sheet - 0.3 * SHEET) > 1) return 'a faixa de baixo mudou de tamanho'
+      if (!(pe.y * r.sheet > 0.7 * SHEET)) return 'a faixa de baixo não desceu'
+      const meio = r.rects.get('meio')!
+      if (Math.abs(pe.y - (meio.y + meio.h)) > 0.002) return 'sobrou buraco ou sobreposição'
+      return null
+    },
+  },
+  {
+    nome: 'a faixa AO LADO não se mexe nem muda de tamanho',
+    rodar() {
+      const zonas = [
+        zona('esq', { x: 0, y: 0.2, w: 0.6, h: 0.5 }),
+        zona('dir', { x: 0.6, y: 0.2, w: 0.4, h: 0.5 }),
+        zona('pe', { x: 0, y: 0.7, w: 1, h: 0.3 }),
+      ]
+      const r = extendDown(zonas, 'esq', SHEET, 1.0)!
+      const dir = r.rects.get('dir')!
+      if (Math.abs(dir.y * r.sheet - 0.2 * SHEET) > 1) return 'a vizinha de lado desceu'
+      if (Math.abs(dir.h * r.sheet - 0.5 * SHEET) > 1) return 'a vizinha de lado mudou de altura'
+      return null
+    },
+  },
+  {
+    nome: 'encolher não estica folha nenhuma',
+    rodar() {
+      const zonas = [zona('meio', { x: 0, y: 0.2, w: 1, h: 0.5 })]
+      return extendDown(zonas, 'meio', SHEET, 0.5) === null ? null : 'esticou ao encolher'
+    },
+  },
+  {
+    nome: 'a folha tem teto: puxar até o infinito para no limite',
+    rodar() {
+      const zonas = [zona('meio', { x: 0, y: 0, w: 1, h: 1 })]
+      const r = extendDown(zonas, 'meio', SHEET, 9999)!
+      if (r.sheet > SHEET_MAX + 1) return `folha passou do teto: ${Math.round(r.sheet)}`
+      const meio = r.rects.get('meio')!
+      if (meio.h > 1.001 || meio.y < -0.001) return 'a faixa saiu da folha'
+      return null
+    },
+  },
+  {
+    nome: 'depois de esticar, todas as frações continuam dentro da folha',
+    rodar() {
+      const zonas = [
+        zona('a', { x: 0, y: 0, w: 1, h: 0.2 }),
+        zona('b', { x: 0, y: 0.2, w: 1, h: 0.3 }),
+        zona('c', { x: 0, y: 0.5, w: 1, h: 0.5 }),
+      ]
+      const r = extendDown(zonas, 'b', SHEET, 1.4)!
+      for (const [id, rect] of r.rects) {
+        if (rect.y < -0.001 || rect.y + rect.h > 1.001) {
+          return `${id} ficou fora: y=${rect.y.toFixed(3)} h=${rect.h.toFixed(3)}`
+        }
+      }
+      return null
+    },
+  },
+  {
+    nome: 'a folha esticada muda onde a divisão se repete',
+    rodar() {
+      const alto = SHEET * 2
+      // Com a folha do dobro do tamanho, o meio da segunda folha é 3×SHEET.
+      const f = pageToFrac({ x: 0, y: alto * 1.5 }, alto)
+      if (Math.abs(f.y - 0.5) > 0.001) return `fração ${f.y.toFixed(3)}, esperava 0,5`
+      const v = visibleSheets(0, alto * 2.5, alto)
+      if (v.first !== 0 || v.last !== 2) return `folhas ${v.first}..${v.last}, esperava 0..2`
       return null
     },
   },

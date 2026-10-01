@@ -33,7 +33,7 @@ import {
   ERASER_MAX,
 } from '../domain/constants'
 import { zoneAtPoint, zoneRectInPage } from '../zones/hit'
-import { SHEET } from '../zones/edit'
+import { SHEET, extendDown } from '../zones/edit'
 import type { ZoneRectFrac } from '../zones/edit'
 import {
   prepareRecognizer,
@@ -46,6 +46,17 @@ import { forgetImage, placeNewImage, readImageFile } from '../ink/images'
 import { eraseAlongSegment } from '../ink/erase'
 import type { Pt } from '../lib/geometry'
 import { buildGraph, toFlowStrokes } from '../flow/graph'
+import {
+  EMPTY_HISTORY,
+  applyPatch,
+  drawStep,
+  eraseStep,
+  forPage,
+  push as pushStep,
+  redo as redoHistory,
+  undo as undoHistory,
+} from '../ink/history'
+import type { History, StrokePatch } from '../ink/history'
 import { applyTheme, loadPrefs, nextRate, savePrefs } from './prefs'
 import type { Theme } from './prefs'
 
@@ -145,6 +156,13 @@ export interface AppState {
   /** Desfaz a última borrachada inteira. */
   undoErase: () => Promise<number>
   canUndoErase: () => boolean
+
+  /** Pilha de voltar/avançar da tinta desta página. */
+  history: History
+  /** Volta um passo: o último traço, a última borrachada. */
+  undoStep: () => Promise<void>
+  /** Refaz o passo que acabou de ser desfeito. */
+  redoStep: () => Promise<void>
   setSelection: (ids: Id[]) => void
   clearSelection: () => void
 
@@ -203,6 +221,16 @@ export interface AppState {
   selectImage: (id: Id | null) => void
 
   growPageIfNeeded: (bottomY: number) => Promise<void>
+
+  /**
+   * Altura de uma repetição da divisão em zonas, na página aberta.
+   *
+   * Era a constante que travava a faixa no fim da folha. Agora é da página, e
+   * esticar uma faixa pra baixo estica isto junto.
+   */
+  sheetHeight: number
+  /** Estica a faixa pra baixo, empurrando as de baixo e esticando a folha. */
+  extendZoneDown: (zoneId: Id, novoFundo: number) => Promise<void>
 }
 
 /**
@@ -317,12 +345,42 @@ let transcribing = false
  * A zona se repete a cada folha padrão, então a faixa usada é a da folha em que
  * a linha realmente está — e não a da primeira.
  */
+/**
+ * Aplica um lado de um passo da pilha: memória primeiro, banco depois.
+ *
+ * A lista de itens só é reposta quando o passo trouxe uma (é o caso da
+ * borracha, que religa itens por linhagem). Pro traço desenhado basta mandar
+ * identificar de novo: tirando o traço, o campo dele some sozinho.
+ */
+async function aplicarPasso(
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+  patch: StrokePatch,
+): Promise<void> {
+  const strokes = applyPatch(get().strokes, patch)
+  set(patch.items ? { strokes, items: patch.items } : { strokes })
+
+  await repo.deleteStrokes(patch.remove)
+  for (const stroke of patch.restore) await repo.putStroke(stroke)
+  if (patch.items) {
+    for (const item of patch.items) await repo.putItem(item)
+  }
+  get().scheduleFieldSync()
+}
+
+/** A altura da folha desta página; página antiga simplesmente usa o padrão. */
+function sheetOf(page: Page | undefined): number {
+  const alto = page?.sheetHeight
+  return typeof alto === 'number' && Number.isFinite(alto) && alto > 0 ? alto : SHEET
+}
+
 function writingArea(state: AppState, item: Item): WritingArea {
   const zone = item.zoneId ? state.zones.find((z) => z.id === item.zoneId) : undefined
   if (zone) {
-    const rect = zoneRectInPage(zone, SHEET)
-    const folha = Math.floor(((item.bounds.minY + item.bounds.maxY) / 2) / SHEET)
-    return { x: rect.x, y: folha * SHEET + rect.y, width: rect.w, height: rect.h }
+    const alto = state.sheetHeight
+    const rect = zoneRectInPage(zone, alto)
+    const folha = Math.floor(((item.bounds.minY + item.bounds.maxY) / 2) / alto)
+    return { x: rect.x, y: folha * alto + rect.y, width: rect.w, height: rect.h }
   }
 
   // Sem zona, a própria linha é a área — com uma folga, pra letra não encostar
@@ -436,6 +494,8 @@ export const useStore = create<AppState>((set, get) => ({
   recordings: [],
   flowcharts: [],
   flowStatus: { state: 'parado', message: '' },
+  history: EMPTY_HISTORY,
+  sheetHeight: SHEET,
   images: [],
   selectedImageId: null,
 
@@ -505,7 +565,12 @@ export const useStore = create<AppState>((set, get) => ({
     const content = await repo.loadPageContent(id)
     // Se o usuário trocou de página enquanto isto carregava, descarta o resultado.
     if (get().activePageId !== id) return
-    set({ ...content, loadingPage: false })
+    set({
+      ...content,
+      loadingPage: false,
+      history: forPage(get().history, id),
+      sheetHeight: sheetOf(get().pages.find((p) => p.id === id)),
+    })
     // Folhas escritas antes desta versão (ou com a identificação desligada)
     // ganham seus campos ao serem abertas.
     get().scheduleFieldSync()
@@ -711,12 +776,15 @@ export const useStore = create<AppState>((set, get) => ({
       color: penColor,
       width: tool === 'highlighter' ? HIGHLIGHTER_WIDTH : penWidth,
       tool: tool === 'highlighter' ? 'highlighter' : 'pen',
-      zoneId: zoneAtPoint(zones, center)?.id ?? null,
+      zoneId: zoneAtPoint(zones, center, get().sheetHeight)?.id ?? null,
       startedAt,
       bounds,
     }
 
-    set({ strokes: [...get().strokes, stroke] })
+    set({
+      strokes: [...get().strokes, stroke],
+      history: pushStep(get().history, drawStep(stroke)),
+    })
     await repo.putStroke(stroke)
     await get().growPageIfNeeded(bounds.maxY)
     get().scheduleFieldSync()
@@ -777,6 +845,8 @@ export const useStore = create<AppState>((set, get) => ({
     const session = eraseSession
     eraseSession = null
     if (!session) return 0
+    const pageId = get().activePageId
+    if (!pageId) return 0
 
     const current = get().strokes
     const currentIds = new Set(current.map((s) => s.id))
@@ -788,17 +858,47 @@ export const useStore = create<AppState>((set, get) => ({
     for (const stroke of addedStrokes) await repo.putStroke(stroke)
     await repo.deleteStrokes(removedIds)
 
+    const inteiros = removedIds.map((id) => session.originals.get(id)!).filter(Boolean)
+    const itensAntes = get().items
+
     lastErase = {
-      restore: removedIds.map((id) => session.originals.get(id)!).filter(Boolean),
+      restore: inteiros,
       removeIds: addedStrokes.map((s) => s.id),
       // Os itens são guardados inteiros: desfazer volta a lista como estava,
       // em vez de tentar refazer a religação ao contrário.
-      items: get().items,
+      items: itensAntes,
     }
 
     await reconcileItems(get, set, session.lineage, new Set(removedIds))
+    set({
+      history: pushStep(
+        get().history,
+        eraseStep(pageId, inteiros, addedStrokes, itensAntes, get().items),
+      ),
+    })
     get().scheduleFieldSync()
     return removedIds.length
+  },
+
+  /**
+   * Volta um passo.
+   *
+   * A pilha guarda os dois lados de cada passo, então voltar é só aplicar o
+   * lado "antes" — nada é recalculado ao contrário, que é onde esse tipo de
+   * código erra e devolve a folha num estado que nunca existiu.
+   */
+  async undoStep() {
+    const passo = undoHistory(get().history)
+    if (!passo) return
+    set({ history: passo.history })
+    await aplicarPasso(get, set, passo.step.antes)
+  },
+
+  async redoStep() {
+    const passo = redoHistory(get().history)
+    if (!passo) return
+    set({ history: passo.history })
+    await aplicarPasso(get, set, passo.step.depois)
   },
 
   /**
@@ -861,7 +961,7 @@ export const useStore = create<AppState>((set, get) => ({
       kind,
       status: 'aberto',
       source: 'carimbo',
-      zoneId: zoneAtPoint(get().zones, center)?.id ?? null,
+      zoneId: zoneAtPoint(get().zones, center, get().sheetHeight)?.id ?? null,
       strokeIds: chosen.map((s) => s.id),
       bounds,
       title: '',
@@ -955,7 +1055,10 @@ export const useStore = create<AppState>((set, get) => ({
         if (item.source === 'carimbo') for (const id of item.strokeIds) stamped.add(id)
       }
 
-      const fields = detectFields(strokes, zones, { ignoreStrokeIds: stamped })
+      const fields = detectFields(strokes, zones, {
+        ignoreStrokeIds: stamped,
+        pageHeight: get().sheetHeight,
+      })
       const plan = planFieldSync(
         fields,
         items.filter((i) => i.source === 'auto'),
@@ -1069,7 +1172,7 @@ export const useStore = create<AppState>((set, get) => ({
         x: (stroke.bounds.minX + stroke.bounds.maxX) / 2,
         y: (stroke.bounds.minY + stroke.bounds.maxY) / 2,
       }
-      const zoneId = zoneAtPoint(zones, center)?.id ?? null
+      const zoneId = zoneAtPoint(zones, center, get().sheetHeight)?.id ?? null
       if (zoneId === stroke.zoneId) return stroke
       const updated = { ...stroke, zoneId }
       changed.push(updated)
@@ -1187,7 +1290,7 @@ export const useStore = create<AppState>((set, get) => ({
           transcription: {
             ...status,
             message: get().autoFields
-              ? 'Nenhuma linha identificada nesta folha. A leitura acontece no que você escreve DENTRO das faixas (Pauta, Tarefas, Dúvidas, Pendências) — a faixa "Anotação" não vira item de propósito.'
+              ? 'Nenhuma linha identificada nesta folha. A leitura acontece no que você escreve DENTRO de uma faixa — se escreveu fora de todas, ou só na faixa de fluxograma, não há linha pra ler.'
               : 'A identificação de campos está desligada, então não há linhas pra ler.',
             acao: get().autoFields ? undefined : 'ligarCampos',
           },
@@ -1339,7 +1442,7 @@ export const useStore = create<AppState>((set, get) => ({
         x: (s.bounds.minX + s.bounds.maxX) / 2,
         y: (s.bounds.minY + s.bounds.maxY) / 2,
       }
-      return zoneAtPoint(get().zones, centro, SHEET)?.id === zoneId
+      return zoneAtPoint(get().zones, centro, get().sheetHeight)?.id === zoneId
     })
 
     const grafo = buildGraph(toFlowStrokes(daZona))
@@ -1508,6 +1611,42 @@ export const useStore = create<AppState>((set, get) => ({
   // ─── Folha ─────────────────────────────────────────────────────────────────
 
   /** A folha cresce sozinha quando a escrita chega perto do fim. */
+  /**
+   * Estica a faixa pra baixo — e a folha com ela.
+   *
+   * Três coisas acontecem juntas, e precisam acontecer juntas: as frações de
+   * TODAS as zonas são recalculadas pra nova altura, a página guarda a altura
+   * nova, e a página cresce pelo menos até caber uma folha inteira. Gravar uma
+   * sem a outra deixaria o desenho e a classificação discordando sobre onde
+   * cada faixa está — o defeito mais caro que este app já teve.
+   */
+  async extendZoneDown(zoneId, novoFundo) {
+    const resultado = extendDown(get().zones, zoneId, get().sheetHeight, novoFundo)
+    if (!resultado) return
+
+    const zones = get().zones.map((z) => {
+      const rect = resultado.rects.get(z.id)
+      return rect ? { ...z, rect } : z
+    })
+    set({ zones, sheetHeight: resultado.sheet })
+    await repo.putZones(zones)
+
+    const { activePageId, pages } = get()
+    const page = pages.find((p) => p.id === activePageId)
+    if (page) {
+      const updated = {
+        ...page,
+        sheetHeight: resultado.sheet,
+        height: Math.max(page.height, resultado.sheet),
+        updatedAt: Date.now(),
+      }
+      await repo.putPage(updated)
+      set({ pages: pages.map((p) => (p.id === page.id ? updated : p)) })
+    }
+
+    await get().reclassifyStrokes()
+  },
+
   async growPageIfNeeded(bottomY) {
     const { activePageId, pages } = get()
     const page = pages.find((p) => p.id === activePageId)

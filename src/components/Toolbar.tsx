@@ -102,6 +102,8 @@ export function Toolbar({ onOpenFlow }: { onOpenFlow: (id: string) => void }) {
 
   return (
     <aside className="toolbar">
+      <HistoryButtons />
+
       {TOOLS.map((t) => (
         <button
           key={t.kind}
@@ -223,6 +225,50 @@ export function Toolbar({ onOpenFlow }: { onOpenFlow: (id: string) => void }) {
         )}
       </div>
     </aside>
+  )
+}
+
+/**
+ * Voltar e avançar.
+ *
+ * Ficam no topo da barra, acima das ferramentas: é o primeiro lugar onde a mão
+ * procura depois de um traço errado, e tem que estar à vista sempre — não é um
+ * aviso que aparece por cinco segundos e some.
+ *
+ * Cobrem a TINTA: traço desenhado e borrachada. Mexer em zonas, itens e fichas
+ * não entra na pilha — são mudanças que a própria tela já mostra desfeitas num
+ * toque, e misturá-las aqui faria "voltar" significar coisas diferentes a cada
+ * vez.
+ */
+function HistoryButtons() {
+  const history = useStore((s) => s.history)
+  const undoStep = useStore((s) => s.undoStep)
+  const redoStep = useStore((s) => s.redoStep)
+
+  const paraVoltar = history.feitos[history.feitos.length - 1]
+  const paraAvancar = history.desfeitos[history.desfeitos.length - 1]
+
+  return (
+    <div className="history-row">
+      <button
+        className="history-btn"
+        onClick={() => void undoStep()}
+        disabled={!paraVoltar}
+        title={paraVoltar ? `Voltar: ${paraVoltar.label}` : 'Nada pra voltar'}
+        aria-label="Voltar"
+      >
+        ↶
+      </button>
+      <button
+        className="history-btn"
+        onClick={() => void redoStep()}
+        disabled={!paraAvancar}
+        title={paraAvancar ? `Avançar: ${paraAvancar.label}` : 'Nada pra avançar'}
+        aria-label="Avançar"
+      >
+        ↷
+      </button>
+    </div>
   )
 }
 
