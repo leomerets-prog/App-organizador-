@@ -141,6 +141,19 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
         </div>
       )}
 
+      {/* O que a leitura viu, sempre à vista. Quando algo não sai como o
+          usuário esperava, estes números dizem ONDE parou — sem eles, a
+          conversa vira adivinhação de parte a parte. */}
+      {chart.diagnostico && (
+        <div className="flow-diag">
+          <strong>Leitura:</strong> {chart.diagnostico.tracos} traços ·{' '}
+          {chart.diagnostico.fechados} caixas de um traço só ·{' '}
+          {chart.diagnostico.juntados} montadas juntando lados ·{' '}
+          {chart.diagnostico.setas} setas · {chart.diagnostico.letra} traços de letra ·{' '}
+          {chart.diagnostico.soltos} de fora
+        </div>
+      )}
+
       {erro && <div className="flow-erro">{erro}</div>}
       {salvo && <div className="flow-salvo">✓ Salvo — {salvo}</div>}
       {flowStatus.state === 'erro' && <div className="flow-erro">{flowStatus.message}</div>}

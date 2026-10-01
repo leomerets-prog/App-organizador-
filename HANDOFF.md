@@ -455,7 +455,33 @@ medidas reais, justamente pra que ninguém volte a estreitar a entrada.
 que o usuário não sabe que existe (ter escolhido o modelo certo, ter criado a
 zona ANTES de desenhar), a condição é o defeito.
 
-### 26. Fluxograma não se lê linha por linha
+### 26. Quase ninguém desenha um retângulo sem levantar a caneta
+
+A leitura só aceitava caixa feita de UM traço fechado. Com caneta na mão, o
+normal é dois "L" encaixados, ou os quatro lados soltos — e aí nenhum traço
+sozinho é caixa nenhuma. O fluxograma inteiro do usuário não devolvia uma
+única caixa por causa disso, e o teste não pegava porque todos os desenhos de
+teste eram feitos de uma tacada só.
+
+`chainOpenStrokes()` junta traços abertos cujas pontas se encontram (até 30px).
+Três regras que não são enfeite, e cada uma veio de um erro medido:
+
+- **para assim que FECHA.** Sem isso a junção continuava e soldava a letra de
+  dentro da caixa no lado dela: de 14 caixas, 3 se perdiam
+- **o menor vão ganha.** O lado seguinte encosta de perto; a letra, que às
+  vezes também está perto, encosta de longe
+- **cadeia que não fecha devolve tudo.** Uma tentativa frustrada não pode
+  consumir os lados de uma caixa que daria certo logo adiante
+
+Só entram traços com mais de 34px: letra é curta, e deixá-la entrar faria
+palavras virarem caixas (há caso de teste pra isso).
+
+**Lição que vale pro resto:** *todo* desenho sintético deste repositório era
+feito do jeito mais limpo possível — e foi exatamente por onde o recurso
+quebrou com gente de verdade. Teste de desenho precisa imitar a MÃO, não a
+geometria.
+
+### 27. Fluxograma não se lê linha por linha
 
 A zona de fluxograma é a única que `items/detect.ts` ignora (`ZONES_SEM_LINHA`).
 Lá uma caixa e a seta ao lado estão na mesma altura: a identificação por linha
@@ -465,7 +491,7 @@ leria as duas como um campo só, e um desenho de dez traços viraria quatro
 A leitura daquela zona é outra, mora em `flow/`, e o resultado é **um** registro
 — o desenho montado — em vez de um por linha.
 
-### 27. Prazo é dia do calendário, no fuso de casa
+### 28. Prazo é dia do calendário, no fuso de casa
 
 `new Date('2026-09-30')` é lido como **UTC** e, no Brasil, volta como dia 29. Um
 prazo que anda um dia pra trás sozinho destrói a confiança na lista inteira — e
@@ -541,6 +567,8 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Esticar empurra as de baixo, não as cobre | Faixa sobreposta faz a mesma linha pertencer a duas, e aí o painel começa a mentir |
 | Voltar/avançar cobrem só a tinta | Zona, item e ficha a tela já desfaz num toque. "Voltar" precisa significar a mesma coisa toda vez |
 | A pilha é esvaziada ao trocar de página | Voltar numa folha e ver sumir algo de outra seria pior que não ter voltar |
+| Caixa pode ser feita de vários traços | Com caneta, levantar a mão num canto é o normal. Exigir um traço fechado era exigir um jeito de desenhar que ninguém usa |
+| A leitura mostra os números do que viu | "Não achei caixa nenhuma" é um beco. Com os números, uma foto da tela diz onde parou — e poupa rodadas de adivinhação de parte a parte |
 | O fluxograma lê a folha inteira, não uma zona | O desenho passa de uma folha, o traço guarda a zona de quando foi escrito, e ninguém escolhe o modelo certo antes de desenhar. Geometria basta pra separar caixa, seta e letra |
 | O fluxograma montado é OUTRA coisa, ao lado do desenho | A tinta na folha nunca é apagada nem substituída. Quem desenhou quer poder continuar desenhando, e o leitor erra — se ele comesse o original, errar custaria o trabalho |
 | Nome corrigido à mão sobrevive à remontagem | Mesmo motivo da transcrição: ver a própria correção sumir é o que faz alguém parar de confiar no recurso |

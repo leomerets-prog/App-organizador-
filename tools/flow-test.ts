@@ -435,7 +435,7 @@ const casos: Caso[] = [
  * guarda os dois lados: a geometria dá conta de um desenho de gente, e um
  * fluxograma de verdade passa de uma folha.
  */
-function desenhoDoUsuario(): { strokes: FlowStroke[]; caixas: number } {
+function desenhoDoUsuario(emPedacos = false): { strokes: FlowStroke[]; caixas: number } {
   const CAIXAS: [number, number, number, number][] = [
     [474, 395, 346, 119],
     [514, 596, 246, 134],
@@ -455,10 +455,16 @@ function desenhoDoUsuario(): { strokes: FlowStroke[]; caixas: number } {
 
   const lista: FlowStroke[] = []
   for (const [x, y, w, h] of CAIXAS) {
-    // A caixa fecha PERTO do começo, não exatamente — ninguém fecha exato.
-    const volta = retangulo(x, y, w, h)
-    volta[volta.length - 1] = { x: x + tremor(6), y: y + tremor(6) }
-    lista.push(traco(volta))
+    if (emPedacos) {
+      // Como quase todo mundo desenha: dois "L" encaixados, com as pontas
+      // perto mas sem se tocar.
+      for (const lado of ladosEmL(x, y, w, h)) lista.push(traco(lado))
+    } else {
+      // A caixa fecha PERTO do começo, não exatamente — ninguém fecha exato.
+      const volta = retangulo(x, y, w, h)
+      volta[volta.length - 1] = { x: x + tremor(6), y: y + tremor(6) }
+      lista.push(traco(volta))
+    }
     lista.push(traco(palavra(x + 18, y + h * 0.4, Math.min(w - 36, 120))))
     if (h > 70) lista.push(traco(palavra(x + 18, y + h * 0.72, Math.min(w - 36, 100))))
   }
@@ -475,7 +481,85 @@ function desenhoDoUsuario(): { strokes: FlowStroke[]; caixas: number } {
   return { strokes: lista, caixas: CAIXAS.length }
 }
 
+/** Um retângulo feito em dois "L", com as pontas perto mas separadas. */
+function ladosEmL(x: number, y: number, w: number, h: number) {
+  const folga = 9
+  const a = mao([
+    { x: x + folga, y: y },
+    { x: x + w, y: y },
+    { x: x + w, y: y + h - folga },
+  ].flatMap((p, i, arr) => (i === arr.length - 1 ? [p] : interpolarReta(p, arr[i + 1]))))
+  const b = mao([
+    { x: x + w - folga, y: y + h },
+    { x: x, y: y + h },
+    { x: x, y: y + folga },
+  ].flatMap((p, i, arr) => (i === arr.length - 1 ? [p] : interpolarReta(p, arr[i + 1]))))
+  return [a, b]
+}
+
+function interpolarReta(a: { x: number; y: number }, b: { x: number; y: number }) {
+  const pts: { x: number; y: number }[] = []
+  for (let t = 0; t < 12; t++) {
+    pts.push({ x: a.x + ((b.x - a.x) * t) / 12, y: a.y + ((b.y - a.y) * t) / 12 })
+  }
+  return pts
+}
+
 casos.push(
+  {
+    // ESTE é o caso que faltava. Quase ninguém desenha um retângulo sem
+    // levantar a caneta, e um lado solto não é caixa nenhuma.
+    nome: 'caixa desenhada em dois traços ainda é uma caixa',
+    rodar() {
+      const lados = ladosEmL(100, 100, 240, 110)
+      if (classifyShape(lados[0]) || classifyShape(lados[1])) {
+        return 'um "L" sozinho virou caixa'
+      }
+      const g = buildGraph([traco(lados[0]), traco(lados[1])])
+      if (g.diagnostico.juntados !== 1) {
+        return `juntou ${g.diagnostico.juntados} caixa(s) (fechados sozinhos: ${g.diagnostico.fechados})`
+      }
+      return null
+    },
+  },
+  {
+    nome: 'o desenho do usuário sai inteiro mesmo feito em dois traços por caixa',
+    rodar() {
+      const { strokes, caixas } = desenhoDoUsuario(true)
+      const g = buildGraph(strokes)
+      if (g.nodes.length !== caixas) {
+        return `${g.nodes.length} caixas, esperava ${caixas} (juntadas: ${g.diagnostico.juntados})`
+      }
+      if (g.edges.length !== caixas - 1) return `${g.edges.length} setas, esperava ${caixas - 1}`
+      return null
+    },
+  },
+  {
+    nome: 'juntar não faz palavras virarem caixa',
+    rodar() {
+      // Quatro palavras soltas, próximas, como num parágrafo.
+      const texto = [
+        traco(palavra(100, 100, 90)),
+        traco(palavra(100, 130, 80)),
+        traco(palavra(100, 160, 95)),
+        traco(palavra(100, 190, 70)),
+      ]
+      const g = buildGraph(texto)
+      return g.nodes.length === 0 ? null : `${g.nodes.length} palavra(s) viraram caixa`
+    },
+  },
+  {
+    nome: 'o diagnóstico conta o que a leitura viu',
+    rodar() {
+      const { strokes } = desenhoDoUsuario()
+      const d = buildGraph(strokes).diagnostico
+      if (d.tracos !== strokes.length) return `contou ${d.tracos} de ${strokes.length} traços`
+      if (d.formas !== 14) return `${d.formas} formas`
+      if (d.setas !== 13) return `${d.setas} setas`
+      if (d.letra < 14) return `${d.letra} traços de letra`
+      return null
+    },
+  },
   {
     nome: 'o desenho de verdade do usuário sai inteiro',
     rodar() {

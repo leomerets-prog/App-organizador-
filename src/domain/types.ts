@@ -288,6 +288,22 @@ export interface Flowchart {
   edges: FlowChartEdge[]
   /** Quantos traços o leitor não soube aproveitar; aparece na tela. */
   soltos: number
+  /**
+   * O que a leitura viu, passo a passo.
+   *
+   * Fica guardado e aparece na tela porque "não achei caixa nenhuma" é um
+   * beco: sem estes números não dá pra saber se a caixa não fechou, se a seta
+   * não encostou ou se a tinta nem chegou. Uma foto da tela basta.
+   */
+  diagnostico?: {
+    tracos: number
+    fechados: number
+    juntados: number
+    formas: number
+    setas: number
+    letra: number
+    soltos: number
+  }
   updatedAt: number
 }
 

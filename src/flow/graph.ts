@@ -1,6 +1,6 @@
 import type { Bounds, Id, Stroke } from '../domain/types'
 import type { Pt } from '../lib/geometry'
-import { boundsContain, boundsOf, dist, padBounds, pointToSegment } from '../lib/geometry'
+import { boundsContain, boundsOf, dist, padBounds, pathLength, pointToSegment } from '../lib/geometry'
 import { classifyShape, isClosedPath } from './shapes'
 import type { ShapeKind } from './shapes'
 
@@ -45,13 +45,29 @@ const ARROWHEAD_NEAR = 30
 /** Distância máxima entre a letra e a seta pra ela ser rótulo daquela seta. */
 const EDGE_LABEL_NEAR = 60
 
+/**
+ * Quão perto duas pontas precisam estar pra serem o mesmo canto.
+ *
+ * Quase ninguém desenha um retângulo sem levantar a caneta: o normal é dois
+ * "L" encaixados, ou quatro lados soltos. Cada lado vira um traço ABERTO, e
+ * nenhum deles sozinho é caixa nenhuma — foi o que fez o desenho de verdade
+ * do usuário não devolver uma caixa sequer.
+ */
+const JOIN_GAP = 30
+
+/** Traço mais curto que isto não entra na junção: é letra, não lado de caixa. */
+const JOIN_MIN_LENGTH = 34
+
+/** Quantos traços no máximo formam uma caixa. Quatro lados, com folga. */
+const MAX_JOIN_PARTS = 6
+
 export interface FlowNode {
   id: Id
   kind: ShapeKind
   /** Onde a caixa foi desenhada, na folha. */
   bounds: Bounds
-  /** O traço que desenha a caixa. */
-  shapeStrokeId: Id
+  /** Os traços que desenham a caixa — um só, ou os lados feitos em separado. */
+  shapeStrokeIds: Id[]
   /** Os traços da letra de dentro — o nome da caixa, antes de ser lido. */
   labelStrokeIds: Id[]
 }
@@ -74,6 +90,24 @@ export interface FlowGraph {
   edges: FlowEdge[]
   /** Traços que não entraram em nada; o painel diz quantos foram. */
   soltos: Id[]
+  /**
+   * O que a leitura viu, passo a passo.
+   *
+   * Existe porque "não achei caixa nenhuma" é um beco: não dá pra saber se o
+   * problema foi a caixa não fechar, a seta não encostar ou a tinta nem ter
+   * chegado. Com estes números, uma foto da tela basta pra saber onde parou.
+   */
+  diagnostico: {
+    tracos: number
+    /** Traços que já fechavam sozinhos. */
+    fechados: number
+    /** Caixas montadas juntando lados soltos. */
+    juntados: number
+    formas: number
+    setas: number
+    letra: number
+    soltos: number
+  }
 }
 
 /** Só o necessário de um traço, pra este módulo não depender do resto. */
@@ -95,7 +129,7 @@ export function toFlowStrokes(strokes: readonly Stroke[]): FlowStroke[] {
 export function buildGraph(strokes: readonly FlowStroke[]): FlowGraph {
   const usados = new Set<Id>()
 
-  // 1. Caixas.
+  // 1. Caixas feitas de um traço só.
   const nodes: FlowNode[] = []
   for (const s of strokes) {
     const forma = classifyShape(s.points)
@@ -104,11 +138,27 @@ export function buildGraph(strokes: readonly FlowStroke[]): FlowGraph {
       id: s.id,
       kind: forma.kind,
       bounds: forma.bounds,
-      shapeStrokeId: s.id,
+      shapeStrokeIds: [s.id],
       labelStrokeIds: [],
     })
     usados.add(s.id)
   }
+  const fechadosSozinhos = nodes.length
+
+  // 1b. Caixas feitas de VÁRIOS traços — dois "L", quatro lados soltos.
+  for (const cadeia of chainOpenStrokes(strokes.filter((s) => !usados.has(s.id)))) {
+    const forma = classifyShape(cadeia.points)
+    if (!forma) continue
+    nodes.push({
+      id: cadeia.ids[0],
+      kind: forma.kind,
+      bounds: forma.bounds,
+      shapeStrokeIds: cadeia.ids,
+      labelStrokeIds: [],
+    })
+    for (const id of cadeia.ids) usados.add(id)
+  }
+  const juntados = nodes.length - fechadosSozinhos
 
   // Caixa dentro de caixa é quase sempre a letra lida como forma (um "O"
   // grande, um balão). A de dentro vira letra da de fora.
@@ -118,14 +168,18 @@ export function buildGraph(strokes: readonly FlowStroke[]): FlowGraph {
       if (dentro === fora) continue
       if (boundsContain(fora.bounds, dentro.bounds)) {
         aninhadas.add(dentro.id)
-        fora.labelStrokeIds.push(dentro.shapeStrokeId)
+        for (const id of dentro.shapeStrokeIds) fora.labelStrokeIds.push(id)
         break
       }
     }
   }
   const caixas = nodes.filter((n) => !aninhadas.has(n.id))
 
-  const abertos = strokes.filter((s) => !usados.has(s.id) && !isClosedPath(s.points))
+  const dentroDeCaixa = new Set<Id>()
+  for (const n of caixas) for (const id of n.shapeStrokeIds) dentroDeCaixa.add(id)
+  const abertos = strokes.filter(
+    (s) => !usados.has(s.id) && !dentroDeCaixa.has(s.id) && !isClosedPath(s.points),
+  )
 
   // 2. Setas: traço aberto com as duas pontas em caixas diferentes.
   const edges: FlowEdge[] = []
@@ -210,15 +264,106 @@ export function buildGraph(strokes: readonly FlowStroke[]): FlowGraph {
   }
   const finais = caixas.filter((n) => ligada.has(n.id) || n.labelStrokeIds.length > 0)
   for (const fora of caixas) {
-    if (!finais.includes(fora)) soltos.push(fora.shapeStrokeId)
+    if (!finais.includes(fora)) soltos.push(...fora.shapeStrokeIds)
   }
 
   const vivos = new Set(finais.map((n) => n.id))
+  const setas = edges.filter((e) => vivos.has(e.from) && vivos.has(e.to))
+  const letra = finais.reduce((t, n) => t + n.labelStrokeIds.length, 0)
+
   return {
     nodes: finais,
-    edges: edges.filter((e) => vivos.has(e.from) && vivos.has(e.to)),
+    edges: setas,
     soltos,
+    diagnostico: {
+      tracos: strokes.length,
+      fechados: fechadosSozinhos,
+      juntados,
+      formas: finais.length,
+      setas: setas.length,
+      letra,
+      soltos: soltos.length,
+    },
   }
+}
+
+/**
+ * Junta traços abertos que, encostados ponta a ponta, fecham uma figura.
+ *
+ * **Quase ninguém desenha um retângulo sem levantar a caneta.** O normal é
+ * dois "L" encaixados, ou os quatro lados soltos. Cada lado vira um traço
+ * aberto, e nenhum deles sozinho é caixa nenhuma — por isso um fluxograma
+ * inteiro podia não devolver uma única caixa.
+ *
+ * A junção é gulosa e por ponta: pega um traço, procura outro cuja ponta
+ * encoste na dele (invertendo se for preciso), e continua até não achar mais.
+ * Só entram traços COMPRIDOS: letra é curta, e deixá-la entrar faria palavras
+ * virarem caixas.
+ */
+export function chainOpenStrokes(
+  strokes: readonly FlowStroke[],
+): { ids: Id[]; points: Pt[] }[] {
+  const candidatos = strokes.filter(
+    (s) => s.points.length >= 2 && pathLength(s.points) >= JOIN_MIN_LENGTH,
+  )
+  const sobrando = new Map(candidatos.map((s) => [s.id, s]))
+  const cadeias: { ids: Id[]; points: Pt[] }[] = []
+
+  const fecha = (pontos: Pt[]) =>
+    pontos.length > 2 && dist(pontos[0], pontos[pontos.length - 1]) <= JOIN_GAP
+
+  for (const inicial of candidatos) {
+    if (!sobrando.has(inicial.id)) continue
+
+    const ids = [inicial.id]
+    let pontos = [...inicial.points]
+    const pegos = new Set<Id>([inicial.id])
+    let virou = false
+
+    // Um retângulo tem quatro lados; mais que isso é a junção se perdendo.
+    while (ids.length < MAX_JOIN_PARTS && !fecha(pontos)) {
+      const ponta = pontos[pontos.length - 1]
+
+      // O MENOR vão ganha: o lado seguinte da caixa encosta de perto, e a
+      // letra de dentro, que às vezes também está perto, encosta de longe.
+      let melhor: { id: Id; trecho: readonly Pt[]; vao: number } | null = null
+      for (const [id, outro] of sobrando) {
+        if (pegos.has(id)) continue
+        const inicio = outro.points[0]
+        const fim = outro.points[outro.points.length - 1]
+        const dInicio = dist(ponta, inicio)
+        const dFim = dist(ponta, fim)
+        const vao = Math.min(dInicio, dFim)
+        if (vao > JOIN_GAP) continue
+        if (melhor && vao >= melhor.vao) continue
+        melhor = { id, trecho: dInicio <= dFim ? outro.points : [...outro.points].reverse(), vao }
+      }
+
+      if (melhor) {
+        pontos = [...pontos, ...melhor.trecho]
+        ids.push(melhor.id)
+        pegos.add(melhor.id)
+        continue
+      }
+
+      // Nada desta ponta: vira a cadeia e tenta pela outra, uma vez só.
+      if (virou) break
+      virou = true
+      pontos.reverse()
+    }
+
+    /*
+     * Só vale se FECHOU. Cadeia aberta é devolvida inteira, sem consumir
+     * traço nenhum — senão uma tentativa frustrada comeria os lados de uma
+     * caixa que daria certo logo adiante.
+     */
+    if (ids.length >= 2 && fecha(pontos)) {
+      for (const id of ids) sobrando.delete(id)
+      cadeias.push({ ids, points: pontos })
+    }
+  }
+
+  return cadeias
 }
 
 /** A caixa em que este ponto encosta (dentro, ou a menos de `SNAP` da borda). */

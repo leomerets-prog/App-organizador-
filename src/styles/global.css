@@ -2375,6 +2375,18 @@ input {
   color: var(--text-dim);
 }
 
+.flow-diag {
+  padding: 8px 18px;
+  font-size: 11px;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+
+.flow-diag strong {
+  color: var(--text-dim);
+}
+
 .flow-erro {
   padding: 10px 18px;
   font-size: 13px;

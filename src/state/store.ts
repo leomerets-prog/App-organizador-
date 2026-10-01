@@ -1452,13 +1452,14 @@ export const useStore = create<AppState>((set, get) => ({
     const grafo = buildGraph(toFlowStrokes(tinta))
 
     if (grafo.nodes.length === 0) {
+      const d = grafo.diagnostico
       set({
         flowStatus: {
           state: 'erro',
           message:
             tinta.length === 0
               ? 'Não há desenho nesta folha ainda.'
-              : `Li ${tinta.length} traço(s) e não achei caixa nenhuma. A caixa precisa estar FECHADA — o traço voltando ao ponto de partida.`,
+              : `Li ${d.tracos} traço(s) e não achei caixa nenhuma (${d.fechados} fecharam sozinhos, ${d.juntados} montadas juntando lados). A caixa precisa FECHAR — o traço voltando ao ponto de partida, ou os lados se encontrando nos cantos.`,
         },
       })
       return
@@ -1532,6 +1533,7 @@ export const useStore = create<AppState>((set, get) => ({
       nodes,
       edges,
       soltos: grafo.soltos.length,
+      diagnostico: grafo.diagnostico,
       updatedAt: Date.now(),
     }
 
