@@ -368,6 +368,100 @@ async function aplicarPasso(
   get().scheduleFieldSync()
 }
 
+/** Prazo da leitura dos nomes inteira. Passou disso, o resto fica em branco. */
+const PRAZO_NOMES = 25_000
+
+/** Prazo de UMA caixa. Uma chamada presa não pode segurar as outras treze. */
+const PRAZO_CAIXA = 6_000
+
+/**
+ * Lê o nome de cada caixa, com o fluxograma já na tela.
+ *
+ * Roda solta, sem ninguém esperando: cada nome que chega atualiza o desenho no
+ * lugar. Dois prazos seguram o caso ruim — o do conjunto e o de cada caixa —
+ * porque o reconhecedor pode demorar muito, ou não voltar nunca, e nenhuma das
+ * duas coisas pode deixar a tela escrita "lendo" pra sempre.
+ *
+ * Nome que o usuário escreveu à mão nunca é tocado, como em todo o resto do app.
+ */
+async function lerNomesDasCaixas(
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+  chartId: Id,
+  grafo: { nodes: { id: Id; labelStrokeIds: Id[] }[] },
+  pageId: Id,
+): Promise<void> {
+  if (!recognizerPossible()) return
+
+  const status = await prepareRecognizer(() => {})
+  if (status.state !== 'pronto' || get().activePageId !== pageId) return
+
+  const ate = Date.now() + PRAZO_NOMES
+  const pendentes = grafo.nodes.filter((n) => n.labelStrokeIds.length > 0)
+  let lidos = 0
+
+  for (let i = 0; i < pendentes.length; i++) {
+    if (get().activePageId !== pageId) return
+    const chart = get().flowcharts.find((f) => f.id === chartId)
+    if (!chart) return
+
+    const node = chart.nodes.find((n) => n.id === pendentes[i].id)
+    if (!node || (node.editado && node.label) || node.label) continue
+
+    if (Date.now() > ate) {
+      set({
+        flowStatus: {
+          state: 'parado',
+          message: `Li ${lidos} nome(s); o resto demorou demais. Toque numa caixa pra escrever, ou em "Ler de novo".`,
+        },
+      })
+      return
+    }
+
+    set({
+      flowStatus: { state: 'lendo', message: `Lendo os nomes… (${i + 1} de ${pendentes.length})` },
+    })
+
+    const tinta = get().strokes.filter((s) => pendentes[i].labelStrokeIds.includes(s.id))
+    if (tinta.length === 0) continue
+
+    const folga = 20
+    try {
+      const leitura = await Promise.race([
+        recognizeStrokes(tinta, {
+          x: node.bounds.minX - folga,
+          y: node.bounds.minY - folga,
+          width: Math.max(1, node.bounds.maxX - node.bounds.minX + folga * 2),
+          height: Math.max(1, node.bounds.maxY - node.bounds.minY + folga * 2),
+        }),
+        new Promise<{ text: string }>((resolve) =>
+          setTimeout(() => resolve({ text: '' }), PRAZO_CAIXA),
+        ),
+      ])
+      if (!leitura.text) continue
+      lidos++
+
+      // Relê do estado a cada volta: o usuário pode ter corrigido um nome
+      // enquanto isto rodava, e a correção dele vale mais.
+      const atual = get().flowcharts.find((f) => f.id === chartId)
+      if (!atual) return
+      const atualizado: Flowchart = {
+        ...atual,
+        nodes: atual.nodes.map((n) =>
+          n.id === node.id && !n.editado && !n.label ? { ...n, label: leitura.text } : n,
+        ),
+        updatedAt: Date.now(),
+      }
+      set({ flowcharts: get().flowcharts.map((f) => (f.id === chartId ? atualizado : f)) })
+      await repo.putFlowchart(atualizado)
+    } catch {
+      // Uma caixa sem nome não pode derrubar o fluxograma inteiro.
+    }
+  }
+
+  if (get().activePageId === pageId) set({ flowStatus: { state: 'parado', message: '' } })
+}
+
 /** A altura da folha desta página; página antiga simplesmente usa o padrão. */
 function sheetOf(page: Page | undefined): number {
   const alto = page?.sheetHeight
@@ -1490,43 +1584,6 @@ export const useStore = create<AppState>((set, get) => ({
       direcao: e.direcao,
     }))
 
-    // A letra das caixas, quando o aparelho sabe ler. Sem reconhecedor as
-    // caixas saem sem nome e o usuário escreve no painel — mesmo caminho da
-    // transcrição da folha, e o painel diz isso em vez de ficar calado.
-    if (recognizerPossible()) {
-      const status = await prepareRecognizer(() => {})
-      if (status.state === 'pronto') {
-        for (let i = 0; i < nodes.length; i++) {
-          if (get().activePageId !== pageId) return
-          const node = nodes[i]
-          if (node.editado && node.label) continue
-          const daCaixa = grafo.nodes.find((n) => n.id === node.id)?.labelStrokeIds ?? []
-          if (daCaixa.length === 0) continue
-
-          set({
-            flowStatus: {
-              state: 'lendo',
-              message: `Lendo os nomes… (${i + 1} de ${nodes.length})`,
-            },
-          })
-          const tinta = get().strokes.filter((s) => daCaixa.includes(s.id))
-          if (tinta.length === 0) continue
-          const folga = 20
-          try {
-            const { text } = await recognizeStrokes(tinta, {
-              x: node.bounds.minX - folga,
-              y: node.bounds.minY - folga,
-              width: Math.max(1, node.bounds.maxX - node.bounds.minX + folga * 2),
-              height: Math.max(1, node.bounds.maxY - node.bounds.minY + folga * 2),
-            })
-            if (text) node.label = text
-          } catch {
-            // Uma caixa sem nome não pode derrubar o fluxograma inteiro.
-          }
-        }
-      }
-    }
-
     const chart: Flowchart = {
       id: anterior?.id ?? newId(),
       pageId,
@@ -1537,11 +1594,24 @@ export const useStore = create<AppState>((set, get) => ({
       updatedAt: Date.now(),
     }
 
+    /*
+     * O desenho aparece AGORA, antes de ler nome nenhum.
+     *
+     * Antes o painel só abria depois de passar o reconhecedor em cada caixa —
+     * e com quinze caixas isso é mais de um minuto de tela parada escrito
+     * "lendo os nomes". O usuário esperou, não apareceu nada, e a conclusão
+     * razoável foi que não funcionou.
+     *
+     * O que ele quer ver é a ESTRUTURA: as caixas, os níveis, as setas. O nome
+     * é enfeite que chega depois, caixa por caixa, com a tela já montada.
+     */
     set({
       flowcharts: [...get().flowcharts.filter((f) => f.id !== chart.id), chart],
       flowStatus: { state: 'parado', message: '' },
     })
     await repo.putFlowchart(chart)
+
+    void lerNomesDasCaixas(get, set, chart.id, grafo, pageId)
   },
 
   async updateFlowNode(chartId, nodeId, patch) {

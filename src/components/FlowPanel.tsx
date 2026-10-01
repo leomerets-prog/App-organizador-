@@ -154,6 +154,15 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
         </div>
       )}
 
+      {/* Os nomes chegam depois do desenho, um por um. Enquanto chegam, a
+          tela diz — mas o fluxograma já está montado atrás. */}
+      {flowStatus.state === 'lendo' && flowStatus.message && (
+        <div className="flow-lendo">{flowStatus.message}</div>
+      )}
+      {flowStatus.state === 'parado' && flowStatus.message && (
+        <div className="flow-diag">{flowStatus.message}</div>
+      )}
+
       {erro && <div className="flow-erro">{erro}</div>}
       {salvo && <div className="flow-salvo">✓ Salvo — {salvo}</div>}
       {flowStatus.state === 'erro' && <div className="flow-erro">{flowStatus.message}</div>}
