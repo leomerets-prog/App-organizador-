@@ -6,6 +6,7 @@ import { PageCanvas } from './components/PageCanvas'
 import { Toolbar } from './components/Toolbar'
 import { AudioBar } from './components/AudioBar'
 import { Central } from './components/Central'
+import { FlowPanel } from './components/FlowPanel'
 import { UpdatePanel } from './components/UpdatePanel'
 import { marcarPronto } from './crash'
 
@@ -14,6 +15,10 @@ export default function App() {
   const init = useStore((s) => s.init)
   const [panelOpen, setPanelOpen] = useState(false)
   const [updateOpen, setUpdateOpen] = useState(false)
+  /** Fluxograma aberto no painel, se houver. */
+  const [flowId, setFlowId] = useState<string | null>(null)
+  const flowcharts = useStore((s) => s.flowcharts)
+  const flowAberto = flowcharts.find((f) => f.id === flowId) ?? null
   // Em tela estreita a lateral vira sobreposição e cobre a folha; começa
   // fechada pra que o tablet em pé abra já mostrando a página.
   const [navOpen, setNavOpen] = useState(() => window.innerWidth > 820)
@@ -58,7 +63,7 @@ export default function App() {
 
         <div className="workspace">
           <PageCanvas />
-          <Toolbar />
+          <Toolbar onOpenFlow={setFlowId} />
         </div>
       </main>
 
@@ -66,6 +71,7 @@ export default function App() {
           próprio botão ☰, e sem isto não haveria como fechá-la. */}
       {navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} />}
 
+      {flowAberto && <FlowPanel chart={flowAberto} onClose={() => setFlowId(null)} />}
       {panelOpen && <Central onClose={() => setPanelOpen(false)} />}
       {updateOpen && <UpdatePanel onClose={() => setUpdateOpen(false)} />}
     </div>

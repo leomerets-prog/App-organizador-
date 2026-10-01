@@ -104,6 +104,8 @@ export type ZoneKind =
   | 'duvidas'
   | 'pendencias'
   | 'documentos'
+  /** Espaço pra desenhar um fluxograma à mão, que depois é remontado limpo. */
+  | 'fluxograma'
   | 'livre'
 
 export interface Zone {
@@ -227,6 +229,49 @@ export interface Recording {
    * e começa do zero como sempre começou.
    */
   positionMs?: number
+}
+
+// ─── Fluxograma ──────────────────────────────────────────────────────────────
+
+/** Retângulo (ação), losango (decisão), redondo (início/fim). */
+export type FlowShape = 'acao' | 'decisao' | 'terminal'
+
+export interface FlowChartNode {
+  id: Id
+  kind: FlowShape
+  /** O nome da caixa: lido da letra de dentro, ou escrito pelo usuário. */
+  label: string
+  /** O usuário mexeu no nome ou na forma? Então a remontagem não desfaz. */
+  editado?: boolean
+  /** Onde a caixa foi desenhada à mão — é o que dá a ordem esquerda/direita. */
+  bounds: Bounds
+}
+
+export interface FlowChartEdge {
+  id: Id
+  from: Id
+  to: Id
+  label: string
+  /** A direção veio da ponta de seta desenhada, ou só da ordem do traço? */
+  direcao: 'ponta' | 'ordem'
+}
+
+/**
+ * O fluxograma montado a partir do desenho de uma zona.
+ *
+ * Fica guardado porque o usuário corrige nomes à mão, e remontar do zero a
+ * cada abertura apagaria essas correções — o mesmo motivo pelo qual o texto
+ * transcrito à mão nunca é sobrescrito.
+ */
+export interface Flowchart {
+  id: Id
+  pageId: Id
+  zoneId: Id
+  nodes: FlowChartNode[]
+  edges: FlowChartEdge[]
+  /** Quantos traços o leitor não soube aproveitar; aparece na tela. */
+  soltos: number
+  updatedAt: number
 }
 
 /** O blob de áudio vive numa store separada pra não pesar as consultas de metadados. */

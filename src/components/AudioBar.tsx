@@ -12,6 +12,7 @@ import {
   worthSaving,
 } from '../audio/playback'
 import { salvarAudio } from '../audio/export'
+import { formatRate } from '../state/prefs'
 import { getRecordingBlob } from '../db/repo'
 import { newId } from '../lib/id'
 import type { Recording } from '../domain/types'
@@ -37,6 +38,8 @@ export function AudioBar() {
   const addRecording = useStore((s) => s.addRecording)
   const removeRecording = useStore((s) => s.removeRecording)
   const setRecordingPosition = useStore((s) => s.setRecordingPosition)
+  const audioRate = useStore((s) => s.audioRate)
+  const cycleAudioRate = useStore((s) => s.cycleAudioRate)
 
   const [handle, setHandle] = useState<RecorderHandle | null>(null)
   const [elapsed, setElapsed] = useState(0)
@@ -105,6 +108,12 @@ export function AudioBar() {
   loadedIdRef.current = loadedId
   const guardarPosicaoRef = useRef(guardarPosicao)
   guardarPosicaoRef.current = guardarPosicao
+
+  // A velocidade vale na hora, inclusive com o áudio já tocando: é assim que
+  // se descobre qual serve, ouvindo a diferença no mesmo trecho.
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.playbackRate = audioRate
+  }, [audioRate])
 
   // Ao sair da página: solta o áudio e grava onde a escuta parou. Sem isto,
   // trocar de página perderia justamente a posição que o recurso existe pra ter.
@@ -177,6 +186,7 @@ export function AudioBar() {
     audioRef.current = audio
     audio.src = url
     audio.preload = 'auto'
+    audio.playbackRate = audioRate
 
     audio.onended = () => {
       setPlayingId(null)
@@ -227,6 +237,9 @@ export function AudioBar() {
       const de = resumeAt(positionsRef.current[rec.id] ?? rec.positionMs ?? 0, duracao)
       audio.currentTime = de / 1000
       setPositions((p) => ({ ...p, [rec.id]: de }))
+      // De novo aqui: trocar o `src` devolve a velocidade pra 1 em parte dos
+      // navegadores, e o único sintoma seria o áudio voltar ao normal sozinho.
+      audio.playbackRate = audioRate
       await audio.play()
       setPlayingId(rec.id)
     } catch {
@@ -306,6 +319,17 @@ export function AudioBar() {
                 </button>
 
                 <span className="rec-meta">{rec.label}</span>
+
+                {/* A velocidade. Um toque passa pra próxima e volta pro 1x
+                    depois do 2x — sem menu, que numa tela de tablet custa
+                    dois toques e um alvo pequeno. */}
+                <button
+                  className={`rec-rate ${audioRate !== 1 ? 'ativo' : ''}`}
+                  onClick={cycleAudioRate}
+                  title="Velocidade de escuta; toque pra acelerar"
+                >
+                  {formatRate(audioRate)}
+                </button>
 
                 <button
                   className="rec-save"

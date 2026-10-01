@@ -71,7 +71,7 @@ por outro.
 ```bash
 npm install
 npm run dev            # servidor de desenvolvimento
-npm test               # rabisco + borracha + campos + zonas + Central + áudio (rode sempre)
+npm test               # rabisco, borracha, campos, zonas, Central, áudio, fluxograma
 npm run build:tablet   # regenera tablet/ — COMITAR JUNTO
 npx cap sync android   # leva tablet/ para o projeto Android
 ```
@@ -350,7 +350,49 @@ antigo) → pasta do próprio app. A última some se o app for desinstalado, e �
 por isso que ela é a última — mas devolver "não deu" e deixar o usuário sem
 cópia nenhuma seria pior.
 
-### 21. Prazo é dia do calendário, no fuso de casa
+### 21. Área não separa retângulo de redondo — canto separa
+
+A primeira ideia pra ler a forma de uma caixa desenhada à mão é comparar a
+área do traço com a da caixa envolvente. Não funciona: um círculo preenche 78%
+e um retângulo de canto arredondado (que é como todo mundo desenha) preenche
+uns 88%. Dez pontos de diferença, com a mão tremendo no meio.
+
+O que separa é o **giro**: no círculo ele é o mesmo em toda a volta; no
+retângulo está todo concentrado em quatro pontos. `countCorners()` reamostra o
+traço e conta só os PICOS de giro — contar cada ponto acima do limite daria
+doze cantos num retângulo, porque um canto feito à mão espalha o giro por
+vários pontos.
+
+A área ainda serve, mas pra outra pergunta: losango preenche ~50%, e isso sim
+é categórico. Daí a ordem das perguntas em `classifyShape()`: magro demais →
+não é caixa; preenche pouco → losango; tem canto → retângulo; não tem →
+redondo. **Começar pelos cantos faria todo losango virar retângulo**, porque
+os dois têm quatro.
+
+### 22. A direção da seta é um palpite, a não ser que haja ponta
+
+Sem cabeça desenhada, a única pista de pra onde a seta aponta é a ordem em que
+a mão fez o traço — e muita gente desenha a seta de trás pra frente. O leitor
+usa a ordem, mas marca a ligação como `direcao: 'ordem'`, e o painel diz na
+tela quantas setas estão nesse caso. Quando existe uma cabeça desenhada
+(traço pequeno largado perto de uma das pontas), **ela ganha da ordem** e a
+ligação vira `direcao: 'ponta'`.
+
+Vale a regra geral: **palpite que não se anuncia vira erro silencioso.** Um
+fluxograma com uma seta invertida parece certo e está errado — e quem recebe
+não tem como saber.
+
+### 23. Fluxograma não se lê linha por linha
+
+A zona de fluxograma é a única que `items/detect.ts` ignora (`ZONES_SEM_LINHA`).
+Lá uma caixa e a seta ao lado estão na mesma altura: a identificação por linha
+leria as duas como um campo só, e um desenho de dez traços viraria quatro
+"tarefas" sem sentido fora do desenho.
+
+A leitura daquela zona é outra, mora em `flow/`, e o resultado é **um** registro
+— o desenho montado — em vez de um por linha.
+
+### 24. Prazo é dia do calendário, no fuso de casa
 
 `new Date('2026-09-30')` é lido como **UTC** e, no Brasil, volta como dia 29. Um
 prazo que anda um dia pra trás sozinho destrói a confiança na lista inteira — e
@@ -372,15 +414,17 @@ src/
   items/       identificação dos campos (detect) e a lógica da Central —
                filtro, busca, resumo, ordem e faixas de prazo (central)
   audio/       gravação, contas do tocador (playback) e salvar pra fora (export)
+  flow/        leitura do fluxograma: formas (shapes), grafo (graph), arranjo (layout)
   ocr/         transcrição da letra (ponte com o plugin Android)
   zones/       em que zona um ponto caiu, e a edição das faixas
-  db/          IndexedDB (versão 2: traços, zonas, itens, áudio, imagens)
+  db/          IndexedDB (versão 3: traços, zonas, itens, áudio, imagens,
+               fluxogramas)
   state/       estado e todas as ações que mudam dados; preferências
   update/      verificação de versão
   components/  folha, navegação, barras, painel
   lib/         geometria
-tools/         testes de rabisco, borracha, campos, zonas, Central, áudio e o
-               roteiro que abre o app num Android de verdade
+tools/         testes de rabisco, borracha, campos, zonas, Central, áudio,
+               fluxograma, e o roteiro que abre o app num Android de verdade
 android/       projeto Capacitor (gerado, mas versionado)
 keystore/      chave de assinatura — não trocar
 ```
@@ -391,7 +435,8 @@ grava depois. É isso que mantém a escrita fluida.
 
 **O que é puro e testável:** `ink/erase.ts`, `ink/scribble.ts`,
 `ink/viewport.ts`, `items/detect.ts`, `items/central.ts`, `audio/playback.ts`,
-`zones/edit.ts` e `lib/geometry.ts` não sabem nada de React nem de banco. Lógica nova de tinta, de
+`flow/shapes.ts`, `flow/graph.ts`, `flow/layout.ts`, `zones/edit.ts` e
+`lib/geometry.ts` não sabem nada de React nem de banco. Lógica nova de tinta, de
 identificação, de zona ou de filtro deve nascer ali.
 
 **Caminho quente:** o traço em andamento e o estado da janela (zoom/rolagem)
@@ -417,6 +462,11 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Ficha é terceira coluna deitado, tela cheia em pé | Passar de um registro ao outro sem perder o lugar na lista; em pé não cabe coluna nenhuma |
 | Tocar de novo na prioridade marcada tira a prioridade | Sem isso, escolher errado vira um estado do qual não se sai |
 | A ordem da lista nunca empata solto | Sem prazo (ou sem prioridade) vai pro fim, e o desempate final é sempre o mais recente. Lista que dança a cada abertura não dá pra confiar |
+| O fluxograma montado é OUTRA coisa, ao lado do desenho | A tinta na folha nunca é apagada nem substituída. Quem desenhou quer poder continuar desenhando, e o leitor erra — se ele comesse o original, errar custaria o trabalho |
+| Nome corrigido à mão sobrevive à remontagem | Mesmo motivo da transcrição: ver a própria correção sumir é o que faz alguém parar de confiar no recurso |
+| O fluxograma sai como PNG, não SVG | Vai ser aberto por outra pessoa, provavelmente no celular. PNG abre em qualquer lugar; SVG abre numa tela de código em metade dos aparelhos |
+| A ordem esquerda/direita do desenho é mantida | Quem desenhou o "sim" à esquerda espera encontrá-lo à esquerda. Arranjo que troca os lados obriga a reler tudo |
+| O acelerador do áudio vai até 2x, sem 0,5x | Acima de 2x a fala vira ruído; e ninguém pediu mais devagar — cada parada a mais no ciclo é um toque a mais pra voltar ao normal |
 | Campo novo em registro já existente nasce OPCIONAL | `positionMs`, `dueAt`, `priority` entraram assim: `DB_VERSION` não sobe, nenhuma migração roda e o que o usuário já tinha continua exatamente como estava. Migração é o lugar onde se perde o caderno de alguém |
 | A posição da escuta vive no BANCO, não na tela | Uma conversa de uma hora se ouve em pedaços, ao longo de dias. Guardar só em memória perderia a posição ao trocar de página, que é justamente quando ela importa |
 | Parado no fim, ▶ recomeça do zero | "Continuar de onde parou" a 200ms do fim é não tocar nada; quem aperta ▶ ali quer ouvir de novo |
@@ -445,6 +495,19 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 na pasta Downloads do tablet, fora do aplicativo. A tinta, o texto transcrito e
 os itens continuam só dentro do app: desinstalar apaga tudo isso. É o item 1 da
 lista de próximas etapas por esse motivo.
+
+**O leitor de fluxograma depende de o desenho ser desenhado assim.** Caixa tem
+que FECHAR (o traço voltando ao começo) e seta tem que ENCOSTAR nas duas
+caixas. Traço que não entrou em nada é contado e dito na tela, mas o app não
+adivinha o que o usuário quis. A leitura foi verificada no navegador com um
+processo de cinco caixas (início, decisão, dois caminhos, fim) e um retorno;
+com a mão de verdade num tablet, os limites de `flow/shapes.ts` ainda podem
+precisar de ajuste — estão todos nomeados no topo do arquivo, pra isso.
+
+**O nome das caixas depende do reconhecedor.** No navegador elas saem vazias
+(aparece "…") e o usuário escreve no painel. No APK, a letra de dentro de cada
+caixa vai pro ML Kit como qualquer outra — com a mesma qualidade, e as mesmas
+limitações, da transcrição da folha.
 
 **Salvar no Android não foi visto funcionando.** O caminho do navegador (o
 download comum) foi verificado; o `FileSaverPlugin` compila contra as sombras e
@@ -510,6 +573,8 @@ pra transcrição importar.
 7. ~~Ficha por registro, com prazo e prioridade~~ — feita
 8. **Lembrete de prazo** — hoje o prazo só ordena e colore; nada avisa o usuário
    no dia. É o passo natural depois da ficha
+9. ~~Acelerador do áudio e barra de posição~~ — feitos
+10. ~~Zona de fluxograma, lida e remontada~~ — feita
 
 ---
 

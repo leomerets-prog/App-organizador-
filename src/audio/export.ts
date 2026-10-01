@@ -57,7 +57,12 @@ export async function salvarAudio(rec: Recording, blob: Blob): Promise<SaveResul
     return { onde: 'downloads deste navegador' }
   }
 
-  const { token } = await FileSaver.abrir({ nome, mimeType: rec.mimeType || 'audio/webm' })
+  return await enviarEmPedacos(blob, nome, rec.mimeType || 'audio/webm')
+}
+
+/** A travessia da ponte, em pedaços — serve pro áudio e pra imagem. */
+async function enviarEmPedacos(blob: Blob, nome: string, mimeType: string): Promise<SaveResult> {
+  const { token } = await FileSaver.abrir({ nome, mimeType })
   try {
     for (let inicio = 0; inicio < blob.size; inicio += PEDACO) {
       const parte = blob.slice(inicio, Math.min(inicio + PEDACO, blob.size))
@@ -69,6 +74,22 @@ export async function salvarAudio(rec: Recording, blob: Blob): Promise<SaveResul
     await FileSaver.cancelar({ token }).catch(() => {})
     throw erro
   }
+}
+
+/**
+ * Salvar uma imagem (hoje, o fluxograma montado).
+ *
+ * Mesmo caminho do áudio — pasta Downloads no aplicativo, download comum no
+ * navegador — porque o problema é o mesmo: o que fica só dentro do app morre
+ * com o app.
+ */
+export async function salvarImagem(blob: Blob, nome: string): Promise<SaveResult> {
+  const limpo = limpar(nome.replace(/\.png$/i, '')) + '.png'
+  if (!noAplicativo()) {
+    baixarNoNavegador(blob, limpo)
+    return { onde: 'downloads deste navegador' }
+  }
+  return await enviarEmPedacos(blob, limpo, 'image/png')
 }
 
 /**

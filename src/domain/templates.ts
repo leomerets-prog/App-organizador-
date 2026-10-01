@@ -70,6 +70,17 @@ export const TEMPLATES: PageTemplate[] = [
     ],
   },
   {
+    id: 'fluxograma',
+    name: 'Fluxograma',
+    description: 'Espaço grande pra desenhar o processo à mão; o app remonta limpo e estruturado.',
+    zones: [
+      { kind: 'pautas', label: 'Processo', rect: { x: 0, y: 0, w: 1, h: 0.08 } },
+      { kind: 'fluxograma', label: 'Fluxograma', rect: { x: 0, y: 0.08, w: 1, h: 0.76 } },
+      { kind: 'duvidas', label: 'Dúvidas', rect: { x: 0, y: 0.84, w: 0.5, h: 0.16 } },
+      { kind: 'tarefas', label: 'Tarefas', rect: { x: 0.5, y: 0.84, w: 0.5, h: 0.16 } },
+    ],
+  },
+  {
     id: 'livre',
     name: 'Livre',
     description: 'Folha inteira sem divisão. Nada é identificado sozinho: aqui o carimbo é seu.',
@@ -100,6 +111,7 @@ export const ZONE_COLORS: Record<ZoneKind, string> = {
   duvidas: '#f59e0b',
   pendencias: '#ef4444',
   documentos: '#06b6d4',
+  fluxograma: '#ec4899',
   livre: '#3f3f46',
 }
 
@@ -123,5 +135,17 @@ export const ZONE_ITEM_KIND: Record<ZoneKind, ItemKind> = {
   duvidas: 'duvida',
   pendencias: 'pendencia',
   documentos: 'documento',
+  // O fluxograma é a exceção, e por um motivo só: ali a transcrição não é
+  // linha por linha, é o desenho inteiro virando um grafo. Tratar cada caixa
+  // como uma nota encheria a Central de pedaços sem sentido fora do desenho.
+  fluxograma: 'nota',
   livre: 'nota',
 }
+
+/**
+ * Zonas em que NÃO se identifica linha por linha.
+ *
+ * Hoje só o fluxograma: lá a leitura é outra (`flow/`), e o resultado é um
+ * registro só — o desenho montado — em vez de um por linha.
+ */
+export const ZONES_SEM_LINHA: ZoneKind[] = ['fluxograma']

@@ -1,6 +1,6 @@
 import type { Bounds, Id, Item, ItemKind, Stroke, Zone } from '../domain/types'
 import { unionBounds } from '../lib/geometry'
-import { ZONE_ITEM_KIND } from '../domain/templates'
+import { ZONE_ITEM_KIND, ZONES_SEM_LINHA } from '../domain/templates'
 import { zoneAtPoint } from '../zones/hit'
 import { PAGE_MIN_HEIGHT } from '../domain/constants'
 
@@ -85,6 +85,10 @@ export function detectFields(
     if (ignore.has(stroke.id)) continue
     const zone = resolveZone(stroke, zoneById, zones, pageHeight)
     if (!zone) continue
+    // No fluxograma a leitura não é por linha: lá uma caixa e a seta ao lado
+    // estão na mesma altura e virariam duas tarefas sem sentido. Quem lê
+    // aquela zona é `flow/`, e o resultado é um desenho, não uma lista.
+    if (ZONES_SEM_LINHA.includes(zone.kind)) continue
     const list = byZone.get(zone.id)
     if (list) list.push(stroke)
     else byZone.set(zone.id, [stroke])

@@ -436,6 +436,7 @@ input {
 .zone-duvidas { color: #f59e0b; }
 .zone-pendencias { color: #ef4444; }
 .zone-documentos { color: #06b6d4; }
+.zone-fluxograma { color: #ec4899; }
 .zone-livre { color: #3f3f46; }
 
 .template-name {
@@ -911,6 +912,26 @@ input {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.rec-rate {
+  flex-shrink: 0;
+  min-width: 48px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rec-rate.ativo {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 600;
 }
 
 .rec-save {
@@ -2307,4 +2328,203 @@ input {
   width: 100%;
   border: 1px solid var(--line);
   color: var(--text-dim);
+}
+
+/* ── Fluxograma ───────────────────────────────────────────────────────────── */
+
+/*
+ * O painel do fluxograma montado. Toma a tela como a Central: aqui não se
+ * desenha, se confere e se corrige o que o leitor entendeu.
+ */
+.flow-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+  background: var(--bg);
+  display: grid;
+  grid-template-rows: auto auto auto 1fr auto;
+  min-height: 0;
+}
+
+.flow-topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.flow-topo h2 {
+  margin: 0;
+  font-size: 19px;
+}
+
+.flow-topo p {
+  margin: 2px 0 0;
+  font-size: 12px;
+}
+
+.flow-acoes {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.flow-acoes button {
+  height: var(--tap);
+  padding: 0 14px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.flow-acoes button:disabled {
+  opacity: 0.5;
+}
+
+.flow-acoes .flow-salvar {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+/* O que o leitor não teve certeza. Fica em cima do desenho de propósito: é o
+   que precisa ser conferido ANTES de mandar o fluxograma pra alguém. */
+.flow-avisos {
+  display: grid;
+  gap: 4px;
+  padding: 10px 18px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.flow-erro {
+  padding: 10px 18px;
+  font-size: 13px;
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.flow-salvo {
+  padding: 10px 18px;
+  font-size: 13px;
+  color: var(--ok);
+}
+
+/* O desenho em si fica sempre sobre branco, nos dois temas: ele vai virar
+   imagem pra outra pessoa, e precisa ser igual ao que vai sair salvo. */
+.flow-tela {
+  overflow: auto;
+  padding: 20px;
+  display: grid;
+  place-items: start center;
+  background: var(--surface-2);
+  min-height: 0;
+}
+
+.flow-svg {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.flow-caixa:hover {
+  opacity: 0.88;
+}
+
+.flow-editor {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.flow-editor label {
+  display: grid;
+  gap: 4px;
+  flex: 1;
+  min-width: 200px;
+}
+
+.flow-editor label span {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+.flow-editor input {
+  height: var(--tap);
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 15px;
+  padding: 0 10px;
+}
+
+.flow-formas {
+  display: flex;
+  gap: 6px;
+}
+
+.flow-formas button {
+  height: var(--tap);
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.flow-formas button.ativo {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.flow-ok {
+  height: var(--tap);
+  padding: 0 18px;
+  border-radius: 9px;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.flow-setas {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 18px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.flow-setas button {
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: 12px;
 }

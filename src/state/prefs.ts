@@ -24,6 +24,9 @@ export interface Prefs {
   zoom: number
   /** Raio da borracha, em px de página. */
   eraserSize: number
+  /** Velocidade de escuta do áudio. Fica entre as preferências porque é um
+      jeito de ouvir, não um dado da gravação: vale pra todas. */
+  audioRate: number
 }
 
 const KEY = 'organizador.prefs.v1'
@@ -37,6 +40,7 @@ const DEFAULTS: Prefs = {
   showText: true,
   zoom: ZOOM_FIT,
   eraserSize: ERASER_DEFAULT,
+  audioRate: 1,
 }
 
 export function loadPrefs(): Prefs {
@@ -56,6 +60,7 @@ export function loadPrefs(): Prefs {
         typeof saved.eraserSize === 'number'
           ? Math.min(ERASER_MAX, Math.max(ERASER_MIN, saved.eraserSize))
           : DEFAULTS.eraserSize,
+      audioRate: nearestRate(saved.audioRate),
     }
   } catch {
     // Navegador com armazenamento bloqueado: segue nos padrões.
@@ -69,6 +74,41 @@ export function savePrefs(prefs: Prefs): void {
   } catch {
     // Não poder guardar preferência não pode impedir de usar o app.
   }
+}
+
+/**
+ * Velocidades de escuta, na ordem em que o botão passa por elas.
+ *
+ * Param em 2x de propósito: acima disso a fala vira ruído, e o botão existe pra
+ * ouvir mais rápido, não pra pular. Nada de 0,5x — ninguém pediu "mais devagar",
+ * e cada parada a mais é um toque a mais pra voltar ao normal.
+ */
+export const AUDIO_RATES = [1, 1.25, 1.5, 1.75, 2] as const
+
+/** A próxima velocidade, dando a volta no fim. */
+export function nextRate(atual: number): number {
+  const i = AUDIO_RATES.indexOf(nearestRate(atual) as (typeof AUDIO_RATES)[number])
+  return AUDIO_RATES[(i + 1) % AUDIO_RATES.length]
+}
+
+/**
+ * A velocidade guardada, encaixada na lista.
+ *
+ * Preferência vem do localStorage, que qualquer coisa pode ter mexido — e
+ * `playbackRate` com lixo dentro não é erro visível: é áudio que não toca.
+ */
+export function nearestRate(valor: unknown): number {
+  if (typeof valor !== 'number' || !Number.isFinite(valor)) return 1
+  let melhor: number = AUDIO_RATES[0]
+  for (const r of AUDIO_RATES) {
+    if (Math.abs(r - valor) < Math.abs(melhor - valor)) melhor = r
+  }
+  return melhor
+}
+
+/** Como a velocidade aparece no botão: "1x", "1,5x" — vírgula, não ponto. */
+export function formatRate(valor: number): string {
+  return `${String(valor).replace('.', ',')}x`
 }
 
 /** Segue o tema do Android na primeira abertura. */

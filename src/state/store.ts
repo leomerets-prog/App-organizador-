@@ -7,6 +7,10 @@ import type {
   Notebook,
   Page,
   PageImage,
+  Flowchart,
+  FlowChartEdge,
+  FlowChartNode,
+  FlowShape,
   Recording,
   Section,
   Stroke,
@@ -41,7 +45,8 @@ import type { TranscriptionStatus, WritingArea } from '../ocr/handwriting'
 import { forgetImage, placeNewImage, readImageFile } from '../ink/images'
 import { eraseAlongSegment } from '../ink/erase'
 import type { Pt } from '../lib/geometry'
-import { applyTheme, loadPrefs, savePrefs } from './prefs'
+import { buildGraph, toFlowStrokes } from '../flow/graph'
+import { applyTheme, loadPrefs, nextRate, savePrefs } from './prefs'
 import type { Theme } from './prefs'
 
 /**
@@ -66,6 +71,8 @@ export interface AppState {
   zones: Zone[]
   items: Item[]
   recordings: Recording[]
+  /** Fluxogramas montados a partir das zonas de fluxograma desta página. */
+  flowcharts: Flowchart[]
   images: PageImage[]
   /** Imagem em ajuste (mover/redimensionar). */
   selectedImageId: Id | null
@@ -88,6 +95,8 @@ export interface AppState {
   zoom: number
   /** Raio da borracha, em px de página. */
   eraserSize: number
+  /** Velocidade de escuta do áudio, pra todas as gravações. */
+  audioRate: number
   selection: Set<Id>
 
   // Gravação em andamento
@@ -122,6 +131,8 @@ export interface AppState {
   toggleTheme: () => void
   setZoom: (zoom: number) => void
   setEraserSize: (size: number) => void
+  /** Passa pra próxima velocidade de escuta, dando a volta em 2x. */
+  cycleAudioRate: () => void
 
   commitStroke: (points: InkPoint[], startedAt: number) => Promise<void>
 
@@ -176,6 +187,13 @@ export interface AppState {
   addRecording: (rec: Recording, blob: Blob) => Promise<void>
   removeRecording: (id: Id) => Promise<void>
   setActiveRecording: (id: Id | null) => void
+  /** Lê o desenho da zona de fluxograma e monta (ou remonta) o fluxograma. */
+  buildFlowchart: (zoneId: Id) => Promise<void>
+  /** Corrige o nome ou a forma de uma caixa; a correção sobrevive à remontagem. */
+  updateFlowNode: (chartId: Id, nodeId: Id, patch: { label?: string; kind?: FlowShape }) => Promise<void>
+  updateFlowEdge: (chartId: Id, edgeId: Id, patch: { label?: string }) => Promise<void>
+  /** Como está a leitura do desenho; é o que a tela mostra enquanto roda. */
+  flowStatus: { state: 'parado' | 'lendo' | 'erro'; message: string }
   /** Guarda onde a escuta parou, pra retomar dali na próxima vez. */
   setRecordingPosition: (id: Id, positionMs: number) => Promise<void>
 
@@ -400,6 +418,7 @@ function persist(get: () => AppState): void {
     showText: s.showText,
     zoom: s.zoom,
     eraserSize: s.eraserSize,
+    audioRate: s.audioRate,
   })
 }
 
@@ -415,6 +434,8 @@ export const useStore = create<AppState>((set, get) => ({
   zones: [],
   items: [],
   recordings: [],
+  flowcharts: [],
+  flowStatus: { state: 'parado', message: '' },
   images: [],
   selectedImageId: null,
 
@@ -429,6 +450,7 @@ export const useStore = create<AppState>((set, get) => ({
   theme: initialPrefs.theme,
   zoom: initialPrefs.zoom,
   eraserSize: initialPrefs.eraserSize,
+  audioRate: initialPrefs.audioRate,
   selection: new Set(),
 
   activeRecordingId: null,
@@ -460,14 +482,14 @@ export const useStore = create<AppState>((set, get) => ({
     const sections = await repo.listSections(id)
     set({ activeNotebookId: id, sections, activeSectionId: null, pages: [] })
     if (sections[0]) await get().selectSection(sections[0].id)
-    else set({ activePageId: null, strokes: [], zones: [], items: [], recordings: [], images: [] })
+    else set({ activePageId: null, strokes: [], zones: [], items: [], recordings: [], images: [], flowcharts: [] })
   },
 
   async selectSection(id) {
     const pages = await repo.listPages(id)
     set({ activeSectionId: id, pages })
     if (pages[0]) await get().selectPage(pages[0].id)
-    else set({ activePageId: null, strokes: [], zones: [], items: [], recordings: [], images: [] })
+    else set({ activePageId: null, strokes: [], zones: [], items: [], recordings: [], images: [], flowcharts: [] })
   },
 
   async selectPage(id) {
@@ -581,7 +603,7 @@ export const useStore = create<AppState>((set, get) => ({
     set({ pages })
     if (get().activePageId === id) {
       if (pages[0]) await get().selectPage(pages[0].id)
-      else set({ activePageId: null, strokes: [], zones: [], items: [], recordings: [], images: [] })
+      else set({ activePageId: null, strokes: [], zones: [], items: [], recordings: [], images: [], flowcharts: [] })
     }
   },
 
@@ -665,6 +687,11 @@ export const useStore = create<AppState>((set, get) => ({
 
   setEraserSize(size) {
     set({ eraserSize: Math.min(ERASER_MAX, Math.max(ERASER_MIN, size)) })
+    persist(get)
+  },
+
+  cycleAudioRate() {
+    set({ audioRate: nextRate(get().audioRate) })
     persist(get)
   },
 
@@ -1283,6 +1310,154 @@ export const useStore = create<AppState>((set, get) => ({
     const atualizado = { ...rec, positionMs }
     set({ recordings: get().recordings.map((r) => (r.id === id ? atualizado : r)) })
     await repo.updateRecording(atualizado)
+  },
+
+  // ─── Fluxograma ────────────────────────────────────────────────────────────
+
+  /**
+   * Lê o desenho e monta o fluxograma.
+   *
+   * Duas coisas que esta função NÃO faz, de propósito:
+   *
+   * - **não apaga a tinta.** O desenho à mão continua na folha exatamente como
+   *   estava; o fluxograma montado é outra coisa, que mora ao lado
+   * - **não desfaz correção do usuário.** Nome que ele escreveu à mão no
+   *   painel sobrevive à remontagem, pelo mesmo motivo que a transcrição
+   *   corrigida nunca é sobrescrita: ver a própria correção sumir é o que faz
+   *   alguém parar de confiar no recurso
+   */
+  async buildFlowchart(zoneId) {
+    const pageId = get().activePageId
+    const zone = get().zones.find((z) => z.id === zoneId)
+    if (!pageId || !zone) return
+
+    set({ flowStatus: { state: 'lendo', message: 'Lendo o desenho…' } })
+
+    const daZona = get().strokes.filter((s) => {
+      if (s.zoneId) return s.zoneId === zoneId
+      const centro = {
+        x: (s.bounds.minX + s.bounds.maxX) / 2,
+        y: (s.bounds.minY + s.bounds.maxY) / 2,
+      }
+      return zoneAtPoint(get().zones, centro, SHEET)?.id === zoneId
+    })
+
+    const grafo = buildGraph(toFlowStrokes(daZona))
+
+    if (grafo.nodes.length === 0) {
+      set({
+        flowStatus: {
+          state: 'erro',
+          message:
+            'Não achei caixa nenhuma neste desenho. Faça as caixas FECHADAS (o traço voltando ao começo) e ligue uma na outra com setas que encostem nas duas.',
+        },
+      })
+      return
+    }
+
+    const anterior = get().flowcharts.find((f) => f.zoneId === zoneId)
+    const nomeAntigo = new Map((anterior?.nodes ?? []).map((n) => [n.id, n]))
+    const rotuloAntigo = new Map((anterior?.edges ?? []).map((e) => [e.id, e.label]))
+
+    const nodes: FlowChartNode[] = grafo.nodes.map((n) => {
+      const velho = nomeAntigo.get(n.id)
+      return {
+        id: n.id,
+        // Forma trocada à mão também fica: o leitor erra entre losango e
+        // retângulo com mais frequência que erra o resto.
+        kind: velho?.editado ? velho.kind : n.kind,
+        label: velho?.editado ? velho.label : (velho?.label ?? ''),
+        editado: velho?.editado,
+        bounds: n.bounds,
+      }
+    })
+
+    const edges: FlowChartEdge[] = grafo.edges.map((e) => ({
+      id: e.id,
+      from: e.from,
+      to: e.to,
+      label: rotuloAntigo.get(e.id) ?? '',
+      direcao: e.direcao,
+    }))
+
+    // A letra das caixas, quando o aparelho sabe ler. Sem reconhecedor as
+    // caixas saem sem nome e o usuário escreve no painel — mesmo caminho da
+    // transcrição da folha, e o painel diz isso em vez de ficar calado.
+    if (recognizerPossible()) {
+      const status = await prepareRecognizer(() => {})
+      if (status.state === 'pronto') {
+        for (let i = 0; i < nodes.length; i++) {
+          if (get().activePageId !== pageId) return
+          const node = nodes[i]
+          if (node.editado && node.label) continue
+          const daCaixa = grafo.nodes.find((n) => n.id === node.id)?.labelStrokeIds ?? []
+          if (daCaixa.length === 0) continue
+
+          set({
+            flowStatus: {
+              state: 'lendo',
+              message: `Lendo os nomes… (${i + 1} de ${nodes.length})`,
+            },
+          })
+          const tinta = get().strokes.filter((s) => daCaixa.includes(s.id))
+          if (tinta.length === 0) continue
+          const folga = 20
+          try {
+            const { text } = await recognizeStrokes(tinta, {
+              x: node.bounds.minX - folga,
+              y: node.bounds.minY - folga,
+              width: Math.max(1, node.bounds.maxX - node.bounds.minX + folga * 2),
+              height: Math.max(1, node.bounds.maxY - node.bounds.minY + folga * 2),
+            })
+            if (text) node.label = text
+          } catch {
+            // Uma caixa sem nome não pode derrubar o fluxograma inteiro.
+          }
+        }
+      }
+    }
+
+    const chart: Flowchart = {
+      id: anterior?.id ?? newId(),
+      pageId,
+      zoneId,
+      nodes,
+      edges,
+      soltos: grafo.soltos.length,
+      updatedAt: Date.now(),
+    }
+
+    set({
+      flowcharts: [...get().flowcharts.filter((f) => f.id !== chart.id), chart],
+      flowStatus: { state: 'parado', message: '' },
+    })
+    await repo.putFlowchart(chart)
+  },
+
+  async updateFlowNode(chartId, nodeId, patch) {
+    const chart = get().flowcharts.find((f) => f.id === chartId)
+    if (!chart) return
+    const atualizado: Flowchart = {
+      ...chart,
+      nodes: chart.nodes.map((n) =>
+        n.id === nodeId ? { ...n, ...patch, editado: true } : n,
+      ),
+      updatedAt: Date.now(),
+    }
+    set({ flowcharts: get().flowcharts.map((f) => (f.id === chartId ? atualizado : f)) })
+    await repo.putFlowchart(atualizado)
+  },
+
+  async updateFlowEdge(chartId, edgeId, patch) {
+    const chart = get().flowcharts.find((f) => f.id === chartId)
+    if (!chart) return
+    const atualizado: Flowchart = {
+      ...chart,
+      edges: chart.edges.map((e) => (e.id === edgeId ? { ...e, ...patch } : e)),
+      updatedAt: Date.now(),
+    }
+    set({ flowcharts: get().flowcharts.map((f) => (f.id === chartId ? atualizado : f)) })
+    await repo.putFlowchart(atualizado)
   },
 
   // ─── Imagens ───────────────────────────────────────────────────────────────

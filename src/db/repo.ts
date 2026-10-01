@@ -1,5 +1,6 @@
 import { getDb } from './database'
 import type {
+  Flowchart,
   Id,
   Item,
   Notebook,
@@ -78,7 +79,9 @@ export async function putPage(page: Page): Promise<void> {
 
 export async function deletePage(id: Id): Promise<void> {
   const db = await getDb()
-  const kill = async (store: 'strokes' | 'zones' | 'items' | 'recordings' | 'images') => {
+  const kill = async (
+    store: 'strokes' | 'zones' | 'items' | 'recordings' | 'images' | 'flowcharts',
+  ) => {
     const keys = await db.getAllKeysFromIndex(store, 'byPage', id)
     await Promise.all(keys.map((k) => db.delete(store, k)))
   }
@@ -92,6 +95,7 @@ export async function deletePage(id: Id): Promise<void> {
     kill('items'),
     kill('recordings'),
     kill('images'),
+    kill('flowcharts'),
   ])
   await db.delete('pages', id)
 }
@@ -104,20 +108,22 @@ export interface PageContent {
   items: Item[]
   recordings: Recording[]
   images: PageImage[]
+  flowcharts: Flowchart[]
 }
 
 export async function loadPageContent(pageId: Id): Promise<PageContent> {
   const db = await getDb()
-  const [strokes, zones, items, recordings, images] = await Promise.all([
+  const [strokes, zones, items, recordings, images, flowcharts] = await Promise.all([
     db.getAllFromIndex('strokes', 'byPage', pageId),
     db.getAllFromIndex('zones', 'byPage', pageId),
     db.getAllFromIndex('items', 'byPage', pageId),
     db.getAllFromIndex('recordings', 'byPage', pageId),
     db.getAllFromIndex('images', 'byPage', pageId),
+    db.getAllFromIndex('flowcharts', 'byPage', pageId),
   ])
   strokes.sort((a, b) => a.startedAt - b.startedAt)
   images.sort((a, b) => a.createdAt - b.createdAt)
-  return { strokes, zones, items: items.map(normalizeItem), recordings, images }
+  return { strokes, zones, items: items.map(normalizeItem), recordings, images, flowcharts }
 }
 
 /**
@@ -199,6 +205,18 @@ export async function putRecording(rec: Recording, blob: Blob): Promise<void> {
 export async function updateRecording(rec: Recording): Promise<void> {
   const db = await getDb()
   await db.put('recordings', rec)
+}
+
+// ─── Fluxogramas ─────────────────────────────────────────────────────────────
+
+export async function putFlowchart(chart: Flowchart): Promise<void> {
+  const db = await getDb()
+  await db.put('flowcharts', chart)
+}
+
+export async function deleteFlowchart(id: Id): Promise<void> {
+  const db = await getDb()
+  await db.delete('flowcharts', id)
 }
 
 export async function getRecordingBlob(id: Id): Promise<Blob | undefined> {

@@ -1389,6 +1389,7 @@ const ZONE_KIND_LABEL: Record<ZoneKind, string> = {
   duvidas: 'Dúvidas',
   pendencias: 'Pendências',
   documentos: 'Documentos',
+  fluxograma: 'Fluxograma',
   livre: 'Livre (não vira item)',
 }
 

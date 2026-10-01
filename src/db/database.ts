@@ -7,6 +7,7 @@ import type {
   Notebook,
   Page,
   PageImage,
+  Flowchart,
   Recording,
   RecordingBlob,
   Section,
@@ -33,10 +34,11 @@ interface OrganizadorDB extends DBSchema {
   recordingBlobs: { key: Id; value: RecordingBlob }
   images: { key: Id; value: PageImage; indexes: { byPage: Id } }
   imageBlobs: { key: Id; value: ImageBlob }
+  flowcharts: { key: Id; value: Flowchart; indexes: { byPage: Id; byZone: Id } }
 }
 
 const DB_NAME = 'organizador'
-const DB_VERSION = 2
+const DB_VERSION = 3
 
 let dbPromise: Promise<IDBPDatabase<OrganizadorDB>> | null = null
 
@@ -75,6 +77,15 @@ export function getDb(): Promise<IDBPDatabase<OrganizadorDB>> {
           const images = db.createObjectStore('images', { keyPath: 'id' })
           images.createIndex('byPage', 'pageId')
           db.createObjectStore('imageBlobs', { keyPath: 'id' })
+        }
+
+        // Store NOVA, e só isso: nenhuma store antiga é aberta, lida ou
+        // reescrita aqui. É o que faz a atualização não poder perder nada do
+        // que já estava no aparelho.
+        if (oldVersion < 3) {
+          const flowcharts = db.createObjectStore('flowcharts', { keyPath: 'id' })
+          flowcharts.createIndex('byPage', 'pageId')
+          flowcharts.createIndex('byZone', 'zoneId')
         }
       },
     })

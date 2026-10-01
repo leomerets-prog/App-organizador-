@@ -11,9 +11,10 @@
     "typecheck": "tsc -b --noEmit",
     "test:scribble": "esbuild tools/scribble-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/scribble-test.mjs --log-level=error && node node_modules/.cache/scribble-test.mjs",
     "test:erase": "esbuild tools/erase-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/erase-test.mjs --log-level=error && node node_modules/.cache/erase-test.mjs",
-    "test": "npm run check:java && npm run test:scribble && npm run test:erase && npm run test:fields && npm run test:zones && npm run test:central && npm run test:audio",
+    "test": "npm run check:java && npm run test:scribble && npm run test:erase && npm run test:fields && npm run test:zones && npm run test:central && npm run test:audio && npm run test:flow",
     "test:fields": "esbuild tools/fields-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/fields-test.mjs --log-level=error && node node_modules/.cache/fields-test.mjs",
     "test:zones": "esbuild tools/zones-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/zones-test.mjs --log-level=error && node node_modules/.cache/zones-test.mjs",
+    "test:flow": "esbuild tools/flow-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/flow-test.mjs --log-level=error && node node_modules/.cache/flow-test.mjs",
     "test:audio": "esbuild tools/audio-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/audio-test.mjs --log-level=error && node node_modules/.cache/audio-test.mjs",
     "test:central": "esbuild tools/central-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/central-test.mjs --log-level=error && node node_modules/.cache/central-test.mjs",
     "check:java": "bash tools/check-java.sh"
