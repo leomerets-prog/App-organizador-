@@ -105,7 +105,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
           </p>
         </div>
         <div className="flow-acoes">
-          <button onClick={() => void buildFlowchart(chart.zoneId)} disabled={flowStatus.state === 'lendo'}>
+          <button onClick={() => void buildFlowchart()} disabled={flowStatus.state === 'lendo'}>
             {flowStatus.state === 'lendo' ? 'Lendo…' : '↻ Ler de novo'}
           </button>
           <button className="flow-salvar" onClick={() => void salvar()} disabled={salvando}>

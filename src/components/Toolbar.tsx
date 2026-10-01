@@ -280,30 +280,29 @@ function HistoryButtons() {
  * certa ele é o caminho inteiro — toca, lê o desenho, abre o painel.
  */
 function FlowchartButton({ onOpen }: { onOpen: (id: string) => void }) {
-  const zones = useStore((s) => s.zones)
+  const activePageId = useStore((s) => s.activePageId)
   const flowcharts = useStore((s) => s.flowcharts)
   const buildFlowchart = useStore((s) => s.buildFlowchart)
   const flowStatus = useStore((s) => s.flowStatus)
 
-  const zona = zones.find((z) => z.kind === 'fluxograma')
-  if (!zona) return null
-
-  const pronto = flowcharts.find((f) => f.zoneId === zona.id)
+  const pronto = flowcharts.find((f) => f.pageId === activePageId)
   const lendo = flowStatus.state === 'lendo'
 
   return (
     <button
       className={`tool-btn ${flowStatus.state === 'erro' ? 'alerta' : ''}`}
-      disabled={lendo}
+      disabled={lendo || !activePageId}
       onClick={async () => {
-        await buildFlowchart(zona.id)
-        const montado = useStore.getState().flowcharts.find((f) => f.zoneId === zona.id)
+        await buildFlowchart()
+        const montado = useStore
+          .getState()
+          .flowcharts.find((f) => f.pageId === useStore.getState().activePageId)
         if (montado) onOpen(montado.id)
       }}
       title={
         pronto
           ? 'Lê o desenho de novo e abre o fluxograma montado'
-          : 'Lê o desenho da zona de fluxograma e monta a versão estruturada'
+          : 'Lê o desenho desta folha e monta a versão estruturada'
       }
     >
       <span className="tool-glyph">⌗</span>

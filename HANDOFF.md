@@ -427,7 +427,35 @@ Vale a regra geral: **palpite que não se anuncia vira erro silencioso.** Um
 fluxograma com uma seta invertida parece certo e está errado — e quem recebe
 não tem como saber.
 
-### 25. Fluxograma não se lê linha por linha
+### 25. O fluxograma lê a FOLHA, nunca uma zona
+
+A primeira versão lia só a tinta da zona de fluxograma. Falhou no primeiro
+desenho de verdade do usuário, e por três motivos somados — cada um sozinho já
+bastava:
+
+- **o desenho passa de uma folha.** Catorze caixas em cadeia deram 1871px, e a
+  divisão em zonas se repete a cada 1754: as caixas de baixo eram classificadas
+  na faixa do TOPO da folha seguinte e sumiam da leitura
+- **o traço guarda a zona de quando foi escrito.** Ele desenhou primeiro e
+  criou a zona depois; `addZone` reclassifica, mas pelo resto da divisão — numa
+  zona menor que o desenho, parte dos traços nunca entrava nela
+- **o botão só existia se a folha tivesse a zona.** Quem desenhou num modelo
+  qualquer não via botão nenhum, e acabava tocando em "Transcrever"
+
+Hoje `buildFlowchart()` lê **todos os traços da página**, sem zona nenhuma no
+caminho, e o botão está sempre na barra. Não faz falta: caixa, seta e letra se
+distinguem pela geometria, e o que não é do desenho (o título escrito à mão, as
+notas da margem) vira traço solto, é contado e dito na tela.
+
+A leitura em si nunca foi a culpada — o desenho dele, reconstruído da foto, sai
+com 14 caixas e 13 setas. Esse caso está em `tools/flow-test.ts`, com as
+medidas reais, justamente pra que ninguém volte a estreitar a entrada.
+
+**Regra que vale além deste caso:** quando um recurso precisa de uma condição
+que o usuário não sabe que existe (ter escolhido o modelo certo, ter criado a
+zona ANTES de desenhar), a condição é o defeito.
+
+### 26. Fluxograma não se lê linha por linha
 
 A zona de fluxograma é a única que `items/detect.ts` ignora (`ZONES_SEM_LINHA`).
 Lá uma caixa e a seta ao lado estão na mesma altura: a identificação por linha
@@ -437,7 +465,7 @@ leria as duas como um campo só, e um desenho de dez traços viraria quatro
 A leitura daquela zona é outra, mora em `flow/`, e o resultado é **um** registro
 — o desenho montado — em vez de um por linha.
 
-### 26. Prazo é dia do calendário, no fuso de casa
+### 27. Prazo é dia do calendário, no fuso de casa
 
 `new Date('2026-09-30')` é lido como **UTC** e, no Brasil, volta como dia 29. Um
 prazo que anda um dia pra trás sozinho destrói a confiança na lista inteira — e
@@ -513,6 +541,7 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Esticar empurra as de baixo, não as cobre | Faixa sobreposta faz a mesma linha pertencer a duas, e aí o painel começa a mentir |
 | Voltar/avançar cobrem só a tinta | Zona, item e ficha a tela já desfaz num toque. "Voltar" precisa significar a mesma coisa toda vez |
 | A pilha é esvaziada ao trocar de página | Voltar numa folha e ver sumir algo de outra seria pior que não ter voltar |
+| O fluxograma lê a folha inteira, não uma zona | O desenho passa de uma folha, o traço guarda a zona de quando foi escrito, e ninguém escolhe o modelo certo antes de desenhar. Geometria basta pra separar caixa, seta e letra |
 | O fluxograma montado é OUTRA coisa, ao lado do desenho | A tinta na folha nunca é apagada nem substituída. Quem desenhou quer poder continuar desenhando, e o leitor erra — se ele comesse o original, errar custaria o trabalho |
 | Nome corrigido à mão sobrevive à remontagem | Mesmo motivo da transcrição: ver a própria correção sumir é o que faz alguém parar de confiar no recurso |
 | O fluxograma sai como PNG, não SVG | Vai ser aberto por outra pessoa, provavelmente no celular. PNG abre em qualquer lugar; SVG abre numa tela de código em metade dos aparelhos |
@@ -549,7 +578,8 @@ lista de próximas etapas por esse motivo.
 
 **O leitor de fluxograma depende de o desenho ser desenhado assim.** Caixa tem
 que FECHAR (o traço voltando ao começo) e seta tem que ENCOSTAR nas duas
-caixas. Traço que não entrou em nada é contado e dito na tela, mas o app não
+caixas. Não depende mais de zona, de modelo nem da ordem em que as coisas
+foram feitas. Traço que não entrou em nada é contado e dito na tela, mas o app não
 adivinha o que o usuário quis. A leitura foi verificada no navegador com um
 processo de cinco caixas (início, decisão, dois caminhos, fim) e um retorno;
 com a mão de verdade num tablet, os limites de `flow/shapes.ts` ainda podem

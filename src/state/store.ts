@@ -205,8 +205,8 @@ export interface AppState {
   addRecording: (rec: Recording, blob: Blob) => Promise<void>
   removeRecording: (id: Id) => Promise<void>
   setActiveRecording: (id: Id | null) => void
-  /** Lê o desenho da zona de fluxograma e monta (ou remonta) o fluxograma. */
-  buildFlowchart: (zoneId: Id) => Promise<void>
+  /** Lê o desenho da folha inteira e monta (ou remonta) o fluxograma. */
+  buildFlowchart: () => Promise<void>
   /** Corrige o nome ou a forma de uma caixa; a correção sobrevive à remontagem. */
   updateFlowNode: (chartId: Id, nodeId: Id, patch: { label?: string; kind?: FlowShape }) => Promise<void>
   updateFlowEdge: (chartId: Id, edgeId: Id, patch: { label?: string }) => Promise<void>
@@ -1429,36 +1429,42 @@ export const useStore = create<AppState>((set, get) => ({
    *   corrigida nunca é sobrescrita: ver a própria correção sumir é o que faz
    *   alguém parar de confiar no recurso
    */
-  async buildFlowchart(zoneId) {
+  async buildFlowchart() {
     const pageId = get().activePageId
-    const zone = get().zones.find((z) => z.id === zoneId)
-    if (!pageId || !zone) return
+    if (!pageId) return
 
     set({ flowStatus: { state: 'lendo', message: 'Lendo o desenho…' } })
 
-    const daZona = get().strokes.filter((s) => {
-      if (s.zoneId) return s.zoneId === zoneId
-      const centro = {
-        x: (s.bounds.minX + s.bounds.maxX) / 2,
-        y: (s.bounds.minY + s.bounds.maxY) / 2,
-      }
-      return zoneAtPoint(get().zones, centro, get().sheetHeight)?.id === zoneId
-    })
-
-    const grafo = buildGraph(toFlowStrokes(daZona))
+    /*
+     * Lê a FOLHA INTEIRA, não uma zona.
+     *
+     * Antes lia só a tinta da zona de fluxograma, e isso quebrou no primeiro
+     * desenho de verdade: um fluxograma de quinze caixas passa de 1754px, e a
+     * divisão em zonas se REPETE a cada folha — as caixas de baixo caíam na
+     * faixa do topo da folha seguinte e sumiam da leitura. Além disso obrigava
+     * a escolher o modelo certo antes de desenhar, que ninguém faz.
+     *
+     * Não precisa de zona nenhuma: caixa, seta e letra se distinguem pela
+     * geometria. O que não for parte do desenho vira traço solto, é contado e
+     * dito na tela.
+     */
+    const tinta = get().strokes.filter((s) => s.pageId === pageId)
+    const grafo = buildGraph(toFlowStrokes(tinta))
 
     if (grafo.nodes.length === 0) {
       set({
         flowStatus: {
           state: 'erro',
           message:
-            'Não achei caixa nenhuma neste desenho. Faça as caixas FECHADAS (o traço voltando ao começo) e ligue uma na outra com setas que encostem nas duas.',
+            tinta.length === 0
+              ? 'Não há desenho nesta folha ainda.'
+              : `Li ${tinta.length} traço(s) e não achei caixa nenhuma. A caixa precisa estar FECHADA — o traço voltando ao ponto de partida.`,
         },
       })
       return
     }
 
-    const anterior = get().flowcharts.find((f) => f.zoneId === zoneId)
+    const anterior = get().flowcharts.find((f) => f.pageId === pageId)
     const nomeAntigo = new Map((anterior?.nodes ?? []).map((n) => [n.id, n]))
     const rotuloAntigo = new Map((anterior?.edges ?? []).map((e) => [e.id, e.label]))
 
@@ -1523,7 +1529,6 @@ export const useStore = create<AppState>((set, get) => ({
     const chart: Flowchart = {
       id: anterior?.id ?? newId(),
       pageId,
-      zoneId,
       nodes,
       edges,
       soltos: grafo.soltos.length,

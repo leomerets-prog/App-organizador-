@@ -419,6 +419,107 @@ const casos: Caso[] = [
   },
 ]
 
+// ── O desenho de verdade ──────────────────────────────────────────────────
+
+/**
+ * O fluxograma que o usuário mandou, reconstruído da foto.
+ *
+ * Catorze caixas em cadeia, com a letra dentro, ligadas por ticks curtos, mais
+ * o título escrito à mão e duas notas na margem. As medidas saíram da captura
+ * de tela dele, convertidas pra px de página.
+ *
+ * Está aqui porque a primeira tentativa dele falhou e a leitura NÃO era a
+ * culpada: o desenho passa dos 1754px de uma folha, e a versão antiga lia só a
+ * tinta da zona de fluxograma — a divisão em zonas se repete a cada folha, e
+ * as caixas de baixo caíam na faixa do topo da folha seguinte. Este caso
+ * guarda os dois lados: a geometria dá conta de um desenho de gente, e um
+ * fluxograma de verdade passa de uma folha.
+ */
+function desenhoDoUsuario(): { strokes: FlowStroke[]; caixas: number } {
+  const CAIXAS: [number, number, number, number][] = [
+    [474, 395, 346, 119],
+    [514, 596, 246, 134],
+    [507, 797, 238, 97],
+    [504, 954, 241, 47],
+    [519, 1036, 204, 67],
+    [504, 1155, 185, 67],
+    [489, 1260, 312, 104],
+    [492, 1409, 271, 82],
+    [495, 1551, 262, 74],
+    [495, 1670, 258, 90],
+    [495, 1831, 224, 85],
+    [492, 1961, 194, 82],
+    [474, 2095, 205, 90],
+    [465, 2207, 173, 59],
+  ]
+
+  const lista: FlowStroke[] = []
+  for (const [x, y, w, h] of CAIXAS) {
+    // A caixa fecha PERTO do começo, não exatamente — ninguém fecha exato.
+    const volta = retangulo(x, y, w, h)
+    volta[volta.length - 1] = { x: x + tremor(6), y: y + tremor(6) }
+    lista.push(traco(volta))
+    lista.push(traco(palavra(x + 18, y + h * 0.4, Math.min(w - 36, 120))))
+    if (h > 70) lista.push(traco(palavra(x + 18, y + h * 0.72, Math.min(w - 36, 100))))
+  }
+  for (let i = 0; i < CAIXAS.length - 1; i++) {
+    const [x1, y1, w1, h1] = CAIXAS[i]
+    const [x2, y2, w2] = CAIXAS[i + 1]
+    lista.push(traco(reta(x1 + w1 / 2, y1 + h1, x2 + w2 / 2, y2)))
+  }
+  // O que não é fluxograma: o título e as notas da margem.
+  lista.push(traco(palavra(390, 300, 240)))
+  lista.push(traco(palavra(240, 420, 50)))
+  lista.push(traco(reta(310, 420, 345, 425)))
+
+  return { strokes: lista, caixas: CAIXAS.length }
+}
+
+casos.push(
+  {
+    nome: 'o desenho de verdade do usuário sai inteiro',
+    rodar() {
+      const { strokes, caixas } = desenhoDoUsuario()
+      const g = buildGraph(strokes)
+      if (g.nodes.length !== caixas) return `${g.nodes.length} caixas, esperava ${caixas}`
+      if (g.edges.length !== caixas - 1) return `${g.edges.length} setas, esperava ${caixas - 1}`
+      return null
+    },
+  },
+  {
+    nome: 'nele, toda caixa fica com a letra de dentro',
+    rodar() {
+      const { strokes } = desenhoDoUsuario()
+      const g = buildGraph(strokes)
+      const mudas = g.nodes.filter((n) => n.labelStrokeIds.length === 0)
+      return mudas.length === 0 ? null : `${mudas.length} caixa(s) sem letra`
+    },
+  },
+  {
+    // É isto que a versão antiga não fazia: ela lia só a zona, e a zona se
+    // repete a cada folha.
+    nome: 'ele passa de uma folha, e isso não atrapalha a leitura',
+    rodar() {
+      const { strokes } = desenhoDoUsuario()
+      const g = buildGraph(strokes)
+      const fundo = Math.max(
+        ...g.nodes.map((n) => n.bounds.maxY),
+      )
+      if (fundo <= 1754) return `o desenho de teste nem passa de uma folha (${Math.round(fundo)}px)`
+      const abaixo = g.nodes.filter((n) => n.bounds.minY > 1754)
+      return abaixo.length >= 2 ? null : 'nenhuma caixa caiu na segunda folha'
+    },
+  },
+  {
+    nome: 'o título e as notas da margem ficam de fora, e são contados',
+    rodar() {
+      const { strokes } = desenhoDoUsuario()
+      const g = buildGraph(strokes)
+      return g.soltos.length === 3 ? null : `${g.soltos.length} soltos, esperava 3`
+    },
+  },
+)
+
 console.log('\n  Fluxograma — do rabisco ao desenho estruturado\n')
 let falhas = 0
 for (const caso of casos) {

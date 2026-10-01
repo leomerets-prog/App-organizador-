@@ -275,7 +275,15 @@ export interface FlowChartEdge {
 export interface Flowchart {
   id: Id
   pageId: Id
-  zoneId: Id
+  /**
+   * A zona de onde veio, quando veio de uma.
+   *
+   * Hoje a leitura é da folha inteira: um fluxograma de verdade passa da
+   * altura de uma folha, e a divisão em zonas se repete a cada folha — ler só
+   * a zona fazia as caixas de baixo sumirem. Fica opcional pros fluxogramas
+   * montados antes disso.
+   */
+  zoneId?: Id
   nodes: FlowChartNode[]
   edges: FlowChartEdge[]
   /** Quantos traços o leitor não soube aproveitar; aparece na tela. */
