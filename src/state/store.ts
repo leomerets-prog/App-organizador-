@@ -12,6 +12,7 @@ import type {
   FlowChartNode,
   FlowColor,
   FlowShape,
+  Porta,
   Recording,
   Section,
   Stroke,
@@ -221,9 +222,19 @@ export interface AppState {
   updateFlowNode: (
     chartId: Id,
     nodeId: Id,
-    patch: { label?: string; kind?: FlowShape; pos?: { x: number; y: number }; cor?: FlowColor },
+    patch: {
+      label?: string
+      kind?: FlowShape
+      pos?: { x: number; y: number }
+      cor?: FlowColor
+      tamanho?: { w: number; h: number }
+    },
   ) => Promise<void>
-  updateFlowEdge: (chartId: Id, edgeId: Id, patch: { label?: string }) => Promise<void>
+  updateFlowEdge: (
+    chartId: Id,
+    edgeId: Id,
+    patch: { label?: string; saida?: Porta; entrada?: Porta },
+  ) => Promise<void>
   /**
    * Cria uma caixa no painel, na forma escolhida na lateral.
    *

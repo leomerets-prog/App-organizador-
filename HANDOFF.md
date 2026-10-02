@@ -845,6 +845,44 @@ nenhum.
 É gravado **depois** de a folha abrir de verdade, nunca antes: anotar na
 intenção faria o app tentar voltar pra uma folha que não chegou a carregar.
 
+### 36i. A caixa cresce pelo texto, e quem mede é quem desenha
+
+*"Queria alterar o tamanho do bloco e também a largura, pois escrevi muito e
+está ficando oculto."*
+
+A quebra do nome cortava em três linhas e o resto sumia — sem aviso nenhum.
+Hoje:
+
+- **o tamanho escolhido é um MÍNIMO**, nunca uma camisa de força. Uma caixa que
+  recusasse crescer esconderia o nome, que é o defeito que o tamanho ajustável
+  veio consertar
+- **`quebrarTexto` devolve TODAS as linhas**, e parte a palavra que não cabe
+  em vez de deixá-la vazar
+
+E a parte que não pode ser esquecida: **a mesma função que mede é a que
+desenha.** `quebrarTexto`/`limiteDeLetras` moram em `flow/layout.ts` e o painel
+as importa. Se fossem duas contas parecidas, o dia em que uma mudasse a caixa
+voltaria a ter altura de menos — e o texto, a sumir.
+
+Largura e altura entram por BOTÃO, e não por alça no canto da caixa. A alça é o
+jeito bonito e seria pequena demais: com o fluxograma reduzido pra caber na
+largura, um canto de 30px do desenho vira doze de dedo. Isso já custou três
+versões neste painel (36b).
+
+### 36j. Numa grade, `auto` é max-content
+
+A lista de setas na lateral é `display: grid`. Com um nome comprido, a coluna
+`auto` cresceu até o tamanho do conteúdo e empurrou o ⇄ e o ✕ pra fora da
+lateral — e a lateral inteira passou a rolar pro lado, escondendo as formas.
+
+Dois fechos, porque um só não basta: `grid-template-columns: minmax(0, 1fr)` na
+lista, e `overflow-x: hidden` na lateral. O primeiro é a causa; o segundo é a
+garantia de que nenhum conteúdo futuro repita o truque.
+
+**A regra:** numa coluna de grade que deve caber num espaço fixo, escreva
+`minmax(0, 1fr)`. `1fr` sozinho também não segura — o mínimo automático de um
+item de grade é `min-content`.
+
 ### 37. O que se pode ESCOLHER é mais do que o que se pode ADIVINHAR
 
 `ShapeKind` (`flow/shapes.ts`) são as três formas que a leitura sabe reconhecer
@@ -933,6 +971,9 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Tocar escolhe, arrastar move — o mesmo gesto | Separar em dois modos obrigaria a escolher o modo antes de saber o que se quer fazer. Quem solta sem andar escolheu; quem andou, moveu |
 | `touch-action: none` vai no `<svg>`, nunca no que está dentro dele | O navegador ignora a propriedade em elemento de dentro de um SVG. Estava no `<g>` da caixa, não fazia nada, e o gesto da caneta era roubado pra rolar a tela |
 | Um gesto de cada vez, e a caneta não cede ao dedo | A palma encosta antes da ponta. Dois gestos disputando a mesma tela levavam a caixa pro lado errado e depois travavam o painel |
+| O tamanho da caixa é um mínimo; o texto pode pedir mais | Esconder o nome é pior que ficar grande. Uma caixa que recusasse crescer refaria o defeito que o tamanho ajustável veio consertar |
+| Quem MEDE o texto é quem DESENHA o texto | Duas contas parecidas em dois lugares: no dia em que uma mudar, o nome volta a ser cortado |
+| A seta pode ter o lado escolhido à mão | "Em geral certo" não é sempre certo; quem monta o desenho sabe de que lado a seta fica legível. E dá pra voltar pro automático |
 | A seta escolhe a porta pela POSIÇÃO do destino, não pelo sentido | Toda seta pra frente saía por baixo e entrava por cima; com as caixas arrastadas pro lado, ela descia, atravessava e entrava pelo telhado da vizinha |
 | Dois dedos podem o que um dedo não pode | A pinça foi recusada antes por brigar com o arrasto — brigaria se fosse o mesmo dedo. Um move, dois aproximam, e não há ambiguidade |
 | Botão que ABRE não recalcula | "Eu saio pra olhar na folha e volto, ele já mexeu em várias coisas". E ao separar, alguém tem que avisar que o recálculo ficou pendente |

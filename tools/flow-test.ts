@@ -1,7 +1,14 @@
 import { classifyShape, countCorners, isClosedPath, polygonArea } from '../src/flow/shapes'
 import { buildGraph } from '../src/flow/graph'
 import type { FlowStroke } from '../src/flow/graph'
-import { backEdges, layout, levelize } from '../src/flow/layout'
+import {
+  alturaParaTexto,
+  backEdges,
+  layout,
+  levelize,
+  limiteDeLetras,
+  quebrarTexto,
+} from '../src/flow/layout'
 import { mergeFlowchart } from '../src/flow/merge'
 import {
   MAX_PASSOS,
@@ -502,6 +509,128 @@ const casos: Caso[] = [
       const fim = l.edges[0]?.points.at(-1)
       if (!destino || !fim) return 'a seta não foi traçada'
       return Math.abs(fim.y - destino.y) < 1 ? null : 'deixou de entrar pelo topo'
+    },
+  },
+  {
+    /*
+     * "Queria alterar o tamanho do bloco e também a largura, pois escrevi muito
+     * e está ficando oculto."
+     *
+     * A quebra cortava em três linhas e o resto sumia. Agora a caixa cresce pra
+     * caber o nome inteiro — e o teste pergunta as duas coisas que importam:
+     * nenhuma linha se perdeu, e a caixa tem altura pra todas elas.
+     */
+    nome: 'nome comprido não é cortado: a caixa cresce pra caber',
+    rodar() {
+      const comprido =
+        'Conferir o pedido com o cliente, registrar no sistema e avisar o setor de compras antes de seguir'
+      const l = layout({
+        nodes: [{ ...caixa('a'), label: comprido }],
+        edges: [],
+      })
+      const posto = l.nodes[0]
+      const linhas = quebrarTexto(comprido, limiteDeLetras(posto.w, posto.kind))
+      const palavras = comprido.split(' ').length
+      const saiu = linhas.join(' ').split(' ').length
+      if (saiu !== palavras) return `${palavras} palavras entraram e ${saiu} saíram`
+      if (posto.h < alturaParaTexto(linhas.length, posto.kind)) {
+        return `a caixa tem ${Math.round(posto.h)}px pra ${linhas.length} linhas`
+      }
+      return null
+    },
+  },
+  {
+    nome: 'a largura escolhida vale, e o nome se requebra nela',
+    rodar() {
+      const texto = 'Conferir o pedido com o cliente e registrar no sistema'
+      const estreita = layout({
+        nodes: [{ ...caixa('a'), label: texto, tamanho: { w: 160, h: 60 } }],
+        edges: [],
+      }).nodes[0]
+      const larga = layout({
+        nodes: [{ ...caixa('a'), label: texto, tamanho: { w: 420, h: 60 } }],
+        edges: [],
+      }).nodes[0]
+      if (Math.abs(estreita.w - 160) > 1) return `a largura escolhida virou ${estreita.w}`
+      if (Math.abs(larga.w - 420) > 1) return `a largura escolhida virou ${larga.w}`
+      // Mais larga, menos linhas — e por isso mais baixa.
+      return larga.h < estreita.h ? null : 'a caixa larga não ficou mais baixa que a estreita'
+    },
+  },
+  {
+    // O tamanho escolhido é um MÍNIMO. Uma caixa que recusasse crescer
+    // esconderia o nome, que é o defeito que o tamanho veio consertar.
+    nome: 'mas a altura escolhida nunca esconde texto',
+    rodar() {
+      const texto = 'Primeira linha bem comprida, segunda linha, terceira linha e ainda mais texto'
+      const posto = layout({
+        nodes: [{ ...caixa('a'), label: texto, tamanho: { w: 200, h: 40 } }],
+        edges: [],
+      }).nodes[0]
+      const linhas = quebrarTexto(texto, limiteDeLetras(posto.w, posto.kind))
+      return posto.h >= alturaParaTexto(linhas.length, posto.kind)
+        ? null
+        : `pedi 40px de altura e a caixa ficou com ${Math.round(posto.h)} pra ${linhas.length} linhas`
+    },
+  },
+  {
+    nome: 'a porta escolhida à mão manda no arranjo',
+    rodar() {
+      const base = {
+        nodes: [
+          { ...caixa('a'), pos: { x: 100, y: 100 } },
+          { ...caixa('b'), pos: { x: 100, y: 500 } },
+        ],
+      }
+      // Sozinho, o arranjo entraria por cima — a caixa está embaixo.
+      const auto = layout({ ...base, edges: [{ id: 'e', from: 'a', to: 'b' }] })
+      const destino = auto.nodes.find((n) => n.id === 'b')
+      if (!destino) return 'a caixa sumiu'
+      if (Math.abs((auto.edges[0].points.at(-1)?.y ?? 0) - destino.y) > 1) {
+        return 'sem escolha, deixou de entrar por cima'
+      }
+      // Com a escolha, entra pela esquerda.
+      const mandado = layout({
+        ...base,
+        edges: [{ id: 'e', from: 'a', to: 'b', saida: 'esquerda', entrada: 'esquerda' }],
+      })
+      const fim = mandado.edges[0].points.at(-1)
+      const inicio = mandado.edges[0].points[0]
+      const origem = mandado.nodes.find((n) => n.id === 'a')
+      if (!fim || !inicio || !origem) return 'a seta não foi traçada'
+      if (Math.abs(fim.x - destino.x) > 1) return `entrou em x=${Math.round(fim.x)}, não na esquerda`
+      if (Math.abs(inicio.x - origem.x) > 1) return 'não saiu pela esquerda da origem'
+      return null
+    },
+  },
+  {
+    nome: 'e a seta chega SEMPRE na direção da porta de destino',
+    rodar() {
+      const cantos: { porta: 'cima' | 'baixo' | 'esquerda' | 'direita'; eixo: 'x' | 'y' }[] = [
+        { porta: 'cima', eixo: 'y' },
+        { porta: 'baixo', eixo: 'y' },
+        { porta: 'esquerda', eixo: 'x' },
+        { porta: 'direita', eixo: 'x' },
+      ]
+      for (const { porta, eixo } of cantos) {
+        const l = layout({
+          nodes: [
+            { ...caixa('a'), pos: { x: 100, y: 100 } },
+            { ...caixa('b'), pos: { x: 600, y: 500 } },
+          ],
+          edges: [{ id: 'e', from: 'a', to: 'b', entrada: porta }],
+        })
+        const pts = l.edges[0].points
+        const fim = pts.at(-1)
+        const antes = pts.at(-2)
+        if (!fim || !antes) return `${porta}: a seta não foi traçada`
+        // O último trecho tem que ser perpendicular à borda de entrada: quem
+        // entra por cima vem descendo, quem entra pela esquerda vem andando.
+        const movel = eixo === 'y' ? Math.abs(fim.y - antes.y) : Math.abs(fim.x - antes.x)
+        const parado = eixo === 'y' ? Math.abs(fim.x - antes.x) : Math.abs(fim.y - antes.y)
+        if (!(movel > 1 && parado < 1)) return `${porta}: a ponta chega de lado, não de frente`
+      }
+      return null
     },
   },
 ]

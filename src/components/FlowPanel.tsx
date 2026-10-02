@@ -1,9 +1,9 @@
 import { useMemo, useRef, useState } from 'react'
 import { useStore } from '../state/store'
-import { layout } from '../flow/layout'
+import { LINHA, limiteDeLetras, layout, quebrarTexto } from '../flow/layout'
 import type { PlacedNode } from '../flow/layout'
 import { rotulo } from '../flow/undo'
-import type { Flowchart, FlowColor, FlowShape } from '../domain/types'
+import type { Flowchart, FlowColor, FlowShape, Porta } from '../domain/types'
 import { salvarImagem } from '../audio/export'
 
 /**
@@ -127,6 +127,10 @@ const ESCALAS = [0.25, 0.4, 0.5, 0.75, 1, 1.5, 2]
 const ZOOM_MIN = 0.2
 const ZOOM_MAX = 3
 
+/** De quanto em quanto a caixa cresce e encolhe. Um toque, uma diferença visível. */
+const PASSO_LARGURA = 40
+const PASSO_ALTURA = 24
+
 const TEXTO = '#111827'
 const SETA = '#4b5563'
 
@@ -192,6 +196,9 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
         nodes: chart.nodes.map((n) =>
           arrastando?.id === n.id ? { ...n, pos: { x: arrastando.x, y: arrastando.y } } : n,
         ),
+        // `label` e `tamanho` vão junto porque é o texto que decide a altura
+        // mínima da caixa: sem eles, o arranjo mediria uma caixa que não é a
+        // que vai ser desenhada.
         edges: chart.edges,
       }),
     [chart.nodes, chart.edges, arrastando],
@@ -495,6 +502,22 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
     window.addEventListener('pointercancel', soltar)
   }
 
+  /**
+   * Muda o tamanho da caixa escolhida.
+   *
+   * Parte do tamanho que ela TEM no desenho (o do arranjo), e não de um padrão
+   * — senão o primeiro toque num "+" devolveria a caixa pro tamanho de fábrica
+   * antes de crescer, e quem tem um nome comprido veria a caixa encolher ao
+   * pedir que ela aumentasse.
+   */
+  const mudarTamanho = async (id: string, dw: number, dh: number) => {
+    const posto = arranjo.nodes.find((n) => n.id === id)
+    if (!posto) return
+    await updateFlowNode(chart.id, id, {
+      tamanho: { w: posto.w + dw, h: posto.h + dh },
+    })
+  }
+
   /** Cria a caixa num canto livre, embaixo de tudo, e já a deixa escolhida. */
   const novaCaixa = async (kind: FlowShape) => {
     const abaixo = Math.max(0, ...arranjo.nodes.map((n) => n.y + n.h)) + 40
@@ -782,8 +805,8 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
                       className="flow-seta-nome"
                       onClick={() => abrirEdicao(`seta:${e.id}`, e.label)}
                     >
-                      {porId.get(e.from)?.label || 'caixa'} → {porId.get(e.to)?.label || 'caixa'}
-                      {e.label ? `: ${e.label}` : ''}
+                      {curto(porId.get(e.from)?.label)} → {curto(porId.get(e.to)?.label)}
+                      {e.label ? `: ${curto(e.label)}` : ''}
                     </button>
                     <button
                       className="flow-seta-acao"
@@ -933,6 +956,35 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
               }}
             />
           </label>
+
+          {/*
+            De que lado a seta sai e por onde ela entra.
+
+            "Automático" é o padrão e acerta na maioria: ele olha onde as duas
+            caixas estão. Mas "em geral certo" não é sempre certo — quem está
+            montando o desenho sabe de que lado a seta fica legível, e até
+            aqui não tinha como dizer.
+          */}
+          {editando.startsWith('seta:') &&
+            (() => {
+              const seta = chart.edges.find((x) => x.id === editando.slice(5))
+              if (!seta) return null
+              return (
+                <>
+                  <PortaEscolha
+                    titulo="Sai por"
+                    atual={seta.saida}
+                    onEscolher={(p) => void updateFlowEdge(chart.id, seta.id, { saida: p })}
+                  />
+                  <PortaEscolha
+                    titulo="Entra por"
+                    atual={seta.entrada}
+                    onEscolher={(p) => void updateFlowEdge(chart.id, seta.id, { entrada: p })}
+                  />
+                </>
+              )
+            })()}
+
           <button className="flow-ok" onClick={fecharEdicao}>
             Pronto
           </button>
@@ -969,6 +1021,48 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
                 </svg>
               </button>
             ))}
+          </div>
+
+          {/*
+            Largura e altura em botões, e não numa alça no canto da caixa.
+
+            A alça é o jeito bonito, e seria pequena demais: com o fluxograma
+            reduzido pra caber na largura, um canto de 30px do desenho vira doze
+            de dedo. Já custou caro neste painel. Botão é alvo cheio em qualquer
+            zoom.
+
+            O tamanho é um MÍNIMO: a caixa cresce sozinha pra caber o nome, e
+            por isso o "−" nunca consegue esconder texto.
+          */}
+          <div className="flow-grupo">
+            <button
+              onClick={() => void mudarTamanho(escolhida, -PASSO_LARGURA, 0)}
+              aria-label="Mais estreita"
+              title="Mais estreita"
+            >
+              ⇤⇥
+            </button>
+            <button
+              onClick={() => void mudarTamanho(escolhida, PASSO_LARGURA, 0)}
+              aria-label="Mais larga"
+              title="Mais larga"
+            >
+              ⇥⇤
+            </button>
+            <button
+              onClick={() => void mudarTamanho(escolhida, 0, -PASSO_ALTURA)}
+              aria-label="Mais baixa"
+              title="Mais baixa"
+            >
+              ⤒⤓
+            </button>
+            <button
+              onClick={() => void mudarTamanho(escolhida, 0, PASSO_ALTURA)}
+              aria-label="Mais alta"
+              title="Mais alta"
+            >
+              ⤓⤒
+            </button>
           </div>
 
           <div className="flow-cores">
@@ -1008,6 +1102,57 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
           Toque na caixa de destino pra fechar a ligação.
         </div>
       )}
+    </div>
+  )
+}
+
+const PORTA_NOME: Record<Porta, string> = {
+  cima: 'Por cima',
+  baixo: 'Por baixo',
+  esquerda: 'Pela esquerda',
+  direita: 'Pela direita',
+}
+
+const PORTA_SETA: Record<Porta, string> = {
+  cima: '↑',
+  baixo: '↓',
+  esquerda: '←',
+  direita: '→',
+}
+
+/**
+ * Escolher um lado — ou deixar o arranjo decidir.
+ *
+ * "Automático" é um botão como os outros, e não a ausência de escolha: assim
+ * dá pra VOLTAR pro automático depois de experimentar um lado, que é o que
+ * qualquer um faz ao mexer nisso.
+ */
+function PortaEscolha({
+  titulo,
+  atual,
+  onEscolher,
+}: {
+  titulo: string
+  atual?: Porta
+  onEscolher: (p?: Porta) => void
+}) {
+  return (
+    <div className="flow-portas">
+      <span className="muted">{titulo}</span>
+      <button className={atual ? '' : 'ativo'} onClick={() => onEscolher(undefined)}>
+        auto
+      </button>
+      {(Object.keys(PORTA_NOME) as Porta[]).map((p) => (
+        <button
+          key={p}
+          className={atual === p ? 'ativo' : ''}
+          onClick={() => onEscolher(p)}
+          title={PORTA_NOME[p]}
+          aria-label={PORTA_NOME[p]}
+        >
+          {PORTA_SETA[p]}
+        </button>
+      ))}
     </div>
   )
 }
@@ -1244,7 +1389,9 @@ function Caixa({
   const cor = CORES[corEscolhida ?? COR_DA_FORMA[posto.kind]]
   const cx = posto.x + posto.w / 2
   const cy = posto.y + posto.h / 2 + (posto.kind === 'documento' ? -6 : 0)
-  const linhas = quebrar(label || '…', posto.kind === 'decisao' ? 18 : 24)
+  // A MESMA conta do arranjo, de propósito: é ela que deu à caixa a altura
+  // que o texto precisa. Se fossem duas, o nome voltaria a ser cortado.
+  const linhas = quebrarTexto(label || '…', limiteDeLetras(posto.w, posto.kind))
 
   return (
     <g
@@ -1288,7 +1435,7 @@ function Caixa({
         <text
           key={i}
           x={cx}
-          y={cy + (i - (linhas.length - 1) / 2) * 18 + 5}
+          y={cy + (i - (linhas.length - 1) / 2) * LINHA + 5}
           textAnchor="middle"
           fontSize={15}
           fill={label ? TEXTO : '#9ca3af'}
@@ -1301,22 +1448,16 @@ function Caixa({
   )
 }
 
-/** Quebra o nome em linhas que caibam na caixa, sem partir palavra no meio. */
-function quebrar(texto: string, limite: number): string[] {
-  const palavras = texto.split(/\s+/).filter(Boolean)
-  if (palavras.length === 0) return ['…']
-  const linhas: string[] = []
-  let atual = ''
-  for (const p of palavras) {
-    if (!atual) atual = p
-    else if (atual.length + 1 + p.length <= limite) atual += ` ${p}`
-    else {
-      linhas.push(atual)
-      atual = p
-    }
-  }
-  if (atual) linhas.push(atual)
-  return linhas.slice(0, 3)
+/**
+ * O nome da caixa, encurtado pra caber na lista da lateral.
+ *
+ * A lista é um índice, não uma leitura: o nome inteiro mora na caixa. Cortar
+ * aqui é o que mantém cada seta numa linha só — e a lateral do tamanho dela.
+ */
+function curto(texto: string | undefined, limite = 14): string {
+  const t = (texto ?? '').trim()
+  if (!t) return 'caixa'
+  return t.length <= limite ? t : `${t.slice(0, limite - 1)}…`
 }
 
 function carimbo(instante: number): string {

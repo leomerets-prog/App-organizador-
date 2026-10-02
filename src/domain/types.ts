@@ -283,7 +283,18 @@ export interface FlowChartNode {
   cor?: FlowColor
   /** Caixa que o usuário criou no painel, sem tinta nenhuma por trás. */
   criadaAMao?: boolean
+  /**
+   * O tamanho que o usuário escolheu pra caixa.
+   *
+   * É um MÍNIMO, não uma camisa de força: a caixa cresce sozinha pra caber o
+   * nome inteiro, porque esconder texto é pior que ficar grande. O relato foi
+   * "escrevi muito e está ficando oculto".
+   */
+  tamanho?: { w: number; h: number }
 }
+
+/** Por onde uma seta sai de uma caixa, ou entra nela. */
+export type Porta = 'cima' | 'baixo' | 'esquerda' | 'direita'
 
 /** As cores que uma caixa pode ter. Poucas, e cada uma com um sentido óbvio. */
 export type FlowColor = 'azul' | 'verde' | 'laranja' | 'vermelho' | 'roxo' | 'cinza'
@@ -297,6 +308,15 @@ export interface FlowChartEdge {
   direcao: 'ponta' | 'ordem' | 'mao'
   /** Ligação que o usuário fez no painel, sem traço nenhum por trás. */
   criadaAMao?: boolean
+  /**
+   * Por onde a seta sai e por onde entra, quando o usuário escolheu.
+   *
+   * Sem escolha, o arranjo decide pela POSIÇÃO das duas caixas. A escolha
+   * existe porque "em geral certo" não é sempre certo: quem está montando o
+   * desenho sabe de que lado a seta fica legível.
+   */
+  saida?: Porta
+  entrada?: Porta
 }
 
 /**

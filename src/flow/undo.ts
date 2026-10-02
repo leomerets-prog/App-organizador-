@@ -68,12 +68,14 @@ export function assinatura(chart: Flowchart): string {
     .map(
       (n) =>
         `${n.id}|${n.kind}|${n.label}|${n.cor ?? ''}|` +
-        (n.pos ? `${Math.round(n.pos.x)},${Math.round(n.pos.y)}` : '-'),
+        (n.pos ? `${Math.round(n.pos.x)},${Math.round(n.pos.y)}` : '-') +
+        '|' +
+        (n.tamanho ? `${Math.round(n.tamanho.w)}x${Math.round(n.tamanho.h)}` : '-'),
     )
     .join(';')
   const setas = [...chart.edges]
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    .map((e) => `${e.id}|${e.from}|${e.to}|${e.label}`)
+    .map((e) => `${e.id}|${e.from}|${e.to}|${e.label}|${e.saida ?? '-'}|${e.entrada ?? '-'}`)
     .join(';')
   return `${caixas}#${setas}`
 }
@@ -167,12 +169,14 @@ export function rotulo(antes: Flowchart, depois: Flowchart): string {
     if (lugar(a.pos) !== lugar(d.pos)) return 'caixa movida'
     if (a.kind !== d.kind) return 'forma'
     if (a.cor !== d.cor) return 'cor'
+    if (tam(a.tamanho) !== tam(d.tamanho)) return 'tamanho'
     if (a.label !== d.label) return 'nome'
   }
   for (const d of depois.edges) {
     const a = antes.edges.find((e) => e.id === d.id)
     if (!a) return 'leitura'
     if (a.from === d.to && a.to === d.from) return 'seta invertida'
+    if (a.saida !== d.saida || a.entrada !== d.entrada) return 'lado da seta'
     if (a.label !== d.label) return 'nome da seta'
   }
   return 'leitura'
@@ -180,4 +184,8 @@ export function rotulo(antes: Flowchart, depois: Flowchart): string {
 
 function lugar(pos: { x: number; y: number } | undefined): string {
   return pos ? `${Math.round(pos.x)},${Math.round(pos.y)}` : '-'
+}
+
+function tam(t: { w: number; h: number } | undefined): string {
+  return t ? `${Math.round(t.w)}x${Math.round(t.h)}` : '-'
 }

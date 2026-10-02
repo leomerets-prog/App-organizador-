@@ -2463,7 +2463,10 @@ input {
 .flow-lateral {
   width: 194px;
   flex: none;
-  overflow: auto;
+  /* Rola só pra baixo. Pros lados, NUNCA: um nome comprido na lista de setas
+     empurrava a lateral inteira pra fora e as formas sumiam da vista. */
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 12px 10px 20px;
   border-right: 1px solid var(--line);
   background: var(--surface);
@@ -2667,11 +2670,45 @@ input {
   outline-offset: 2px;
 }
 
+/* Escolher o lado por onde a seta sai e entra. Fica no editor da seta, junto
+   do nome, porque é lá que se mexe numa seta específica. */
+.flow-portas {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.flow-portas > span {
+  margin-right: 2px;
+}
+
+.flow-portas button {
+  min-width: 38px;
+  height: var(--tap);
+  padding: 0 8px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: 15px;
+}
+
+.flow-portas button.ativo {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 600;
+}
+
 /* A lista de setas, na lateral: uma por linha, com o nome tomando a largura e
    as duas ações no fim. Embaixo do desenho ela crescia pros lados e comia a
    tela de quem estava mexendo nas caixas. */
 .flow-setas {
   display: grid;
+  /* A coluna NÃO pode crescer com o conteúdo: numa grade, `auto` vira
+     max-content e o nome comprido empurrava o ⇄ e o ✕ pra fora da lateral. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   padding: 4px 0 0;
 }

@@ -1,4 +1,4 @@
-import type { FlowShape, Id } from '../domain/types'
+import type { FlowShape, Id, Porta } from '../domain/types'
 
 /**
  * O arranjo: do rabisco pro fluxograma de verdade.
@@ -41,8 +41,12 @@ export interface GraphIn {
     bounds: { minX: number; minY: number; maxX: number; maxY: number }
     /** Posição escolhida à mão; quando existe, manda no arranjo automático. */
     pos?: { x: number; y: number }
+    /** Tamanho escolhido à mão; é um mínimo — o texto pode pedir mais. */
+    tamanho?: { w: number; h: number }
+    /** O nome, porque é ele que decide a altura mínima da caixa. */
+    label?: string
   }[]
-  edges: { id: Id; from: Id; to: Id }[]
+  edges: { id: Id; from: Id; to: Id; saida?: Porta; entrada?: Porta }[]
 }
 
 export interface PlacedNode {
@@ -74,18 +78,100 @@ export interface Layout {
   height: number
 }
 
+/** Altura de uma linha de nome, e a margem de dentro da caixa. */
+export const LINHA = 18
+const RECUO = 14
+/** Largura média de uma letra a 15px em system-ui. Medida, não chutada. */
+const LETRA = 7.8
+/** Ninguém consegue tocar no que é menor que isto. */
+const MIN_W = 120
+const MIN_H = 54
+
 /**
- * O tamanho de cada forma.
+ * O tamanho padrão de cada forma.
  *
  * Todas ocupam a mesma caixa, de propósito: um fluxograma com caixas de
  * tamanhos diferentes se lê como se as maiores importassem mais, e não é isso
  * que a forma quer dizer. As duas exceções têm motivo de desenho — o losango
  * estreita no meio, e o cilindro perde altura útil nas duas tampas.
  */
-export function sizeOf(kind: FlowShape): { w: number; h: number } {
+function padrao(kind: FlowShape): { w: number; h: number } {
   if (kind === 'decisao') return { w: DECISION_W, h: DECISION_H }
   if (kind === 'banco') return { w: NODE_W, h: NODE_H + 22 }
   return { w: NODE_W, h: NODE_H }
+}
+
+/**
+ * Quantas letras cabem numa linha dentro de uma caixa desta largura.
+ *
+ * O losango usa pouco mais da metade: o texto mora na faixa do meio, que é a
+ * única parte larga dele.
+ */
+export function limiteDeLetras(largura: number, kind: FlowShape): number {
+  const util = (largura - RECUO * 2) * (kind === 'decisao' ? 0.62 : 1)
+  return Math.max(4, Math.floor(util / LETRA))
+}
+
+/**
+ * Quebra o nome em linhas que caibam na largura, sem partir palavra no meio.
+ *
+ * Devolve TODAS as linhas — nunca corta. Cortar aqui era o que escondia o
+ * texto: *"escrevi muito e está ficando oculto"*. Palavra maior que a linha é
+ * partida, porque a alternativa é ela sair pra fora da caixa.
+ *
+ * É a mesma função que o painel usa pra desenhar. Se fossem duas, o dia em que
+ * uma mudasse a caixa voltaria a ter altura de menos.
+ */
+export function quebrarTexto(texto: string, limite: number): string[] {
+  const palavras = texto.split(/\s+/).filter(Boolean)
+  if (palavras.length === 0) return ['…']
+  const linhas: string[] = []
+  let atual = ''
+  for (const palavra of palavras) {
+    let p = palavra
+    while (p.length > limite) {
+      if (atual) {
+        linhas.push(atual)
+        atual = ''
+      }
+      linhas.push(p.slice(0, limite))
+      p = p.slice(limite)
+    }
+    if (!atual) atual = p
+    else if (atual.length + 1 + p.length <= limite) atual += ` ${p}`
+    else {
+      linhas.push(atual)
+      atual = p
+    }
+  }
+  if (atual) linhas.push(atual)
+  return linhas
+}
+
+/** A altura mínima pra caber estas linhas nesta forma. */
+export function alturaParaTexto(linhas: number, kind: FlowShape): number {
+  const texto = linhas * LINHA + RECUO * 2
+  // No losango o texto só cabe na faixa do meio: a caixa precisa do dobro.
+  return kind === 'decisao' ? texto * 1.9 : texto
+}
+
+/**
+ * O tamanho de uma caixa: o que o usuário escolheu, nunca menor que o texto.
+ *
+ * O tamanho escolhido é um MÍNIMO, e não uma camisa de força. Uma caixa que
+ * recusasse crescer esconderia o nome — que é exatamente o defeito que o
+ * tamanho ajustável veio consertar.
+ */
+export function sizeOf(
+  kind: FlowShape,
+  tamanho?: { w: number; h: number },
+  label?: string,
+): { w: number; h: number } {
+  const base = padrao(kind)
+  const w = Math.max(MIN_W, tamanho?.w ?? base.w)
+  const linhas = quebrarTexto(label ?? '', limiteDeLetras(w, kind)).length
+  const h = Math.max(MIN_H, tamanho?.h ?? base.h, alturaParaTexto(linhas, kind))
+  return { w, h }
 }
 
 /**
@@ -189,7 +275,8 @@ export function layout(graph: GraphIn): Layout {
   for (const l of niveis) {
     const lista = porNivel.get(l) ?? []
     const soma =
-      lista.reduce((t, n) => t + sizeOf(n.kind).w, 0) + GAP_X * Math.max(0, lista.length - 1)
+      lista.reduce((t, n) => t + sizeOf(n.kind, n.tamanho, n.label).w, 0) +
+      GAP_X * Math.max(0, lista.length - 1)
     largura = Math.max(largura, soma)
   }
 
@@ -200,12 +287,13 @@ export function layout(graph: GraphIn): Layout {
   for (const l of niveis) {
     const lista = porNivel.get(l) ?? []
     const soma =
-      lista.reduce((t, n) => t + sizeOf(n.kind).w, 0) + GAP_X * Math.max(0, lista.length - 1)
+      lista.reduce((t, n) => t + sizeOf(n.kind, n.tamanho, n.label).w, 0) +
+      GAP_X * Math.max(0, lista.length - 1)
     let x = MARGIN + (largura - soma) / 2
-    const alturaDoNivel = Math.max(...lista.map((n) => sizeOf(n.kind).h))
+    const alturaDoNivel = Math.max(...lista.map((n) => sizeOf(n.kind, n.tamanho, n.label).h))
 
     for (const n of lista) {
-      const { w, h } = sizeOf(n.kind)
+      const { w, h } = sizeOf(n.kind, n.tamanho, n.label)
       const posto: PlacedNode = {
         id: n.id,
         kind: n.kind,
@@ -251,7 +339,7 @@ export function layout(graph: GraphIn): Layout {
       from: e.from,
       to: e.to,
       retorno: volta,
-      points: de && para ? caminho(de, para, volta, total) : [],
+      points: de && para ? caminho(de, para, volta, total, e.saida, e.entrada) : [],
     }
   })
 
@@ -296,56 +384,96 @@ function caminho(
   para: PlacedNode,
   retorno: boolean,
   largura: number,
+  saida?: Porta,
+  entrada?: Porta,
 ): { x: number; y: number }[] {
-  const abaixo = para.y >= de.y + de.h - FOLGA_LADO
-  const acima = para.y + para.h <= de.y + FOLGA_LADO
-  const aDireita = para.x >= de.x + de.w - FOLGA_LADO
-  const aEsquerda = para.x + para.w <= de.x + FOLGA_LADO
+  // Escolha do usuário manda — inclusive num retorno. Quem está montando o
+  // desenho sabe de que lado a seta fica legível; o contorno é só o palpite
+  // do arranjo pra quando ninguém disse nada.
+  if (saida || entrada) {
+    const auto = portasAutomaticas(de, para)
+    return rota(de, saida ?? auto.saida, para, entrada ?? auto.entrada)
+  }
 
   if (retorno) return contornando(de, para, largura)
-  if (abaixo) return descendo(de, para)
-  if (aDireita) return deLado(de, para, 1)
-  if (aEsquerda) return deLado(de, para, -1)
-  if (acima) return contornando(de, para, largura)
-  return descendo(de, para)
+
+  const { acima, aDireita, aEsquerda } = ondeEsta(de, para)
+  if (acima && !aDireita && !aEsquerda) return contornando(de, para, largura)
+
+  const auto = portasAutomaticas(de, para)
+  return rota(de, auto.saida, para, auto.entrada)
 }
 
-/** Sai por baixo, entra por cima. */
-function descendo(de: PlacedNode, para: PlacedNode): { x: number; y: number }[] {
-  const deX = de.x + de.w / 2
-  const paraX = para.x + para.w / 2
-  const saiEm = { x: deX, y: de.y + de.h }
-  const chegaEm = { x: paraX, y: para.y }
-  if (Math.abs(deX - paraX) < 2) return [saiEm, chegaEm]
-
-  const meio = (de.y + de.h + para.y) / 2
-  return [saiEm, { x: deX, y: meio }, { x: paraX, y: meio }, chegaEm]
+function ondeEsta(de: PlacedNode, para: PlacedNode) {
+  return {
+    abaixo: para.y >= de.y + de.h - FOLGA_LADO,
+    acima: para.y + para.h <= de.y + FOLGA_LADO,
+    aDireita: para.x >= de.x + de.w - FOLGA_LADO,
+    aEsquerda: para.x + para.w <= de.x + FOLGA_LADO,
+  }
 }
 
 /**
- * Sai pela lateral e entra pela lateral de frente.
+ * De que lado a seta sai e entra, quando ninguém escolheu.
  *
- * `sentido` é +1 quando o destino está à direita e -1 quando está à esquerda:
- * a seta sempre sai pelo lado que aponta pro destino e entra pelo lado do
- * destino que aponta de volta — nunca pelas costas dele.
+ * A pergunta que manda é **onde está o destino**, e não "é pra frente ou pra
+ * trás". Decidir isso errado produz exatamente o que o usuário relatou: *"a
+ * linha não fica na lateral esquerda do novo quadrado, ela sobe e aponta para
+ * o topo"*. A caixa embaixo recebe por cima; a caixa ao lado recebe pelo lado
+ * que olha de volta pra origem — nunca pelas costas.
  */
-function deLado(
+export function portasAutomaticas(
   de: PlacedNode,
   para: PlacedNode,
-  sentido: 1 | -1,
-): { x: number; y: number }[] {
-  const saiEm = {
-    x: sentido === 1 ? de.x + de.w : de.x,
-    y: de.y + de.h / 2,
-  }
-  const chegaEm = {
-    x: sentido === 1 ? para.x : para.x + para.w,
-    y: para.y + para.h / 2,
-  }
-  if (Math.abs(saiEm.y - chegaEm.y) < 2) return [saiEm, chegaEm]
+): { saida: Porta; entrada: Porta } {
+  const { abaixo, acima, aDireita, aEsquerda } = ondeEsta(de, para)
+  if (abaixo) return { saida: 'baixo', entrada: 'cima' }
+  if (aDireita) return { saida: 'direita', entrada: 'esquerda' }
+  if (aEsquerda) return { saida: 'esquerda', entrada: 'direita' }
+  if (acima) return { saida: 'cima', entrada: 'baixo' }
+  return { saida: 'baixo', entrada: 'cima' }
+}
 
-  const meio = (saiEm.x + chegaEm.x) / 2
-  return [saiEm, { x: meio, y: saiEm.y }, { x: meio, y: chegaEm.y }, chegaEm]
+/** O ponto exato de uma porta, na borda da caixa. */
+export function pontoDaPorta(n: PlacedNode, porta: Porta): { x: number; y: number } {
+  if (porta === 'cima') return { x: n.x + n.w / 2, y: n.y }
+  if (porta === 'baixo') return { x: n.x + n.w / 2, y: n.y + n.h }
+  if (porta === 'esquerda') return { x: n.x, y: n.y + n.h / 2 }
+  return { x: n.x + n.w, y: n.y + n.h / 2 }
+}
+
+const ehVertical = (p: Porta) => p === 'cima' || p === 'baixo'
+
+/**
+ * O caminho entre duas portas, em cotovelos retos.
+ *
+ * Três formas, conforme as portas: duas verticais descem com o degrau no meio
+ * da altura; duas laterais atravessam com o degrau no meio do vão; e uma de
+ * cada dá um cotovelo só. A seta sempre CHEGA na direção da porta de destino,
+ * que é o que faz a ponta apontar pro lado certo.
+ */
+export function rota(
+  de: PlacedNode,
+  saida: Porta,
+  para: PlacedNode,
+  entrada: Porta,
+): { x: number; y: number }[] {
+  const a = pontoDaPorta(de, saida)
+  const b = pontoDaPorta(para, entrada)
+
+  if (ehVertical(saida) && ehVertical(entrada)) {
+    if (Math.abs(a.x - b.x) < 2) return [a, b]
+    const meio = (a.y + b.y) / 2
+    return [a, { x: a.x, y: meio }, { x: b.x, y: meio }, b]
+  }
+
+  if (!ehVertical(saida) && !ehVertical(entrada)) {
+    if (Math.abs(a.y - b.y) < 2) return [a, b]
+    const meio = (a.x + b.x) / 2
+    return [a, { x: meio, y: a.y }, { x: meio, y: b.y }, b]
+  }
+
+  return ehVertical(saida) ? [a, { x: a.x, y: b.y }, b] : [a, { x: b.x, y: a.y }, b]
 }
 
 /**
