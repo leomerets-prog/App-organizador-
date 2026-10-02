@@ -87,6 +87,34 @@ const TOQUE = 14
 const FOLGA = 340
 
 /**
+ * O menor tamanho em que o desenho é mostrado quando está em "Caber".
+ *
+ * Existe porque "caber" sem limite fecha um laço — não dentro de um arrasto,
+ * que já está congelado, mas ENTRE um arrasto e o seguinte:
+ *
+ * > a caixa é solta mais pra fora → a tela cresce pra caber → o desenho encolhe
+ * > pra caber na largura → o mesmo passeio de dedo passa a valer mais píxeis de
+ * > desenho → o arrasto seguinte leva a caixa mais longe ainda
+ *
+ * Medido: cada arrasto multiplicava a largura por 1,34. Oito arrastos e o
+ * desenho estava em 10% — as caixas viram pontos, o navegador empurra uma
+ * superfície gigante, e o app "trava sem fechar".
+ *
+ * Abaixo disto o nome de 15px sai com 6px e não se lê de qualquer jeito: é
+ * melhor a tela rolar (o dedo passeia pelo desenho) do que encolher pra nada.
+ */
+const ESCALA_MINIMA = 0.4
+
+/**
+ * O limite absoluto da folha de trabalho.
+ *
+ * Nunca deveria ser alcançado — a caixa já é presa dentro da folha visível a
+ * cada arrasto, e a folha cresce de FOLGA em FOLGA. É a trava de segurança pra
+ * que nenhum caminho que eu não previ devolva uma tela de milhões de píxeis.
+ */
+const MAX_DESENHO = 8000
+
+/**
  * Os degraus do zoom.
  *
  * Degraus fixos, e não um pinça contínuo, porque o gesto de pinça no tablet
@@ -196,6 +224,38 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
   }
 
   /**
+   * Quem está com a mão na massa: **um gesto de cada vez.**
+   *
+   * Num tablet, encostar dois dedos não é exceção — é o normal: a palma da mão
+   * toca a tela antes da ponta da caneta. Sem dono, cada toque começava um
+   * gesto próprio, e dois gestos passavam a disputar a mesma tela (um passeando
+   * o desenho, o outro arrastando a caixa). Cada manipulador também só escuta o
+   * ponteiro que o iniciou, pelo mesmo motivo.
+   *
+   * A regra de quem ganha é a de sempre num aparelho com caneta: **a caneta
+   * interrompe o dedo, o dedo não interrompe a caneta.** É a palma da mão que
+   * precisa ceder, não quem está escrevendo.
+   */
+  const gesto = useRef<{ id: number; tipo: string; abandonar: () => void } | null>(null)
+
+  const assumirGesto = (e: React.PointerEvent): boolean => {
+    const atual = gesto.current
+    if (atual && atual.id !== e.pointerId) {
+      // Só a caneta tem direito de não ser interrompida. Em todo outro caso
+      // quem chega ganha — de propósito: um gesto que ficou preso (o dedo
+      // saiu da tela sem o navegador avisar) trancaria o painel pra sempre, e
+      // "não consigo mais arrastar" é exatamente o que se quer evitar aqui.
+      if (atual.tipo === 'pen' && e.pointerType !== 'pen') return false
+      atual.abandonar()
+    }
+    return true
+  }
+
+  const largarGesto = (id: number) => {
+    if (gesto.current?.id === id) gesto.current = null
+  }
+
+  /**
    * Converte um ponto da TELA pro sistema do desenho.
    *
    * Sem isto o arrasto anda numa velocidade diferente do dedo, porque o SVG é
@@ -229,6 +289,8 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
       return
     }
 
+    if (!assumirGesto(e)) return
+
     // Onde o dedo encostou, em píxeis de TELA — é por esta medida que se
     // decide se foi toque ou arrasto.
     const naTela = { x: e.clientX, y: e.clientY }
@@ -246,6 +308,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
 
     const mover = (evento: Event) => {
       const ev = evento as PointerEvent
+      if (ev.pointerId !== e.pointerId) return
       const d = daTela(ev.clientX, ev.clientY)
       if (!d) return
       if (!andou && Math.hypot(ev.clientX - naTela.x, ev.clientY - naTela.y) < TOQUE) return
@@ -260,9 +323,19 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
         const inicio = daTela(naTela.x, naTela.y)
         if (inicio) deslocamento = { x: inicio.x - posto.x, y: inicio.y - posto.y }
       }
-      const x = d.x - deslocamento.x
-      const y = d.y - deslocamento.y
-      setArrastando({ id: posto.id, x: Math.max(0, x), y: Math.max(0, y) })
+      /*
+       * A caixa fica dentro da folha de trabalho — a que está à vista, com a
+       * folga de arrastar. É o que faz a folha crescer de FOLGA em FOLGA, e não
+       * num múltiplo a cada arrasto: sem isto, soltar a caixa longe fazia a
+       * folha dobrar, o desenho encolher e o arrasto seguinte ir mais longe
+       * ainda. Também é o que impede soltar a caixa num lugar que não dá pra
+       * ver.
+       */
+      const limiteX = Math.min(larguraTela, MAX_DESENHO) - posto.w
+      const limiteY = Math.min(alturaTela, MAX_DESENHO) - posto.h
+      const x = Math.min(Math.max(0, d.x - deslocamento.x), Math.max(0, limiteX))
+      const y = Math.min(Math.max(0, d.y - deslocamento.y), Math.max(0, limiteY))
+      setArrastando({ id: posto.id, x, y })
     }
 
     const desligar = () => {
@@ -274,9 +347,11 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
       window.removeEventListener('pointerup', soltar)
       window.removeEventListener('pointercancel', abandonar)
       setTelaCongelada(null)
+      largarGesto(e.pointerId)
     }
 
-    const soltar = () => {
+    const soltar = (evento?: Event) => {
+      if (evento && (evento as PointerEvent).pointerId !== e.pointerId) return
       desligar()
       setArrastando((atual) => {
         if (atual && atual.id === posto.id) {
@@ -295,11 +370,13 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
      * dos dois mundos: o arrasto não aconteceu E a caixa saiu do lugar um
      * tiquinho. Era o que acontecia quando o navegador roubava o gesto.
      */
-    const abandonar = () => {
+    const abandonar = (evento?: Event) => {
+      if (evento && (evento as PointerEvent).pointerId !== e.pointerId) return
       desligar()
       setArrastando(null)
     }
 
+    gesto.current = { id: e.pointerId, tipo: e.pointerType, abandonar }
     alvo.addEventListener('pointermove', mover)
     alvo.addEventListener('pointerup', soltar)
     alvo.addEventListener('pointercancel', abandonar)
@@ -319,6 +396,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
   const passear = (e: React.PointerEvent) => {
     const tela = telaRef.current
     if (!tela) return
+    if (!assumirGesto(e)) return
     const inicio = {
       x: e.clientX,
       y: e.clientY,
@@ -334,18 +412,22 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
 
     const mover = (evento: Event) => {
       const ev = evento as PointerEvent
+      if (ev.pointerId !== e.pointerId) return
       tela.scrollLeft = inicio.left - (ev.clientX - inicio.x)
       tela.scrollTop = inicio.top - (ev.clientY - inicio.y)
     }
 
-    const soltar = () => {
+    const soltar = (evento?: Event) => {
+      if (evento && (evento as PointerEvent).pointerId !== e.pointerId) return
       alvo.removeEventListener('pointermove', mover)
       alvo.removeEventListener('pointerup', soltar)
       alvo.removeEventListener('pointercancel', soltar)
       window.removeEventListener('pointerup', soltar)
       window.removeEventListener('pointercancel', soltar)
+      largarGesto(e.pointerId)
     }
 
+    gesto.current = { id: e.pointerId, tipo: e.pointerType, abandonar: soltar }
     alvo.addEventListener('pointermove', mover)
     alvo.addEventListener('pointerup', soltar)
     alvo.addEventListener('pointercancel', soltar)
@@ -610,9 +692,21 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
               viewBox={`0 0 ${larguraTela} ${alturaTela}`}
               width={escala ? larguraTela * escala : larguraTela}
               height={escala ? alturaTela * escala : alturaTela}
-              // Com zoom escolhido o desenho passa da largura do painel de
-              // propósito: é a tela que rola. Em "Caber", o navegador reduz.
-              style={escala ? { maxWidth: 'none' } : undefined}
+              /*
+               * Com zoom escolhido o desenho passa da largura do painel de
+               * propósito: é a tela que rola, e a régua é a que o usuário
+               * mandou — não depende do tamanho do desenho, então não há laço.
+               *
+               * Em "Caber" quem reduz é o navegador (`max-width: 100%`), e aí o
+               * piso importa: `min-width` ganha de `max-width` no CSS, então
+               * abaixo de ESCALA_MINIMA o desenho para de encolher e a tela
+               * passa a rolar. É o que corta o laço entre um arrasto e outro.
+               */
+              style={
+                escala
+                  ? { maxWidth: 'none' }
+                  : { minWidth: Math.round(larguraTela * ESCALA_MINIMA) }
+              }
               xmlns="http://www.w3.org/2000/svg"
             >
               <rect x={0} y={0} width={larguraTela} height={alturaTela} fill="#ffffff" />

@@ -712,6 +712,59 @@ então um arrasto que só é testado com mouse não está testado. O roteiro ago
 manda toque de verdade (`Input.dispatchTouchEvent`, pelo CDP) nos dois casos
 que importam — a caixa e o fundo.
 
+### 36c. O laço do arrasto fechava ENTRE um arrasto e o seguinte
+
+Assim que arrastar passou a funcionar com a caneta (36b), o app travou de novo.
+Mesma família da 31, um nível acima — e, desta vez, medido:
+
+| arrasto | largura do desenho | régua |
+|---|---|---|
+| — | 650 | 1,00 |
+| 1 | 911 | 0,841 |
+| 4 | 2193 | 0,349 |
+| 8 | 7078 | 0,108 |
+
+Cada arrasto multiplicava a largura por **1,34**. O caminho:
+
+> a caixa é solta mais pra fora → a tela cresce pra caber → em "Caber" o desenho
+> encolhe pra caber na largura → o mesmo passeio de dedo passa a valer mais
+> píxeis de desenho → o arrasto seguinte leva a caixa mais longe ainda
+
+Congelar o tamanho DURANTE o arrasto (31) fecha a porta de dentro; não fecha a
+de fora. Dois cortes, e os dois são necessários:
+
+1. **Piso de escala em "Caber"** (`ESCALA_MINIMA = 0.4`): abaixo disso o desenho
+   para de encolher e a tela passa a rolar. Em CSS é uma linha — `min-width`
+   ganha de `max-width`, então não é preciso medir nada em JavaScript. Com zoom
+   escolhido pelo usuário não há laço, porque a régua é a que ele mandou e não
+   depende do tamanho do desenho
+2. **A caixa é presa dentro da folha de trabalho visível** (a do arranjo mais
+   `FOLGA`): a folha passa a crescer de pedaço em pedaço, e não num múltiplo
+
+Depois: a régua para em 0,4 e a largura em 2741, em vez de 7078 e caindo.
+
+**A regra:** quando o tamanho do desenho decide a escala E a escala decide o
+tamanho, o laço não se fecha só dentro de um gesto. Pergunte o que acontece no
+DÉCIMO gesto, não no primeiro.
+
+### 36d. Dois dedos não podem dirigir o mesmo gesto
+
+Num tablet, encostar dois dedos é o normal: a palma da mão toca a tela antes da
+ponta da caneta. Sem dono do gesto, cada toque começava um gesto próprio, e os
+dois disputavam a mesma tela — um passeando o desenho, o outro arrastando a
+caixa.
+
+Medido, com a palma apoiada no desenho: a caixa ia pra `150×-107` em vez de
+`150×110`, e **o arrasto seguinte, de um dedo só, não fazia mais nada
+(`0×0`)**. É palavra por palavra o que o usuário relatou: "travou e congelou a
+tela, não consigo mais arrastar".
+
+Hoje há um dono (`gesto`), cada manipulador só escuta o ponteiro que o iniciou,
+e a regra de quem ganha é: **a caneta não é interrompida por um dedo; todo o
+resto é interrompido por quem chega.** O "quem chega ganha" é de propósito — um
+gesto que ficou preso (o dedo saiu da tela sem o navegador avisar) trancaria o
+painel pra sempre, que é justamente o defeito que se está consertando.
+
 ### 37. O que se pode ESCOLHER é mais do que o que se pode ADIVINHAR
 
 `ShapeKind` (`flow/shapes.ts`) são as três formas que a leitura sabe reconhecer
@@ -799,6 +852,11 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Limite de gesto se mede em píxeis DE TELA | Em píxeis do desenho, um fluxograma reduzido faz seis píxeis virarem dois de dedo, e nenhum toque conta como toque |
 | Tocar escolhe, arrastar move — o mesmo gesto | Separar em dois modos obrigaria a escolher o modo antes de saber o que se quer fazer. Quem solta sem andar escolheu; quem andou, moveu |
 | `touch-action: none` vai no `<svg>`, nunca no que está dentro dele | O navegador ignora a propriedade em elemento de dentro de um SVG. Estava no `<g>` da caixa, não fazia nada, e o gesto da caneta era roubado pra rolar a tela |
+| Um gesto de cada vez, e a caneta não cede ao dedo | A palma encosta antes da ponta. Dois gestos disputando a mesma tela levavam a caixa pro lado errado e depois travavam o painel |
+| Gesto preso nunca tranca o painel: quem chega ganha | Se o dedo sai da tela sem o navegador avisar, um dono eterno seria o próprio defeito que se quer evitar |
+| "Caber" tem piso; abaixo dele a tela ROLA | Sem piso, cada arrasto encolhia o desenho e o seguinte ia mais longe — 1,34× por arrasto, medido. E um fluxograma a 10% não se lê de qualquer jeito |
+| A caixa só pode ser solta dentro da folha visível | Faz a folha crescer de pedaço em pedaço, em vez de num múltiplo a cada arrasto — e ninguém solta uma caixa onde não dá pra ver |
+| Pergunte o que acontece no DÉCIMO gesto | Congelar a régua dentro do arrasto fecha a porta de dentro; o laço se fechava entre um arrasto e o seguinte |
 | Arrasto testado só com mouse não está testado | `touch-action` só existe pra toque; com mouse a disputa pelo gesto nunca acontece. Passou em todos os casos e não funcionava no tablet |
 | Gesto interrompido ABANDONA, não grava | Gravar onde a caixa parou quando o navegador rouba o gesto é o pior dos dois mundos: o arrasto não aconteceu e a caixa saiu do lugar |
 | Dedo no vazio passeia pelo desenho | É o que paga a conta de ter tirado a rolagem do navegador — e é o que todo editor de fluxograma faz |
