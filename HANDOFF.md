@@ -505,7 +505,22 @@ Duas lições, as duas caras:
   parecia detalhe; foi o que apontou o defeito. Diagnóstico na tela paga
   rodadas de adivinhação
 
-### 28. A estrutura aparece antes dos nomes
+### 28. "Como eu li": a vista que acaba com a adivinhação
+
+Foram cinco rodadas de "não funcionou" em que os números na tela diziam QUE a
+leitura errava, mas não ONDE. Caro pra todo mundo.
+
+O painel tem um segundo modo: as caixas reconhecidas desenhadas **nas posições
+em que foram desenhadas**, numeradas, com cada ligação entendida saindo como
+uma seta de centro a centro. Comparando com a folha, vê-se de relance qual seta
+grudou na caixa errada, qual caixa não foi vista e qual foi vista onde não
+havia nada.
+
+Um print dessa tela responde, de uma vez, o que três rodadas de números não
+responderam. **Quando um recurso interpreta o que o usuário fez, ele precisa
+saber MOSTRAR o que entendeu — não só o resultado.**
+
+### 29. A estrutura aparece antes dos nomes
 
 O fluxograma só era mostrado depois de passar o reconhecedor em CADA caixa.
 Com quinze caixas isso é mais de um minuto de tela parada escrito "lendo os
@@ -523,7 +538,7 @@ enfeite — nome, texto, enriquecimento — chega depois, com a tela já montada
 Segurar a tela inteira pelo acessório mais lento é o jeito mais fácil de
 transformar um recurso que funciona num recurso que "não foi".
 
-### 29. Fluxograma não se lê linha por linha
+### 30. Fluxograma não se lê linha por linha
 
 A zona de fluxograma é a única que `items/detect.ts` ignora (`ZONES_SEM_LINHA`).
 Lá uma caixa e a seta ao lado estão na mesma altura: a identificação por linha
@@ -533,7 +548,7 @@ leria as duas como um campo só, e um desenho de dez traços viraria quatro
 A leitura daquela zona é outra, mora em `flow/`, e o resultado é **um** registro
 — o desenho montado — em vez de um por linha.
 
-### 30. Prazo é dia do calendário, no fuso de casa
+### 31. Prazo é dia do calendário, no fuso de casa
 
 `new Date('2026-09-30')` é lido como **UTC** e, no Brasil, volta como dia 29. Um
 prazo que anda um dia pra trás sozinho destrói a confiança na lista inteira — e
@@ -611,7 +626,8 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | A pilha é esvaziada ao trocar de página | Voltar numa folha e ver sumir algo de outra seria pior que não ter voltar |
 | Caixa pode ser feita de vários traços | Com caneta, levantar a mão num canto é o normal. Exigir um traço fechado era exigir um jeito de desenhar que ninguém usa |
 | Ponta de seta tem que parecer ponta de seta | Ela decide a DIREÇÃO: errar uma inverte a seta e reorganiza o desenho inteiro. Letra pequena perto da ponta do traço não serve |
-| Encaixe de seta é curto (14px), não generoso | Num fluxograma as caixas ficam a poucos píxeis; folga grande faz a área de encaixe de uma encostar na da outra, e aí qualquer traço vira seta |
+| O painel sabe mostrar o que ENTENDEU, não só o resultado | Cinco rodadas de "não funcionou" com números que diziam que errava, mas não onde. Um print da vista "Como eu li" responde de uma vez |
+| Encaixe de seta curto, com guardas em vez de folga apertada | Folga grande fazia a área de encaixe de uma caixa encostar na da vizinha; apertar demais perdeu ligações de verdade. Quem segura o falso positivo são as guardas (traço dentro de caixa nunca é seta, traço curto também não) |
 | A estrutura aparece antes dos nomes | Esperar o reconhecedor passar em 15 caixas é mais de um minuto de tela parada; o que se quer ver é o desenho, e o nome é enfeite que chega depois |
 | A leitura mostra os números do que viu | "Não achei caixa nenhuma" é um beco. Com os números, uma foto da tela diz onde parou — e poupa rodadas de adivinhação de parte a parte |
 | O fluxograma lê a folha inteira, não uma zona | O desenho passa de uma folha, o traço guarda a zona de quando foi escrito, e ninguém escolhe o modelo certo antes de desenhar. Geometria basta pra separar caixa, seta e letra |

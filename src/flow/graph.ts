@@ -36,11 +36,14 @@ import type { ShapeKind } from './shapes'
 /**
  * Folga pra considerar que a ponta da seta "encostou" na caixa.
  *
- * Pequena de propósito. Era 34, e com caixas a 35px uma da outra isso fazia a
- * área de encaixe de uma encostar na da outra: traço de letra perto da borda
- * virava seta entre as duas. Quem desenha uma seta encosta nas caixas.
+ * Curta, mas não minúscula. Era 34, e com caixas a 35px uma da outra a área de
+ * encaixe de uma encostava na da outra. Baixar pra 14 resolveu isso e custou
+ * caro: duas ligações de verdade deixaram de ser achadas, porque nem todo mundo
+ * encosta a seta na caixa. O que segura o falso positivo hoje são as duas
+ * guardas ao lado — traço inteiro dentro de uma caixa nunca é seta, e traço
+ * curto também não —, então a folga pode voltar a ser razoável.
  */
-const SNAP = 14
+const SNAP = 26
 
 /** Traço mais curto que isto não é seta: é letra, acento, pingo. */
 const MIN_EDGE_LENGTH = 26

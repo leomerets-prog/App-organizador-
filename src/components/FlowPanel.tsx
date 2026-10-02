@@ -43,6 +43,8 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
   const [salvo, setSalvo] = useState<string | null>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
+  /** "Como li": o entendimento desenhado por cima das posições originais. */
+  const [comoLi, setComoLi] = useState(false)
   const svgRef = useRef<SVGSVGElement | null>(null)
 
   const arranjo = useMemo(
@@ -105,6 +107,17 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
           </p>
         </div>
         <div className="flow-acoes">
+          {/* O desenho montado mostra o RESULTADO; este modo mostra o
+              ENTENDIMENTO, nas posições onde o usuário desenhou. É a única
+              vista em que dá pra ver qual seta grudou em qual caixa — e um
+              print dela diz, de uma vez, onde a leitura se perdeu. */}
+          <button
+            className={comoLi ? 'flow-salvar' : ''}
+            onClick={() => setComoLi((v) => !v)}
+            title="Mostra o que o app entendeu, por cima de onde você desenhou"
+          >
+            {comoLi ? '▦ Ver montado' : '◉ Como eu li'}
+          </button>
           <button onClick={() => void buildFlowchart()} disabled={flowStatus.state === 'lendo'}>
             {flowStatus.state === 'lendo' ? 'Lendo…' : '↻ Ler de novo'}
           </button>
@@ -168,6 +181,9 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
       {flowStatus.state === 'erro' && <div className="flow-erro">{flowStatus.message}</div>}
 
       <div className="flow-tela">
+        {comoLi ? (
+          <ComoLi chart={chart} />
+        ) : (
         <svg
           ref={svgRef}
           className="flow-svg"
@@ -247,6 +263,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
             )
           })}
         </svg>
+        )}
       </div>
 
       {/* Editar no lugar: um campo sobre o desenho, não outra tela. */}
@@ -296,6 +313,105 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * O que o app entendeu, desenhado onde o usuário desenhou.
+ *
+ * Cada caixa sai numerada, na posição e no tamanho em que foi reconhecida, e
+ * cada ligação sai como uma seta de centro a centro. Comparando com a folha,
+ * vê-se na hora qual seta grudou na caixa errada, qual caixa não foi vista e
+ * qual foi vista onde não havia nada.
+ *
+ * Nasceu de uma série de rodadas em que os números diziam QUE a leitura errava
+ * mas não ONDE — e um print desta tela responde isso de uma vez.
+ */
+function ComoLi({ chart }: { chart: Flowchart }) {
+  if (chart.nodes.length === 0) return null
+
+  const minX = Math.min(...chart.nodes.map((n) => n.bounds.minX))
+  const minY = Math.min(...chart.nodes.map((n) => n.bounds.minY))
+  const maxX = Math.max(...chart.nodes.map((n) => n.bounds.maxX))
+  const maxY = Math.max(...chart.nodes.map((n) => n.bounds.maxY))
+  const folga = 60
+  const w = maxX - minX + folga * 2
+  const h = maxY - minY + folga * 2
+
+  const numero = new Map(chart.nodes.map((n, i) => [n.id, i + 1]))
+  const centro = (id: string) => {
+    const n = chart.nodes.find((x) => x.id === id)
+    if (!n) return null
+    return { x: (n.bounds.minX + n.bounds.maxX) / 2, y: (n.bounds.minY + n.bounds.maxY) / 2 }
+  }
+
+  return (
+    <svg
+      className="flow-svg"
+      viewBox={`${minX - folga} ${minY - folga} ${w} ${h}`}
+      width={w}
+      height={h}
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <rect x={minX - folga} y={minY - folga} width={w} height={h} fill="#ffffff" />
+      <defs>
+        <marker
+          id="pontaLi"
+          viewBox="0 0 10 10"
+          refX="9"
+          refY="5"
+          markerWidth="8"
+          markerHeight="8"
+          orient="auto-start-reverse"
+        >
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626" />
+        </marker>
+      </defs>
+
+      {chart.edges.map((e) => {
+        const de = centro(e.from)
+        const para = centro(e.to)
+        if (!de || !para) return null
+        return (
+          <line
+            key={e.id}
+            x1={de.x}
+            y1={de.y}
+            x2={para.x}
+            y2={para.y}
+            stroke="#dc2626"
+            strokeWidth={3}
+            markerEnd="url(#pontaLi)"
+          />
+        )
+      })}
+
+      {chart.nodes.map((n) => (
+        <g key={n.id}>
+          <rect
+            x={n.bounds.minX}
+            y={n.bounds.minY}
+            width={Math.max(1, n.bounds.maxX - n.bounds.minX)}
+            height={Math.max(1, n.bounds.maxY - n.bounds.minY)}
+            fill="rgba(37, 99, 235, 0.08)"
+            stroke="#2563eb"
+            strokeWidth={2}
+          />
+          <circle cx={n.bounds.minX + 16} cy={n.bounds.minY + 16} r={15} fill="#2563eb" />
+          <text
+            x={n.bounds.minX + 16}
+            y={n.bounds.minY + 22}
+            textAnchor="middle"
+            fontSize={17}
+            fontWeight="700"
+            fill="#ffffff"
+            fontFamily="system-ui, sans-serif"
+          >
+            {numero.get(n.id)}
+          </text>
+        </g>
+      ))}
+    </svg>
   )
 }
 
