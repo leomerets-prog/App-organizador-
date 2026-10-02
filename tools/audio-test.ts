@@ -1,3 +1,4 @@
+import { limpar } from '../src/audio/export'
 import {
   formatLength,
   formatPosition,
@@ -142,6 +143,23 @@ const casos: Caso[] = [
       if (formatLength(5900) !== '0:06') return `esperava 0:06, veio ${formatLength(5900)}`
       if (formatPosition(5900) !== '0:05') return 'a posição deveria continuar truncando'
       return null
+    },
+  },
+  {
+    /*
+     * Medido no navegador, não suposto: um nome de arquivo com "ç" ou "ã" faz
+     * o Chrome descartar o nome INTEIRO e salvar como "download". Em português
+     * o acento é o caso normal, então um título como "Fluxo de aprovação"
+     * perderia o nome todo.
+     */
+    nome: 'o nome do arquivo perde o acento, e só o acento',
+    rodar() {
+      const saiu = limpar('Fluxo de aprovação de pedido')
+      if (saiu !== 'Fluxo de aprovacao de pedido') return `saiu "${saiu}"`
+      if (limpar('Ação / Decisão: 50% ou "mais"') !== 'Acao - Decisao- 50- ou -mais-') {
+        return `o resto da limpeza mudou: "${limpar('Ação / Decisão: 50% ou "mais"')}"`
+      }
+      return limpar('   ') === 'audio' ? null : 'nome vazio deveria cair no padrão'
     },
   },
 ]

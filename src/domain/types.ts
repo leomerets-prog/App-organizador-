@@ -261,6 +261,15 @@ export type FlowShape =
   | 'dados'
   | 'documento'
   | 'banco'
+  /**
+   * Texto solto: uma caixa sem caixa.
+   *
+   * É uma FORMA, e não um tipo de coisa à parte, de propósito: assim herda de
+   * graça tudo que já funciona numa caixa — arrastar, mudar de tamanho,
+   * desfazer, sobreviver à remontagem. Um "bilhete" separado seria código novo
+   * repetindo o que já existe, e com os defeitos próprios dele.
+   */
+  | 'texto'
 
 export interface FlowChartNode {
   id: Id
@@ -347,6 +356,8 @@ export interface FlowChartEdge {
 export interface Flowchart {
   id: Id
   pageId: Id
+  /** O nome do fluxograma. Aparece no desenho e vai junto na imagem salva. */
+  titulo?: string
   /**
    * A zona de onde veio, quando veio de uma.
    *

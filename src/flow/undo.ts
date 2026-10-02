@@ -81,7 +81,7 @@ export function assinatura(chart: Flowchart): string {
         `|${num(e.saidaDesvio)}|${num(e.entradaDesvio)}|${num(e.dobra)}`,
     )
     .join(';')
-  return `${caixas}#${setas}`
+  return `${chart.titulo ?? ''}#${caixas}#${setas}`
 }
 
 /** Mudou alguma coisa que o usuário veria? */
@@ -158,6 +158,7 @@ export function paraChart(history: FlowHistory, chartId: Id | null): FlowHistory
  * edição nova precisa lembrar de se nomear, e nenhuma fica sem nome.
  */
 export function rotulo(antes: Flowchart, depois: Flowchart): string {
+  if ((antes.titulo ?? '') !== (depois.titulo ?? '')) return 'título'
   if (depois.nodes.length > antes.nodes.length) return 'caixa nova'
   if (depois.nodes.length < antes.nodes.length) return 'caixa tirada'
   if (depois.edges.length > antes.edges.length) return 'ligação nova'

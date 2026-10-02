@@ -95,6 +95,8 @@ const LETRA = 7.8
 /** Ninguém consegue tocar no que é menor que isto. */
 const MIN_W = 120
 const MIN_H = 54
+/** O texto solto pode ser mais raso: não tem borda pra apertar. */
+const MIN_H_TEXTO = 30
 
 /**
  * O tamanho padrão de cada forma.
@@ -107,6 +109,8 @@ const MIN_H = 54
 function padrao(kind: FlowShape): { w: number; h: number } {
   if (kind === 'decisao') return { w: DECISION_W, h: DECISION_H }
   if (kind === 'banco') return { w: NODE_W, h: NODE_H + 22 }
+  // O texto solto nasce largo e raso: ele é uma frase, não um passo.
+  if (kind === 'texto') return { w: NODE_W + 90, h: 46 }
   return { w: NODE_W, h: NODE_H }
 }
 
@@ -159,6 +163,8 @@ export function quebrarTexto(texto: string, limite: number): string[] {
 
 /** A altura mínima pra caber estas linhas nesta forma. */
 export function alturaParaTexto(linhas: number, kind: FlowShape): number {
+  // Sem borda, o texto solto não precisa da margem de dentro de uma caixa.
+  if (kind === 'texto') return linhas * LINHA + 12
   const texto = linhas * LINHA + RECUO * 2
   // No losango o texto só cabe na faixa do meio: a caixa precisa do dobro.
   return kind === 'decisao' ? texto * 1.9 : texto
@@ -179,7 +185,11 @@ export function sizeOf(
   const base = padrao(kind)
   const w = Math.max(MIN_W, tamanho?.w ?? base.w)
   const linhas = quebrarTexto(label ?? '', limiteDeLetras(w, kind)).length
-  const h = Math.max(MIN_H, tamanho?.h ?? base.h, alturaParaTexto(linhas, kind))
+  const h = Math.max(
+    kind === 'texto' ? MIN_H_TEXTO : MIN_H,
+    tamanho?.h ?? base.h,
+    alturaParaTexto(linhas, kind),
+  )
   return { w, h }
 }
 

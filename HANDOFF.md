@@ -922,7 +922,52 @@ E a alça só aparece quando há degrau de verdade (caminho de quatro pontos). N
 reta, ou num cotovelo único, não há o que mover — e uma alça que não faz nada é
 pior que alça nenhuma.
 
-### 37. O que se pode ESCOLHER é mais do que o que se pode ADIVINHAR
+### 36m. Texto solto é uma FORMA, não uma coisa à parte
+
+*"Faltou apenas uma coisa: eu conseguir colocar título no fluxograma, adicionar
+texto em si."*
+
+O texto solto entrou como mais um valor de `FlowShape` (`'texto'`), e não como
+uma lista de bilhetes ao lado das caixas. Com isso ele herdou de graça tudo que
+já funciona numa caixa: arrastar, mudar largura e altura, crescer pelo texto,
+escolher cor, desfazer, e sobreviver a "Ler de novo". Uma lista própria seria
+código novo repetindo o que já existe — com os defeitos próprios dele.
+
+Ele desenha um retângulo transparente com traço pontilhado fraco: o retângulo
+existe porque é ele que recebe o toque e o arrasto; o traço quase invisível
+mostra onde ele está sem competir com o desenho. Na lateral, o ícone ganha duas
+linhas de letra desenhadas à parte — **um botão invisível não se reconhece.**
+
+### 36n. O título mora em y NEGATIVO
+
+O título é do fluxograma inteiro (`Flowchart.titulo`), aparece no desenho — não
+só na barra — e por isso vai junto na imagem salva, que é o ponto: quem recebe o
+PNG precisa saber do que ele é.
+
+A faixa dele é feita **esticando o `viewBox` pra cima** (`0 -72 w h+72`), e não
+empurrando o desenho pra baixo com um `transform`. Parece a mesma coisa e não é:
+com o desenho deslocado, toda conta de arrasto passaria a precisar descontar o
+deslocamento, e a primeira que esquecesse jogaria a caixa pra longe do dedo
+(armadilhas 31, 35). Em y negativo, as coordenadas do desenho continuam as
+mesmas que sempre foram.
+
+O cabeçalho do painel É o botão do título: quem quer dar nome a uma coisa toca
+no nome dela.
+
+### 36o. Acento no nome do arquivo faz o navegador descartar o nome INTEIRO
+
+Medido, não suposto: com `a.download = "Fluxo de aprovação.png"`, o Chrome salva
+o arquivo como **"download"**. Sem o acento, salva com o nome certo. Em
+português o acento é o caso normal — o título de um fluxograma quase sempre tem
+um.
+
+Por isso `limpar()` (em `audio/export.ts`, que serve ao áudio e à imagem) agora
+separa a letra do acento (`normalize('NFD')`) e joga fora só o acento: "Fluxo de
+aprovacao", que se lê igual e atravessa qualquer sistema de arquivos.
+
+**A regra:** nome de arquivo é uma interface com o sistema operacional, não com
+quem lê. Tudo que não for ASCII simples é risco de perder o nome todo — e perder
+o nome todo é pior que perder a cedilha.
 
 `ShapeKind` (`flow/shapes.ts`) são as três formas que a leitura sabe reconhecer
 num rabisco: retângulo, losango e cantos redondos se separam pela geometria do
@@ -1010,6 +1055,10 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Tocar escolhe, arrastar move — o mesmo gesto | Separar em dois modos obrigaria a escolher o modo antes de saber o que se quer fazer. Quem solta sem andar escolheu; quem andou, moveu |
 | `touch-action: none` vai no `<svg>`, nunca no que está dentro dele | O navegador ignora a propriedade em elemento de dentro de um SVG. Estava no `<g>` da caixa, não fazia nada, e o gesto da caneta era roubado pra rolar a tela |
 | Um gesto de cada vez, e a caneta não cede ao dedo | A palma encosta antes da ponta. Dois gestos disputando a mesma tela levavam a caixa pro lado errado e depois travavam o painel |
+| Texto solto é uma FORMA, não uma lista à parte | Herda arrastar, tamanho, cor, desfazer e remontagem de graça. Uma lista própria repetiria tudo isso, com defeitos novos |
+| Botão invisível não se reconhece | O texto solto é quase invisível no desenho, de propósito — mas o ícone dele na lateral precisa mostrar linhas de letra |
+| O título estica o viewBox pra cima, não empurra o desenho | Com `transform`, toda conta de arrasto passaria a precisar descontar o deslocamento, e a primeira que esquecesse jogaria a caixa pra longe do dedo |
+| Nome de arquivo é interface com o SISTEMA, não com quem lê | Medido: um acento faz o Chrome descartar o nome inteiro e salvar como "download". Perder a cedilha é melhor que perder o nome |
 | Linha fina ganha faixa de toque invisível | Dois píxeis não são alvo de toque. Esconder a seta numa lista resolve o alvo e cria outro problema: o usuário quer tocar na coisa que está vendo |
 | O caso de toque numa linha toca AO LADO dela | Em cima passa mesmo sem faixa — e aí o caso não prova nada |
 | Botão de apagar diz o que SOBREVIVE | "Tirar só a ligação": o medo de levar a caixa junto era o que impedia de usar |

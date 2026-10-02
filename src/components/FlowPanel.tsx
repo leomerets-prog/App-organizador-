@@ -40,10 +40,19 @@ const FORMA_NOME: Record<FlowShape, string> = {
   dados: 'Entrada / Saída',
   documento: 'Documento',
   banco: 'Arquivo',
+  texto: 'Texto solto',
 }
 
 /** A ordem da lateral: as três que a leitura conhece primeiro. */
-const FORMAS: FlowShape[] = ['acao', 'decisao', 'terminal', 'dados', 'documento', 'banco']
+const FORMAS: FlowShape[] = [
+  'acao',
+  'decisao',
+  'terminal',
+  'dados',
+  'documento',
+  'banco',
+  'texto',
+]
 
 /** A cor que cada forma tem quando o usuário não escolheu nenhuma. */
 const COR_DA_FORMA: Record<FlowShape, FlowColor> = {
@@ -53,6 +62,7 @@ const COR_DA_FORMA: Record<FlowShape, FlowColor> = {
   dados: 'roxo',
   documento: 'cinza',
   banco: 'cinza',
+  texto: 'cinza',
 }
 
 const CORES: Record<FlowColor, { borda: string; fundo: string; nome: string }> = {
@@ -155,6 +165,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
   const removeFlowEdge = useStore((s) => s.removeFlowEdge)
   const flipFlowEdge = useStore((s) => s.flipFlowEdge)
   const resetFlowLayout = useStore((s) => s.resetFlowLayout)
+  const setFlowTitle = useStore((s) => s.setFlowTitle)
 
   const strokes = useStore((s) => s.strokes)
   const flowHistory = useStore((s) => s.flowHistory)
@@ -228,6 +239,17 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
   const larguraTela = telaCongelada?.w ?? arranjo.width + FOLGA
   const alturaTela = telaCongelada?.h ?? arranjo.height + FOLGA
 
+  /*
+   * O título mora ACIMA de tudo, em y negativo.
+   *
+   * A faixa é dada esticando o `viewBox` pra cima, e não empurrando o desenho
+   * pra baixo com um `transform`. Parece a mesma coisa e não é: com o desenho
+   * deslocado, toda conta de arrasto passaria a precisar descontar o
+   * deslocamento — e a primeira que esquecesse jogaria a caixa pra longe do
+   * dedo. Em y negativo, as coordenadas do desenho continuam sendo as mesmas.
+   */
+  const faixaTitulo = chart.titulo ? 72 : 0
+
   const paraVoltar = flowHistory.chartId === chart.id ? flowHistory.feitos.at(-1) : undefined
   const paraAvancar = flowHistory.chartId === chart.id ? flowHistory.desfeitos.at(-1) : undefined
 
@@ -240,7 +262,9 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
     if (!editando) return
     const alvo = editando
     setEditando(null)
-    if (alvo.startsWith('seta:')) {
+    if (alvo === 'titulo') {
+      void setFlowTitle(chart.id, rascunho)
+    } else if (alvo.startsWith('seta:')) {
       void updateFlowEdge(chart.id, alvo.slice(5), { label: rascunho.trim() })
     } else {
       void updateFlowNode(chart.id, alvo, { label: rascunho.trim() })
@@ -690,8 +714,9 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
     setSalvo(null)
     setSalvando(true)
     try {
-      const png = await paraPng(svgRef.current, arranjo.width, arranjo.height)
-      const { onde } = await salvarImagem(png, `Fluxograma ${carimbo(chart.updatedAt)}.png`)
+      const png = await paraPng(svgRef.current, arranjo.width, arranjo.height, faixaTitulo)
+      const nome = (chart.titulo || 'Fluxograma').replace(/[\\/:*?"<>|]/g, '-').slice(0, 60)
+      const { onde } = await salvarImagem(png, `${nome} ${carimbo(chart.updatedAt)}.png`)
       setSalvo(onde)
     } catch (err) {
       setErro(err instanceof Error && err.message ? err.message : 'Não deu pra salvar a imagem.')
@@ -727,7 +752,17 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
             ☰
           </button>
           <div>
-            <h2>Fluxograma</h2>
+            {/* O cabeçalho É o botão do título: quem quer dar nome a uma coisa
+                toca no nome dela. Um "✎ Título" perdido na barra de ações seria
+                mais um ícone pra procurar. */}
+            <button
+              className="flow-titulo-btn"
+              onClick={() => abrirEdicao('titulo', chart.titulo ?? '')}
+              title="Dar um nome a este fluxograma"
+            >
+              <h2>{chart.titulo || 'Fluxograma'}</h2>
+              <span aria-hidden="true">✎</span>
+            </button>
             <p className="muted">
               {chart.nodes.length} caixa{chart.nodes.length === 1 ? '' : 's'} ·{' '}
               {chart.edges.length} liga{chart.edges.length === 1 ? 'ção' : 'ções'}
@@ -880,6 +915,15 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
                       fill={CORES[COR_DA_FORMA[f]].fundo}
                       stroke={CORES[COR_DA_FORMA[f]].borda}
                     />
+                    {/* O texto solto é um contorno quase invisível — de
+                        propósito, no desenho. Mas um botão invisível não se
+                        reconhece, então o ícone mostra duas linhas de letra. */}
+                    {f === 'texto' && (
+                      <g stroke={CORES.cinza.borda} strokeWidth={2} strokeLinecap="round">
+                        <line x1={11} y1={14} x2={43} y2={14} />
+                        <line x1={11} y1={21} x2={33} y2={21} />
+                      </g>
+                    )}
                   </svg>
                   <span>{FORMA_NOME[f]}</span>
                 </button>
@@ -946,9 +990,11 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
               onTouchMove={seguirPinca}
               onTouchEnd={largarPinca}
               onTouchCancel={largarPinca}
-              viewBox={`0 0 ${larguraTela} ${alturaTela}`}
+              viewBox={`0 ${-faixaTitulo} ${larguraTela} ${alturaTela + faixaTitulo}`}
               width={escala ? larguraTela * escala : larguraTela}
-              height={escala ? alturaTela * escala : alturaTela}
+              height={
+                escala ? (alturaTela + faixaTitulo) * escala : alturaTela + faixaTitulo
+              }
               /*
                * Com zoom escolhido o desenho passa da largura do painel de
                * propósito: é a tela que rola, e a régua é a que o usuário
@@ -966,7 +1012,28 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
               }
               xmlns="http://www.w3.org/2000/svg"
             >
-              <rect x={0} y={0} width={larguraTela} height={alturaTela} fill="#ffffff" />
+              <rect
+                x={0}
+                y={-faixaTitulo}
+                width={larguraTela}
+                height={alturaTela + faixaTitulo}
+                fill="#ffffff"
+              />
+
+              {/* O título vai no DESENHO, não só na barra: é ele que precisa
+                  aparecer na imagem salva e no papel de quem receber. */}
+              {chart.titulo && (
+                <text
+                  x={28}
+                  y={-faixaTitulo + 46}
+                  fontSize={30}
+                  fontWeight="700"
+                  fill={TEXTO}
+                  fontFamily="system-ui, sans-serif"
+                >
+                  {chart.titulo}
+                </text>
+              )}
 
               <defs>
                 <marker
@@ -1095,7 +1162,13 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
       {editando && (
         <div className="flow-editor">
           <label>
-            <span>{editando.startsWith('seta:') ? 'Nome da seta' : 'Nome da caixa'}</span>
+            <span>
+              {editando === 'titulo'
+                ? 'Título do fluxograma'
+                : editando.startsWith('seta:')
+                  ? 'Nome da seta'
+                  : 'Nome da caixa'}
+            </span>
             <input
               autoFocus
               value={rascunho}
@@ -1401,6 +1474,31 @@ function Forma({
     )
   }
 
+  if (kind === 'texto') {
+    /*
+     * Texto solto: uma caixa sem caixa.
+     *
+     * O retângulo existe — é ele que recebe o toque e o arrasto, como em
+     * qualquer outra forma — mas não pinta nada. Um traço pontilhado bem
+     * fraquinho mostra onde ele está sem competir com o desenho; na imagem
+     * salva ele quase não aparece, e o que fica é a frase.
+     */
+    return (
+      <rect
+        x={x}
+        y={y}
+        width={w}
+        height={h}
+        rx={6}
+        fill="transparent"
+        stroke={stroke}
+        strokeOpacity={0.28}
+        strokeDasharray="4 4"
+        strokeWidth={1}
+      />
+    )
+  }
+
   if (kind === 'banco') {
     // Cilindro: arquivo, banco de dados, pilha de papel — o que fica guardado.
     const r = Math.min(13, h * 0.17)
@@ -1683,12 +1781,20 @@ function carimbo(instante: number): string {
  * precisa ganhar a MOLDURA DO DESENHO no lugar da tela de trabalho, senão a
  * imagem salva sai com a folga de arrastar e o zoom escolhido grudados nela.
  */
-async function paraPng(svg: SVGSVGElement | null, largura: number, altura: number): Promise<Blob> {
+async function paraPng(
+  svg: SVGSVGElement | null,
+  largura: number,
+  alturaDoDesenho: number,
+  faixaTitulo = 0,
+): Promise<Blob> {
   if (!svg) throw new Error('O desenho ainda não está pronto.')
 
+  // A moldura da imagem é o desenho mais a faixa do título — e nada da folga
+  // de arrastar nem do zoom escolhido, que são coisas de quem edita.
+  const altura = alturaDoDesenho + faixaTitulo
   const copia = svg.cloneNode(true) as SVGSVGElement
   copia.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
-  copia.setAttribute('viewBox', `0 0 ${largura} ${altura}`)
+  copia.setAttribute('viewBox', `0 ${-faixaTitulo} ${largura} ${altura}`)
   copia.setAttribute('width', String(largura))
   copia.setAttribute('height', String(altura))
   copia.removeAttribute('style')

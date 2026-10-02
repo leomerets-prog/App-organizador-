@@ -259,6 +259,8 @@ export interface AppState {
   removeFlowEdge: (chartId: Id, edgeId: Id) => Promise<void>
   flipFlowEdge: (chartId: Id, edgeId: Id) => Promise<void>
   resetFlowLayout: (chartId: Id) => Promise<void>
+  /** O nome do fluxograma: aparece no desenho e vai junto na imagem salva. */
+  setFlowTitle: (chartId: Id, titulo: string) => Promise<void>
   /**
    * Voltar e avançar DENTRO do painel.
    *
@@ -1712,6 +1714,8 @@ export const useStore = create<AppState>((set, get) => ({
     const chart: Flowchart = {
       id: anterior?.id ?? newId(),
       pageId,
+      // O título é do fluxograma, não da leitura: remontar não pode apagá-lo.
+      titulo: anterior?.titulo,
       nodes,
       edges,
       soltos: grafo.soltos.length,
@@ -1847,6 +1851,12 @@ export const useStore = create<AppState>((set, get) => ({
       ...chart,
       edges: chart.edges.map((e) => (e.id === edgeId ? { ...e, ...patch } : e)),
     })
+  },
+
+  async setFlowTitle(chartId, titulo) {
+    const chart = get().flowcharts.find((f) => f.id === chartId)
+    if (!chart) return
+    await salvarChart(get, set, { ...chart, titulo: titulo.trim() || undefined })
   },
 
   /**

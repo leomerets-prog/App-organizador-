@@ -2370,6 +2370,29 @@ input {
   min-width: 68px;
 }
 
+/* O cabeçalho é o botão do título: parece texto, age como botão. */
+.flow-titulo-btn {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.flow-titulo-btn:active {
+  background: var(--surface-2);
+}
+
+.flow-titulo-btn > span {
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
 .flow-topo h2 {
   margin: 0;
   font-size: 19px;

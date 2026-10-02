@@ -103,10 +103,21 @@ export function nomeDeArquivo(rec: Recording): string {
   return `Organizador ${limpar(quando)}.${extensaoDe(rec.mimeType)}`
 }
 
-/** Tira do nome o que sistema de arquivos nenhum aceita, sem virar ilegível. */
+/**
+ * Tira do nome o que sistema de arquivos nenhum aceita, sem virar ilegível.
+ *
+ * Inclusive o ACENTO, e isso não é frescura: medido no navegador, um nome com
+ * "ç" ou "ã" faz o Chrome descartar o nome INTEIRO e salvar o arquivo como
+ * "download". Em português o acento é o caso normal — um título como "Fluxo de
+ * aprovação" perderia o nome todo. Tirar o acento devolve "Fluxo de aprovacao",
+ * que se lê igual e atravessa qualquer sistema de arquivos.
+ */
 export function limpar(texto: string): string {
   return (
     texto
+      // Separa a letra do acento (NFD) e joga fora só o acento.
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
       .replace(/[/\\?%*:|"<>]/g, '-')
       .replace(/\s+/g, ' ')
       .trim()
