@@ -123,6 +123,10 @@ const MAX_DESENHO = 8000
  */
 const ESCALAS = [0.25, 0.4, 0.5, 0.75, 1, 1.5, 2]
 
+/** Os limites da pinça. Fora deles o desenho não serve pra nada. */
+const ZOOM_MIN = 0.2
+const ZOOM_MAX = 3
+
 const TEXTO = '#111827'
 const SETA = '#4b5563'
 
@@ -139,6 +143,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
   const flipFlowEdge = useStore((s) => s.flipFlowEdge)
   const resetFlowLayout = useStore((s) => s.resetFlowLayout)
 
+  const strokes = useStore((s) => s.strokes)
   const flowHistory = useStore((s) => s.flowHistory)
   const undoFlow = useStore((s) => s.undoFlow)
   const redoFlow = useStore((s) => s.redoFlow)
@@ -498,6 +503,51 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
   }
 
   /**
+   * A pinça de dois dedos.
+   *
+   * Quando o zoom foi feito, a decisão foi "degraus, não pinça", porque a pinça
+   * brigaria com o arrasto da caixa. O raciocínio estava meio errado: brigaria
+   * se fosse o MESMO dedo. Com dois, não há ambiguidade nenhuma — um dedo move,
+   * dois dedos aproximam —, e é o gesto que qualquer pessoa tenta primeiro num
+   * tablet. Os botões continuam lá pra quem quer um valor exato.
+   *
+   * É escutada por evento de TOQUE, e não de ponteiro, porque o toque já traz
+   * os dois dedos juntos no mesmo evento: não é preciso manter registro de quem
+   * está na tela, que é justamente onde esse tipo de código erra.
+   */
+  const pinca = useRef<{ distancia: number; escala: number } | null>(null)
+
+  /** A escala que o desenho tem agora na tela, medida — em "Caber" não há número. */
+  const escalaNaTela = (): number => {
+    const svg = svgRef.current
+    if (!svg) return escala ?? 1
+    return svg.getBoundingClientRect().width / larguraTela
+  }
+
+  const distanciaEntre = (t: React.TouchList): number =>
+    Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+
+  const comecarPinca = (e: React.TouchEvent) => {
+    if (e.touches.length !== 2) return
+    // O que o primeiro dedo tinha começado (passear, ou arrastar uma caixa)
+    // não vale mais: dois dedos querem outra coisa, e a caixa volta pro lugar.
+    gesto.current?.abandonar()
+    pinca.current = { distancia: distanciaEntre(e.touches), escala: escalaNaTela() }
+  }
+
+  const seguirPinca = (e: React.TouchEvent) => {
+    const inicio = pinca.current
+    if (!inicio || e.touches.length !== 2 || inicio.distancia <= 0) return
+    const agora = distanciaEntre(e.touches)
+    const nova = (inicio.escala * agora) / inicio.distancia
+    setEscala(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, nova)))
+  }
+
+  const largarPinca = (e: React.TouchEvent) => {
+    if (e.touches.length < 2) pinca.current = null
+  }
+
+  /**
    * Um degrau de zoom pra cada lado.
    *
    * O degrau é escolhido a partir do tamanho que o desenho ESTÁ, medido na
@@ -532,6 +582,17 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
 
   const semNome = chart.nodes.filter((n) => !n.label).length
   const porOrdem = chart.edges.filter((e) => e.direcao === 'ordem').length
+
+  /**
+   * Há tinta na folha que este fluxograma ainda não viu?
+   *
+   * Comparado com `lidoAte` — o traço mais novo que entrou na leitura — e não
+   * com `updatedAt`, que muda a cada edição do painel e esconderia o aviso
+   * justamente depois de trabalhar nele.
+   */
+  const desenhoNovo =
+    typeof chart.lidoAte === 'number' &&
+    strokes.some((s) => s.pageId === chart.pageId && s.startedAt > chart.lidoAte!)
 
   return (
     <div className="flow-panel" role="dialog" aria-label="Fluxograma montado">
@@ -583,7 +644,8 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
             <button
               className="flow-zoom"
               onClick={() => setEscala(null)}
-              title="Voltar a caber na largura"
+              aria-label="Zoom"
+              title="Zoom — toque pra voltar a caber na largura. Com dois dedos também dá pra aproximar."
             >
               {escala === null ? 'Caber' : `${Math.round(escala * 100)}%`}
             </button>
@@ -620,6 +682,16 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
           </button>
         </div>
       </header>
+
+      {/* Abrir o painel não relê mais a folha — e por isso a tela precisa
+          dizer quando há desenho novo esperando. Sem este aviso, "só abre"
+          viraria "nunca atualiza", que é um jeito pior de errar. */}
+      {desenhoNovo && (
+        <div className="flow-lendo">
+          Você desenhou nesta folha depois que o fluxograma foi montado. Toque em{' '}
+          <strong>↻ Ler de novo</strong> pra incluir — o que você editou aqui não se perde.
+        </div>
+      )}
 
       {/* O que o leitor não teve certeza fica dito, não escondido: é por aqui
           que o usuário sabe o que conferir antes de mandar o desenho adiante. */}
@@ -744,6 +816,10 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
               ref={svgRef}
               className="flow-svg"
               onPointerDown={passear}
+              onTouchStart={comecarPinca}
+              onTouchMove={seguirPinca}
+              onTouchEnd={largarPinca}
+              onTouchCancel={largarPinca}
               viewBox={`0 0 ${larguraTela} ${alturaTela}`}
               width={escala ? larguraTela * escala : larguraTela}
               height={escala ? alturaTela * escala : alturaTela}

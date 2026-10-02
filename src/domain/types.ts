@@ -323,6 +323,17 @@ export interface Flowchart {
   /** Quantos traços o leitor não soube aproveitar; aparece na tela. */
   soltos: number
   /**
+   * O traço mais novo que entrou nesta leitura.
+   *
+   * Serve pra uma pergunta só: *há desenho na folha que este fluxograma ainda
+   * não viu?* Não dá pra responder com `updatedAt`, que muda a cada edição do
+   * painel — depois de trocar uma cor ele seria mais novo que a tinta, e o
+   * aviso sumiria com desenho novo esperando.
+   *
+   * Opcional: fluxograma montado antes disto simplesmente não avisa.
+   */
+  lidoAte?: number
+  /**
    * O que a leitura viu, passo a passo.
    *
    * Fica guardado e aparece na tela porque "não achei caixa nenhuma" é um

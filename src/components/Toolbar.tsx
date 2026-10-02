@@ -273,11 +273,18 @@ function HistoryButtons() {
 }
 
 /**
- * Montar o fluxograma.
+ * Abrir o fluxograma — e só montar quando ainda não existe um.
  *
- * Só aparece quando a folha TEM uma zona de fluxograma: um botão que não faz
- * nada em 90% das folhas é um botão que ensina a ignorar a barra. Na folha
- * certa ele é o caminho inteiro — toca, lê o desenho, abre o painel.
+ * Antes este botão RELIA a folha inteira a cada toque. O relato: *"ele fica
+ * lendo o fluxo várias vezes; eu saio pra olhar na folha e volto a editar, ele
+ * já mexeu em várias coisas"*. E mexia mesmo — a junção guarda o que foi
+ * editado, mas o que não foi acompanha a tinta, os nomes são lidos de novo
+ * caixa por caixa, e tudo isso só porque ele quis dar uma olhada na folha.
+ *
+ * Um fluxograma montado é uma COISA que existe, e um botão que abre uma coisa
+ * não pode refazê-la. Reler virou o que sempre devia ter sido: um pedido
+ * explícito, no "↻ Ler de novo" de dentro do painel, com o aviso na tela
+ * quando há desenho novo esperando.
  */
 function FlowchartButton({ onOpen }: { onOpen: (id: string) => void }) {
   const activePageId = useStore((s) => s.activePageId)
@@ -293,6 +300,11 @@ function FlowchartButton({ onOpen }: { onOpen: (id: string) => void }) {
       className={`tool-btn ${flowStatus.state === 'erro' ? 'alerta' : ''}`}
       disabled={lendo || !activePageId}
       onClick={async () => {
+        // Já existe: abre e pronto. Nada de reler nem de mexer em nada.
+        if (pronto) {
+          onOpen(pronto.id)
+          return
+        }
         await buildFlowchart()
         const montado = useStore
           .getState()
@@ -301,7 +313,7 @@ function FlowchartButton({ onOpen }: { onOpen: (id: string) => void }) {
       }}
       title={
         pronto
-          ? 'Lê o desenho de novo e abre o fluxograma montado'
+          ? 'Abre o fluxograma montado. Pra incluir o que você desenhou depois, use "↻ Ler de novo" lá dentro'
           : 'Lê o desenho desta folha e monta a versão estruturada'
       }
     >

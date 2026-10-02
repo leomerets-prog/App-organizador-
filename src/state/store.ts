@@ -657,6 +657,14 @@ function persist(get: () => AppState): void {
     zoom: s.zoom,
     eraserSize: s.eraserSize,
     audioRate: s.audioRate,
+    ultimoLugar:
+      s.activeNotebookId && s.activeSectionId && s.activePageId
+        ? {
+            notebookId: s.activeNotebookId,
+            sectionId: s.activeSectionId,
+            pageId: s.activePageId,
+          }
+        : undefined,
   })
 }
 
@@ -714,6 +722,32 @@ export const useStore = create<AppState>((set, get) => ({
         notebooks = await repo.listNotebooks()
       }
       set({ notebooks, ready: true })
+
+      /*
+       * Volta pra onde ele estava.
+       *
+       * O app abria sempre no primeiro caderno, na primeira aba e na primeira
+       * folha. Quem tem o trabalho na folha vinte reencontrava o começo de tudo
+       * a cada vez — "não consigo retomar o projeto de onde eu estava".
+       *
+       * Cada passo é conferido antes de ser usado: caderno apagado, aba
+       * apagada ou folha apagada não podem deixar o app sem lugar nenhum. Se
+       * qualquer um falhar, cai no caminho de sempre.
+       */
+      const lugar = initialPrefs.ultimoLugar
+      if (lugar && notebooks.some((n) => n.id === lugar.notebookId)) {
+        const sections = await repo.listSections(lugar.notebookId)
+        const secao = sections.find((x) => x.id === lugar.sectionId)
+        if (secao) {
+          const pages = await repo.listPages(secao.id)
+          if (pages.some((p) => p.id === lugar.pageId)) {
+            set({ activeNotebookId: lugar.notebookId, sections, activeSectionId: secao.id, pages })
+            await get().selectPage(lugar.pageId)
+            return
+          }
+        }
+      }
+
       if (notebooks[0]) await get().selectNotebook(notebooks[0].id)
     })()
     return initOnce
@@ -755,6 +789,9 @@ export const useStore = create<AppState>((set, get) => ({
       flowHistory: SEM_HISTORIA,
       sheetHeight: sheetOf(get().pages.find((p) => p.id === id)),
     })
+    // Guarda o lugar só DEPOIS de a folha abrir de verdade: anotar antes faria
+    // o app tentar voltar pra uma folha que nem chegou a carregar.
+    persist(get)
     // Folhas escritas antes desta versão (ou com a identificação desligada)
     // ganham seus campos ao serem abertas.
     get().scheduleFieldSync()
@@ -1661,6 +1698,9 @@ export const useStore = create<AppState>((set, get) => ({
       edges,
       soltos: grafo.soltos.length,
       diagnostico: grafo.diagnostico,
+      // Marca até onde esta leitura enxergou, pra que o painel saiba avisar
+      // quando houver desenho novo na folha.
+      lidoAte: tinta.reduce((maior, s) => Math.max(maior, s.startedAt), 0),
       updatedAt: Date.now(),
     }
 

@@ -27,6 +27,19 @@ export interface Prefs {
   /** Velocidade de escuta do áudio. Fica entre as preferências porque é um
       jeito de ouvir, não um dado da gravação: vale pra todas. */
   audioRate: number
+  /**
+   * Onde o usuário estava da última vez.
+   *
+   * Sem isto o app sempre abria no primeiro caderno, na primeira aba e na
+   * primeira folha — e quem tem o trabalho na folha vinte reencontra o começo
+   * de tudo a cada vez. O relato foi "não consigo retomar o projeto de onde eu
+   * estava".
+   *
+   * Fica nas preferências, e não no banco, porque é do APARELHO e não do
+   * caderno: é a resposta pra "onde eu parei aqui", não um dado do conteúdo.
+   * Os três ids juntos porque a folha sozinha não diz em que aba ela está.
+   */
+  ultimoLugar?: { notebookId: string; sectionId: string; pageId: string }
 }
 
 const KEY = 'organizador.prefs.v1'
@@ -61,11 +74,20 @@ export function loadPrefs(): Prefs {
           ? Math.min(ERASER_MAX, Math.max(ERASER_MIN, saved.eraserSize))
           : DEFAULTS.eraserSize,
       audioRate: nearestRate(saved.audioRate),
+      ultimoLugar: lugarValido(saved.ultimoLugar),
     }
   } catch {
     // Navegador com armazenamento bloqueado: segue nos padrões.
     return { ...DEFAULTS, theme: systemTheme() }
   }
+}
+
+/** Só aceita o lugar inteiro: dois ids de três não levam a lugar nenhum. */
+function lugarValido(v: Prefs['ultimoLugar']): Prefs['ultimoLugar'] {
+  if (!v || typeof v !== 'object') return undefined
+  const { notebookId, sectionId, pageId } = v
+  const ok = (x: unknown) => typeof x === 'string' && x.length > 0
+  return ok(notebookId) && ok(sectionId) && ok(pageId) ? { notebookId, sectionId, pageId } : undefined
 }
 
 export function savePrefs(prefs: Prefs): void {

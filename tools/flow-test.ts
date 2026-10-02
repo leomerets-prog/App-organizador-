@@ -428,7 +428,92 @@ const casos: Caso[] = [
       return null
     },
   },
+  {
+    /*
+     * "quando vêm da esquerda para um novo quadrado na direita, a linha não
+     * fica na lateral esquerda do novo quadrado, ela sobe e aponta para o topo."
+     *
+     * Toda seta pra frente saía por baixo e entrava por cima, viesse de onde
+     * viesse. No arranjo automático isso quase sempre casa; com as caixas
+     * arrastadas pro lado — que é o que o painel virou — a seta descia,
+     * atravessava e subia pra entrar pelo telhado da caixa vizinha.
+     */
+    nome: 'seta pra caixa ao lado entra pela LATERAL, não pelo topo',
+    rodar() {
+      const l = layout({
+        nodes: [
+          // Um pouco mais baixa, como fica quando a caixa é arrastada à mão:
+          // é esse "quase alinhado" que fazia a seta descer e subir pelo topo.
+          { ...caixa('a'), pos: { x: 60, y: 300 } },
+          { ...caixa('b'), pos: { x: 500, y: 340 } },
+        ],
+        edges: [{ id: 'e', from: 'a', to: 'b' }],
+      })
+      const destino = l.nodes.find((n) => n.id === 'b')
+      const seta = l.edges[0]
+      if (!destino || !seta || seta.points.length < 2) return 'a seta não foi traçada'
+      const fim = seta.points[seta.points.length - 1]
+      if (Math.abs(fim.x - destino.x) > 1) {
+        return `a seta chega em x=${Math.round(fim.x)}, e a lateral esquerda é ${destino.x}`
+      }
+      if (Math.abs(fim.y - (destino.y + destino.h / 2)) > 1) {
+        return 'a seta não chega na altura do meio da caixa'
+      }
+      // E sai pela lateral direita da origem, não pelo pé dela.
+      const origem = l.nodes.find((n) => n.id === 'a')
+      const inicio = seta.points[0]
+      if (!origem || Math.abs(inicio.x - (origem.x + origem.w)) > 1) {
+        return 'a seta não sai pela lateral direita da origem'
+      }
+      return null
+    },
+  },
+  {
+    nome: 'e pra caixa à esquerda entra pela lateral direita dela',
+    rodar() {
+      const l = layout({
+        nodes: [
+          { ...caixa('a'), pos: { x: 600, y: 300 } },
+          { ...caixa('b'), pos: { x: 80, y: 300 } },
+        ],
+        edges: [{ id: 'e', from: 'a', to: 'b' }],
+      })
+      const destino = l.nodes.find((n) => n.id === 'b')
+      const fim = l.edges[0]?.points.at(-1)
+      if (!destino || !fim) return 'a seta não foi traçada'
+      return Math.abs(fim.x - (destino.x + destino.w)) < 1
+        ? null
+        : `a seta chega em x=${Math.round(fim.x)}, e a lateral direita é ${destino.x + destino.w}`
+    },
+  },
+  {
+    // O caso de sempre não pode ter mudado: no fluxograma arrumado o destino
+    // fica embaixo, e aí entrar por cima é o certo.
+    nome: 'quando o destino está embaixo, a seta continua entrando por cima',
+    rodar() {
+      const l = layout({
+        nodes: [
+          { ...caixa('a'), pos: { x: 100, y: 100 } },
+          { ...caixa('b'), pos: { x: 100, y: 400 } },
+        ],
+        edges: [{ id: 'e', from: 'a', to: 'b' }],
+      })
+      const destino = l.nodes.find((n) => n.id === 'b')
+      const fim = l.edges[0]?.points.at(-1)
+      if (!destino || !fim) return 'a seta não foi traçada'
+      return Math.abs(fim.y - destino.y) < 1 ? null : 'deixou de entrar pelo topo'
+    },
+  },
 ]
+
+/** Uma caixa qualquer, pros casos de arranjo. */
+function caixa(id: string) {
+  return {
+    id,
+    kind: 'acao' as const,
+    bounds: { minX: 0, minY: 0, maxX: 10, maxY: 10 },
+  }
+}
 
 // ── O desenho de verdade ──────────────────────────────────────────────────
 

@@ -807,6 +807,44 @@ consegui reproduzir este no navegador do computador — ele é de temporização
 a máquina daqui é rápida demais. Foi achado lendo o código, não medindo, e está
 anotado aqui por isso.
 
+### 36g. Um botão que ABRE uma coisa não pode refazê-la
+
+O botão "Fluxograma" relia a folha inteira e remontava o desenho a cada toque.
+O relato: *"ele fica lendo o fluxo várias vezes; eu saio pra olhar na folha e
+volto a editar, ele já mexeu em várias coisas"*. E mexia mesmo — a junção guarda
+o que foi editado, mas o que não foi acompanha a tinta, e os nomes são lidos de
+novo caixa por caixa. Tudo isso porque ele quis dar uma olhada na folha.
+
+Um fluxograma montado é uma COISA que existe. Hoje o botão abre a que existe, e
+reler virou o que sempre devia ter sido: um pedido explícito, no "↻ Ler de
+novo" de dentro do painel.
+
+**O preço de "só abrir" é nunca atualizar**, e é por isso que o painel ganhou um
+aviso: *"você desenhou nesta folha depois que o fluxograma foi montado"*. Ele
+compara com `lidoAte` — o traço mais novo que entrou na leitura, gravado junto
+com o fluxograma — e **não** com `updatedAt`, que muda a cada edição do painel e
+faria o aviso sumir justamente depois de trabalhar nele.
+
+**A regra:** quando um botão tanto abre quanto recalcula, separe os dois. E ao
+separar, pergunte quem avisa que o recálculo ficou pendente.
+
+### 36h. O app abria sempre na primeira folha
+
+*"Quando eu salvo, eu não consigo retomar o projeto de onde eu estava."*
+
+O arranque era `notebooks[0] → sections[0] → pages[0]`, sempre. Quem tem o
+trabalho na folha vinte reencontrava o começo de tudo a cada vez.
+
+Hoje o lugar (caderno + aba + folha) fica em `prefs.ultimoLugar`, no
+localStorage — e não no banco — porque é do APARELHO, não do caderno: é a
+resposta pra "onde eu parei aqui". Os três ids juntos, porque a folha sozinha
+não diz em que aba ela está. Cada um é conferido antes de ser usado; qualquer um
+que tenha sumido derruba pro caminho de sempre, e o app nunca fica sem lugar
+nenhum.
+
+É gravado **depois** de a folha abrir de verdade, nunca antes: anotar na
+intenção faria o app tentar voltar pra uma folha que não chegou a carregar.
+
 ### 37. O que se pode ESCOLHER é mais do que o que se pode ADIVINHAR
 
 `ShapeKind` (`flow/shapes.ts`) são as três formas que a leitura sabe reconhecer
@@ -895,6 +933,10 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Tocar escolhe, arrastar move — o mesmo gesto | Separar em dois modos obrigaria a escolher o modo antes de saber o que se quer fazer. Quem solta sem andar escolheu; quem andou, moveu |
 | `touch-action: none` vai no `<svg>`, nunca no que está dentro dele | O navegador ignora a propriedade em elemento de dentro de um SVG. Estava no `<g>` da caixa, não fazia nada, e o gesto da caneta era roubado pra rolar a tela |
 | Um gesto de cada vez, e a caneta não cede ao dedo | A palma encosta antes da ponta. Dois gestos disputando a mesma tela levavam a caixa pro lado errado e depois travavam o painel |
+| A seta escolhe a porta pela POSIÇÃO do destino, não pelo sentido | Toda seta pra frente saía por baixo e entrava por cima; com as caixas arrastadas pro lado, ela descia, atravessava e entrava pelo telhado da vizinha |
+| Dois dedos podem o que um dedo não pode | A pinça foi recusada antes por brigar com o arrasto — brigaria se fosse o mesmo dedo. Um move, dois aproximam, e não há ambiguidade |
+| Botão que ABRE não recalcula | "Eu saio pra olhar na folha e volto, ele já mexeu em várias coisas". E ao separar, alguém tem que avisar que o recálculo ficou pendente |
+| O app reabre onde o usuário parou | Abria sempre na primeira folha. Quem trabalha na folha vinte reencontrava o começo de tudo a cada vez |
 | Toda exclusividade tem data de validade | A caneta nem sempre manda `pointerup`. Dono de gesto sem prazo recusava todo toque seguinte e matava o painel — o defeito que o dono existia pra evitar |
 | Gravar nunca acontece dentro de uma função de `setState` | Ela roda durante a renderização; mexer na loja ali fecha um laço quando o React refaz a renderização, e só aparece no aparelho mais lento |
 | Gesto preso nunca tranca o painel: quem chega ganha | Se o dedo sai da tela sem o navegador avisar, um dono eterno seria o próprio defeito que se quer evitar |

@@ -258,15 +258,38 @@ export function layout(graph: GraphIn): Layout {
   return { nodes: colocados, edges: setas, width: total, height: altura }
 }
 
+/** Folga pra decidir "está embaixo" / "está ao lado" sem brigar por um píxel. */
+const FOLGA_LADO = 8
+
 /**
  * O caminho de uma seta, em cotovelos retos.
  *
- * Reto porque fluxograma oficial é reto: linha torta cruzando caixa é o que
- * faz um desenho desses virar ilegível. São três casos, e só três:
+ * Reto porque fluxograma oficial é reto: linha torta cruzando caixa é o que faz
+ * um desenho desses virar ilegível.
  *
- * - **pra baixo, na mesma coluna** — uma reta
- * - **pra baixo, mudando de coluna** — desce, anda no meio do vão, desce
- * - **de volta pra cima** — sai pela lateral, sobe pela margem e entra por lá
+ * ## Por onde a seta sai e por onde ela entra
+ *
+ * A pergunta que manda é **onde está o destino**, não "é pra frente ou pra
+ * trás". Quem decide errado produz exatamente o que o usuário relatou:
+ *
+ * > "quando vêm da esquerda para um novo quadrado na direita, a linha não fica
+ * > na lateral esquerda do novo quadrado, ela sobe e aponta para o topo"
+ *
+ * Antes toda seta pra frente saía por BAIXO e entrava por CIMA, viesse de onde
+ * viesse. Num fluxograma só arrumado pelo arranjo isso quase sempre casa,
+ * porque o destino fica mesmo embaixo. Mas o painel virou editor: o usuário
+ * arrasta as caixas pro lado, e aí a seta descia, atravessava e subia pra
+ * entrar pelo telhado da caixa vizinha.
+ *
+ * Hoje são quatro casos:
+ *
+ * - **o destino está embaixo** — sai por baixo, entra por cima (o do
+ *   fluxograma arrumado, e o mais legível)
+ * - **está ao lado** — sai pela lateral e entra pela lateral de frente,
+ *   com o cotovelo no meio do vão
+ * - **é retorno de ciclo**, ou está acima sem estar ao lado — contorna por
+ *   fora, pela margem
+ * - **as duas se sobrepõem** — cai no primeiro, que é o menos feio
  */
 function caminho(
   de: PlacedNode,
@@ -274,30 +297,78 @@ function caminho(
   retorno: boolean,
   largura: number,
 ): { x: number; y: number }[] {
+  const abaixo = para.y >= de.y + de.h - FOLGA_LADO
+  const acima = para.y + para.h <= de.y + FOLGA_LADO
+  const aDireita = para.x >= de.x + de.w - FOLGA_LADO
+  const aEsquerda = para.x + para.w <= de.x + FOLGA_LADO
+
+  if (retorno) return contornando(de, para, largura)
+  if (abaixo) return descendo(de, para)
+  if (aDireita) return deLado(de, para, 1)
+  if (aEsquerda) return deLado(de, para, -1)
+  if (acima) return contornando(de, para, largura)
+  return descendo(de, para)
+}
+
+/** Sai por baixo, entra por cima. */
+function descendo(de: PlacedNode, para: PlacedNode): { x: number; y: number }[] {
   const deX = de.x + de.w / 2
   const paraX = para.x + para.w / 2
-
-  if (retorno || para.y <= de.y) {
-    // Contorna por fora, pelo lado mais perto da borda — e nunca por cima das
-    // caixas, que é o que o desvio existe pra evitar.
-    const paraEsquerda = deX < largura / 2
-    const corredor = paraEsquerda
-      ? Math.min(de.x, para.x) - MARGIN / 2
-      : Math.max(de.x + de.w, para.x + para.w) + MARGIN / 2
-    const saida = paraEsquerda ? de.x : de.x + de.w
-    const entrada = paraEsquerda ? para.x : para.x + para.w
-    return [
-      { x: saida, y: de.y + de.h / 2 },
-      { x: corredor, y: de.y + de.h / 2 },
-      { x: corredor, y: para.y + para.h / 2 },
-      { x: entrada, y: para.y + para.h / 2 },
-    ]
-  }
-
   const saiEm = { x: deX, y: de.y + de.h }
   const chegaEm = { x: paraX, y: para.y }
   if (Math.abs(deX - paraX) < 2) return [saiEm, chegaEm]
 
   const meio = (de.y + de.h + para.y) / 2
   return [saiEm, { x: deX, y: meio }, { x: paraX, y: meio }, chegaEm]
+}
+
+/**
+ * Sai pela lateral e entra pela lateral de frente.
+ *
+ * `sentido` é +1 quando o destino está à direita e -1 quando está à esquerda:
+ * a seta sempre sai pelo lado que aponta pro destino e entra pelo lado do
+ * destino que aponta de volta — nunca pelas costas dele.
+ */
+function deLado(
+  de: PlacedNode,
+  para: PlacedNode,
+  sentido: 1 | -1,
+): { x: number; y: number }[] {
+  const saiEm = {
+    x: sentido === 1 ? de.x + de.w : de.x,
+    y: de.y + de.h / 2,
+  }
+  const chegaEm = {
+    x: sentido === 1 ? para.x : para.x + para.w,
+    y: para.y + para.h / 2,
+  }
+  if (Math.abs(saiEm.y - chegaEm.y) < 2) return [saiEm, chegaEm]
+
+  const meio = (saiEm.x + chegaEm.x) / 2
+  return [saiEm, { x: meio, y: saiEm.y }, { x: meio, y: chegaEm.y }, chegaEm]
+}
+
+/**
+ * Contorna por fora, pela margem.
+ *
+ * Pelo lado mais perto da borda, e nunca por cima das caixas — que é o que o
+ * desvio existe pra evitar.
+ */
+function contornando(
+  de: PlacedNode,
+  para: PlacedNode,
+  largura: number,
+): { x: number; y: number }[] {
+  const paraEsquerda = de.x + de.w / 2 < largura / 2
+  const corredor = paraEsquerda
+    ? Math.min(de.x, para.x) - MARGIN / 2
+    : Math.max(de.x + de.w, para.x + para.w) + MARGIN / 2
+  const saida = paraEsquerda ? de.x : de.x + de.w
+  const entrada = paraEsquerda ? para.x : para.x + para.w
+  return [
+    { x: saida, y: de.y + de.h / 2 },
+    { x: corredor, y: de.y + de.h / 2 },
+    { x: corredor, y: para.y + para.h / 2 },
+    { x: entrada, y: para.y + para.h / 2 },
+  ]
 }
