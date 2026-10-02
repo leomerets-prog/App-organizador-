@@ -148,6 +148,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
   /** Fechada por padrão: foi ela que estava atrapalhando mexer no desenho. */
   const [setasAbertas, setSetasAbertas] = useState(false)
   const svgRef = useRef<SVGSVGElement | null>(null)
+  const telaRef = useRef<HTMLDivElement | null>(null)
 
   const arranjo = useMemo(
     () =>
@@ -264,15 +265,19 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
       setArrastando({ id: posto.id, x: Math.max(0, x), y: Math.max(0, y) })
     }
 
-    const soltar = () => {
+    const desligar = () => {
       alvo.removeEventListener('pointermove', mover)
       alvo.removeEventListener('pointerup', soltar)
-      alvo.removeEventListener('pointercancel', soltar)
+      alvo.removeEventListener('pointercancel', abandonar)
       // Rede de segurança: se o dedo sair da caixa e soltar fora dela, é a
       // janela que avisa. Sem isto a caixa fica grudada no dedo pra sempre.
       window.removeEventListener('pointerup', soltar)
-      window.removeEventListener('pointercancel', soltar)
+      window.removeEventListener('pointercancel', abandonar)
       setTelaCongelada(null)
+    }
+
+    const soltar = () => {
+      desligar()
       setArrastando((atual) => {
         if (atual && atual.id === posto.id) {
           void updateFlowNode(chart.id, posto.id, { pos: { x: atual.x, y: atual.y } })
@@ -280,6 +285,65 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
         return null
       })
       if (!andou) setEscolhida((atual) => (atual === posto.id ? null : posto.id))
+    }
+
+    /**
+     * Gesto interrompido: a caixa volta pro lugar, sem gravar nada.
+     *
+     * `pointercancel` é o navegador dizendo "este gesto agora é meu" (ou o
+     * sistema interrompendo). Gravar onde a caixa parou nessas horas é o pior
+     * dos dois mundos: o arrasto não aconteceu E a caixa saiu do lugar um
+     * tiquinho. Era o que acontecia quando o navegador roubava o gesto.
+     */
+    const abandonar = () => {
+      desligar()
+      setArrastando(null)
+    }
+
+    alvo.addEventListener('pointermove', mover)
+    alvo.addEventListener('pointerup', soltar)
+    alvo.addEventListener('pointercancel', abandonar)
+    window.addEventListener('pointerup', soltar)
+    window.addEventListener('pointercancel', abandonar)
+  }
+
+  /**
+   * Arrastar o FUNDO passeia pelo desenho.
+   *
+   * Existe porque o `touch-action: none` do SVG tirou do navegador a rolagem
+   * com o dedo — e tinha que tirar, senão ele rouba o gesto da caixa. Quem
+   * rola passa a ser o painel: dedo no vazio, o desenho anda junto. É o que
+   * todo editor de fluxograma faz, e é o único jeito de alcançar o resto de um
+   * desenho grande com a caneta.
+   */
+  const passear = (e: React.PointerEvent) => {
+    const tela = telaRef.current
+    if (!tela) return
+    const inicio = {
+      x: e.clientX,
+      y: e.clientY,
+      left: tela.scrollLeft,
+      top: tela.scrollTop,
+    }
+    const alvo = e.currentTarget as unknown as HTMLElement
+    try {
+      alvo.setPointerCapture(e.pointerId)
+    } catch {
+      // Segue sem captura.
+    }
+
+    const mover = (evento: Event) => {
+      const ev = evento as PointerEvent
+      tela.scrollLeft = inicio.left - (ev.clientX - inicio.x)
+      tela.scrollTop = inicio.top - (ev.clientY - inicio.y)
+    }
+
+    const soltar = () => {
+      alvo.removeEventListener('pointermove', mover)
+      alvo.removeEventListener('pointerup', soltar)
+      alvo.removeEventListener('pointercancel', soltar)
+      window.removeEventListener('pointerup', soltar)
+      window.removeEventListener('pointercancel', soltar)
     }
 
     alvo.addEventListener('pointermove', mover)
@@ -533,13 +597,16 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
           </aside>
         )}
 
-        <div className="flow-tela">
+        <div className="flow-tela" ref={telaRef}>
           {comoLi ? (
-            <ComoLi chart={chart} />
+            // Passeia também aqui: o `touch-action: none` vale pros dois
+            // desenhos, e sem isto esta vista ficaria sem como rolar.
+            <ComoLi chart={chart} onPointerDown={passear} />
           ) : (
             <svg
               ref={svgRef}
               className="flow-svg"
+              onPointerDown={passear}
               viewBox={`0 0 ${larguraTela} ${alturaTela}`}
               width={escala ? larguraTela * escala : larguraTela}
               height={escala ? alturaTela * escala : alturaTela}
@@ -839,7 +906,13 @@ function Forma({
  * Nasceu de uma série de rodadas em que os números diziam QUE a leitura errava
  * mas não ONDE — e um print desta tela responde isso de uma vez.
  */
-function ComoLi({ chart }: { chart: Flowchart }) {
+function ComoLi({
+  chart,
+  onPointerDown,
+}: {
+  chart: Flowchart
+  onPointerDown: (e: React.PointerEvent) => void
+}) {
   if (chart.nodes.length === 0) return null
 
   const minX = Math.min(...chart.nodes.map((n) => n.bounds.minX))
@@ -860,6 +933,7 @@ function ComoLi({ chart }: { chart: Flowchart }) {
   return (
     <svg
       className="flow-svg"
+      onPointerDown={onPointerDown}
       viewBox={`${minX - folga} ${minY - folga} ${w} ${h}`}
       width={w}
       height={h}
@@ -952,7 +1026,15 @@ function Caixa({
       className="flow-caixa"
       data-id={posto.id}
       onPointerDown={onPointerDown}
-      style={{ cursor: ligando ? 'crosshair' : 'move', touchAction: 'none' }}
+      /*
+       * Repare que NÃO tem `touch-action` aqui.
+       *
+       * Tinha, e não servia pra nada: o navegador ignora `touch-action` em
+       * elemento de dentro de um SVG, que não tem caixa de layout própria. A
+       * declaração que vale está no `<svg>` inteiro, no CSS — e foi a falta
+       * dela que fez o arrasto com a caneta não funcionar.
+       */
+      style={{ cursor: ligando ? 'crosshair' : 'move' }}
     >
       {/* O realce da escolhida fica POR BAIXO, pra não cobrir o nome. */}
       {escolhida && (

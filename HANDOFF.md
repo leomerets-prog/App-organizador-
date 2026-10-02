@@ -676,6 +676,42 @@ Toda edição do painel passa por `salvarChart`, e é por isso que nenhuma preci
 lembrar de registrar o passo — nem de se nomear: o nome do passo ("caixa
 movida", "cor") sai da comparação das duas fotografias.
 
+### 36b. `touch-action` no SVG: tem que estar no `<svg>`, não no que está dentro
+
+A armadilha mais cara desta sequência inteira, porque **passou em todos os
+casos de teste**. O arrasto da caixa funcionava com mouse e não funcionava com
+a caneta: a caixa andava uns dez píxeis e parava. De fora, "ainda não consigo
+arrastar pra onde eu quero" — três versões seguidas.
+
+Duas coisas se somavam:
+
+1. A tela do painel **rola** (o desenho é mais alto que o painel). Rolagem é
+   algo que o navegador quer fazer sozinho, e pra isso ele ROUBA o gesto: deixa
+   o dedo andar alguns píxeis, decide que aquilo é rolagem e manda
+   `pointercancel`
+2. O `touch-action: none` que impediria isso estava no `<g>` da caixa — e **o
+   navegador ignora `touch-action` em elemento de dentro de um SVG**, que não
+   tem caixa de layout própria. A declaração não fazia nada
+
+Hoje ela está no `.flow-svg`, com a mesma frase que já estava no `.canvas` da
+folha desde o começo: *"sem isto o navegador rouba os eventos da caneta pra
+rolar a página"*. O mesmo defeito, no mesmo app, duas vezes.
+
+Duas consequências que vieram junto:
+
+- **Quem passeia pelo desenho é o painel** (`passear`), porque a rolagem do
+  navegador foi tirada: dedo no vazio arrasta a tela. É o que todo editor de
+  fluxograma faz
+- **`pointercancel` ABANDONA o arrasto**, em vez de gravar onde a caixa parou.
+  Com o gesto roubado, gravar era o pior dos dois mundos: o arrasto não
+  acontecia E a caixa saía do lugar um tiquinho
+
+**A regra, e vale pro roteiro de teste mais do que pro código:** `touch-action`
+só existe pra toque. Arrastar com `page.mouse` **nunca** exercita essa disputa,
+então um arrasto que só é testado com mouse não está testado. O roteiro agora
+manda toque de verdade (`Input.dispatchTouchEvent`, pelo CDP) nos dois casos
+que importam — a caixa e o fundo.
+
 ### 37. O que se pode ESCOLHER é mais do que o que se pode ADIVINHAR
 
 `ShapeKind` (`flow/shapes.ts`) são as três formas que a leitura sabe reconhecer
@@ -762,6 +798,10 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Nenhuma régua muda enquanto o dedo está encostado | A tela que se ajusta sozinha + arrasto = laço de realimentação. Travou o app no primeiro arrasto de verdade |
 | Limite de gesto se mede em píxeis DE TELA | Em píxeis do desenho, um fluxograma reduzido faz seis píxeis virarem dois de dedo, e nenhum toque conta como toque |
 | Tocar escolhe, arrastar move — o mesmo gesto | Separar em dois modos obrigaria a escolher o modo antes de saber o que se quer fazer. Quem solta sem andar escolheu; quem andou, moveu |
+| `touch-action: none` vai no `<svg>`, nunca no que está dentro dele | O navegador ignora a propriedade em elemento de dentro de um SVG. Estava no `<g>` da caixa, não fazia nada, e o gesto da caneta era roubado pra rolar a tela |
+| Arrasto testado só com mouse não está testado | `touch-action` só existe pra toque; com mouse a disputa pelo gesto nunca acontece. Passou em todos os casos e não funcionava no tablet |
+| Gesto interrompido ABANDONA, não grava | Gravar onde a caixa parou quando o navegador rouba o gesto é o pior dos dois mundos: o arrasto não aconteceu e a caixa saiu do lugar |
+| Dedo no vazio passeia pelo desenho | É o que paga a conta de ter tirado a rolagem do navegador — e é o que todo editor de fluxograma faz |
 | Nenhuma medida de gesto atravessa uma troca de régua | Medir a distância dedo↔caixa antes de congelar a tela e usá-la depois fazia a caixa pular no primeiro movimento. A folga de arrastar existe o tempo todo, pra que nada mude no instante do toque |
 | O desfazer do painel guarda o fluxograma INTEIRO | Ele é menor que um traço, e assim "Ler de novo" vira um passo como os outros — remontar não tem operação inversa pra calcular |
 | Edição que não muda nada não vira passo | ↶ que pisca sem mexer na tela é pior que ↶ nenhum: quem vê conclui que o desfazer não funciona |

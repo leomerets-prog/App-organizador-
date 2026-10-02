@@ -2535,6 +2535,21 @@ input {
   border-radius: var(--radius);
   border: 1px solid var(--line);
   background: #fff;
+  /*
+   * A mesma linha do `.canvas`, pelo mesmo motivo: sem ela o navegador rouba
+   * os eventos da caneta pra rolar a tela, e a caixa anda uns dez píxeis antes
+   * de o gesto virar rolagem. Com mouse isso nunca aparece — `touch-action` só
+   * existe pra toque.
+   *
+   * E tem que ser AQUI, no `<svg>`. No `<g>` da caixa o navegador ignora:
+   * elemento de dentro de um SVG não tem caixa de layout própria. Era lá que
+   * estava, e por isso não servia pra nada.
+   *
+   * Em troca, quem passeia pelo desenho é o painel (`passear`): dedo no vazio
+   * arrasta a tela.
+   */
+  touch-action: none;
+  cursor: grab;
 }
 
 .flow-caixa:hover {
