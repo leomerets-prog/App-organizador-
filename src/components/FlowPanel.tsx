@@ -235,25 +235,53 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
    * A regra de quem ganha é a de sempre num aparelho com caneta: **a caneta
    * interrompe o dedo, o dedo não interrompe a caneta.** É a palma da mão que
    * precisa ceder, não quem está escrevendo.
+   *
+   * Com uma ressalva que vale mais que a regra: **dono parado não tranca
+   * nada.** Uma caneta que sai do alcance do digitalizador às vezes não manda
+   * `pointerup` nenhum; se o dono daquele gesto valesse pra sempre, todo toque
+   * seguinte seria recusado e o painel ficaria morto — exatamente o defeito
+   * que este dono existe pra evitar.
    */
-  const gesto = useRef<{ id: number; tipo: string; abandonar: () => void } | null>(null)
+  const gesto = useRef<{
+    id: number
+    tipo: string
+    quando: number
+    abandonar: () => void
+  } | null>(null)
+
+  /** Depois disto sem notícias, o gesto é dado por perdido. */
+  const GESTO_PARADO = 1500
 
   const assumirGesto = (e: React.PointerEvent): boolean => {
     const atual = gesto.current
     if (atual && atual.id !== e.pointerId) {
-      // Só a caneta tem direito de não ser interrompida. Em todo outro caso
-      // quem chega ganha — de propósito: um gesto que ficou preso (o dedo
-      // saiu da tela sem o navegador avisar) trancaria o painel pra sempre, e
-      // "não consigo mais arrastar" é exatamente o que se quer evitar aqui.
-      if (atual.tipo === 'pen' && e.pointerType !== 'pen') return false
+      const parado = Date.now() - atual.quando > GESTO_PARADO
+      // Só a caneta, e só enquanto estiver viva, tem direito de não ser
+      // interrompida. Em todo outro caso quem chega ganha.
+      if (!parado && atual.tipo === 'pen' && e.pointerType !== 'pen') return false
       atual.abandonar()
     }
     return true
   }
 
+  /** Cada movimento renova o gesto: é o que distingue vivo de preso. */
+  const renovarGesto = (id: number) => {
+    if (gesto.current?.id === id) gesto.current.quando = Date.now()
+  }
+
   const largarGesto = (id: number) => {
     if (gesto.current?.id === id) gesto.current = null
   }
+
+  /**
+   * Onde a caixa parou, fora do estado do React.
+   *
+   * Serve ao `soltar`, que precisa dessa posição SEM entrar na fila de
+   * atualização do React — gravar de dentro de um `set(atual => …)` é mexer na
+   * loja no meio de uma renderização, e isso fecha um laço quando o React
+   * descarta e refaz a renderização.
+   */
+  const ondeParou = useRef<{ id: string; x: number; y: number } | null>(null)
 
   /**
    * Converte um ponto da TELA pro sistema do desenho.
@@ -309,6 +337,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
     const mover = (evento: Event) => {
       const ev = evento as PointerEvent
       if (ev.pointerId !== e.pointerId) return
+      renovarGesto(e.pointerId)
       const d = daTela(ev.clientX, ev.clientY)
       if (!d) return
       if (!andou && Math.hypot(ev.clientX - naTela.x, ev.clientY - naTela.y) < TOQUE) return
@@ -335,6 +364,9 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
       const limiteY = Math.min(alturaTela, MAX_DESENHO) - posto.h
       const x = Math.min(Math.max(0, d.x - deslocamento.x), Math.max(0, limiteX))
       const y = Math.min(Math.max(0, d.y - deslocamento.y), Math.max(0, limiteY))
+      // A posição vive TAMBÉM fora do estado do React, pra que o soltar possa
+      // lê-la sem precisar entrar na fila de atualização. Veja `soltar`.
+      ondeParou.current = { id: posto.id, x, y }
       setArrastando({ id: posto.id, x, y })
     }
 
@@ -342,6 +374,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
       alvo.removeEventListener('pointermove', mover)
       alvo.removeEventListener('pointerup', soltar)
       alvo.removeEventListener('pointercancel', abandonar)
+      alvo.removeEventListener('lostpointercapture', soltar)
       // Rede de segurança: se o dedo sair da caixa e soltar fora dela, é a
       // janela que avisa. Sem isto a caixa fica grudada no dedo pra sempre.
       window.removeEventListener('pointerup', soltar)
@@ -350,15 +383,29 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
       largarGesto(e.pointerId)
     }
 
+    /**
+     * Soltou: grava onde a caixa parou.
+     *
+     * A posição é lida de `ondeParou` — uma caixinha fora do React — e **não**
+     * de dentro de um `setArrastando(atual => …)`.
+     *
+     * Parece a mesma coisa e não é. A função que se passa pro `set` do React é
+     * chamada por ELE, durante a renderização, e tem que ser pura. Gravar lá
+     * dentro significava mexer na loja no meio de uma renderização; quando o
+     * React descarta e refaz essa renderização — coisa que ele faz, e mais num
+     * aparelho lento —, a gravação acontece de novo, muda a loja de novo, e a
+     * renderização é descartada de novo. O laço fecha no instante exato de
+     * soltar.
+     */
     const soltar = (evento?: Event) => {
       if (evento && (evento as PointerEvent).pointerId !== e.pointerId) return
       desligar()
-      setArrastando((atual) => {
-        if (atual && atual.id === posto.id) {
-          void updateFlowNode(chart.id, posto.id, { pos: { x: atual.x, y: atual.y } })
-        }
-        return null
-      })
+      const fim = ondeParou.current
+      ondeParou.current = null
+      setArrastando(null)
+      if (fim && fim.id === posto.id) {
+        void updateFlowNode(chart.id, posto.id, { pos: { x: fim.x, y: fim.y } })
+      }
       if (!andou) setEscolhida((atual) => (atual === posto.id ? null : posto.id))
     }
 
@@ -373,13 +420,18 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
     const abandonar = (evento?: Event) => {
       if (evento && (evento as PointerEvent).pointerId !== e.pointerId) return
       desligar()
+      ondeParou.current = null
       setArrastando(null)
     }
 
-    gesto.current = { id: e.pointerId, tipo: e.pointerType, abandonar }
+    gesto.current = { id: e.pointerId, tipo: e.pointerType, quando: Date.now(), abandonar }
     alvo.addEventListener('pointermove', mover)
     alvo.addEventListener('pointerup', soltar)
     alvo.addEventListener('pointercancel', abandonar)
+    // A caneta às vezes some sem avisar: sai do alcance do digitalizador e o
+    // `pointerup` nunca chega. Quem avisa nessa hora é a perda da captura —
+    // sem ela, o gesto ficaria aberto pra sempre.
+    alvo.addEventListener('lostpointercapture', soltar)
     window.addEventListener('pointerup', soltar)
     window.addEventListener('pointercancel', abandonar)
   }
@@ -413,6 +465,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
     const mover = (evento: Event) => {
       const ev = evento as PointerEvent
       if (ev.pointerId !== e.pointerId) return
+      renovarGesto(e.pointerId)
       tela.scrollLeft = inicio.left - (ev.clientX - inicio.x)
       tela.scrollTop = inicio.top - (ev.clientY - inicio.y)
     }
@@ -422,15 +475,17 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
       alvo.removeEventListener('pointermove', mover)
       alvo.removeEventListener('pointerup', soltar)
       alvo.removeEventListener('pointercancel', soltar)
+      alvo.removeEventListener('lostpointercapture', soltar)
       window.removeEventListener('pointerup', soltar)
       window.removeEventListener('pointercancel', soltar)
       largarGesto(e.pointerId)
     }
 
-    gesto.current = { id: e.pointerId, tipo: e.pointerType, abandonar: soltar }
+    gesto.current = { id: e.pointerId, tipo: e.pointerType, quando: Date.now(), abandonar: soltar }
     alvo.addEventListener('pointermove', mover)
     alvo.addEventListener('pointerup', soltar)
     alvo.addEventListener('pointercancel', soltar)
+    alvo.addEventListener('lostpointercapture', soltar)
     window.addEventListener('pointerup', soltar)
     window.addEventListener('pointercancel', soltar)
   }

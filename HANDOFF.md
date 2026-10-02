@@ -765,6 +765,48 @@ resto é interrompido por quem chega.** O "quem chega ganha" é de propósito �
 gesto que ficou preso (o dedo saiu da tela sem o navegador avisar) trancaria o
 painel pra sempre, que é justamente o defeito que se está consertando.
 
+### 36e. Dono de gesto que não morre é o próprio defeito que ele conserta
+
+A 36d pôs um dono no gesto, e o dono criou um jeito novo de travar: **a caneta
+nem sempre manda `pointerup`.** Ela sai do alcance do digitalizador e o gesto
+fica aberto. Com o dono valendo pra sempre, todo toque seguinte era recusado e
+o painel ficava morto. O relato foi "consigo arrastar livremente mas ao soltar
+ele travou" — e é literal: trava no instante de soltar, porque é aí que o dono
+preso nasce.
+
+Medido: com a caneta sumindo sem soltar, o arrasto seguinte, de dedo, andava
+`0×0`. Com a guarda, `-88×70` de `-100×70` pedidos.
+
+Três fechos, e nenhum sozinho basta:
+
+- **`lostpointercapture` desliga o gesto.** É o aviso que chega quando o
+  `pointerup` não chega
+- **Dono parado não vale.** Cada movimento renova o gesto (`quando`); passado
+  `GESTO_PARADO` sem notícias, quem chega assume, caneta ou não
+- **Fora isso, quem chega ganha.** Só a caneta viva tem direito de não ser
+  interrompida
+
+**A regra:** toda exclusividade precisa de uma data de validade. Se um estado
+seu pode recusar a entrada de alguém, pergunte quem o apaga quando o dono
+desaparece sem avisar — porque ele vai desaparecer.
+
+### 36f. Função de `setState` tem que ser pura — inclusive na hora de gravar
+
+O soltar gravava a posição de dentro de um `setArrastando(atual => { grava;
+return null })`. Parece prático: a posição está ali, na mão.
+
+Mas essa função é chamada pelo React, **durante a renderização**. Gravar lá
+dentro é mexer na loja no meio de uma renderização; quando o React descarta e
+refaz essa renderização — coisa que ele faz, e mais num aparelho lento —, a
+gravação acontece de novo, muda a loja de novo, e a renderização é descartada
+de novo. O laço fecha no instante exato de soltar, e só em quem tem o aparelho
+mais lento.
+
+Hoje a posição viva mora num `useRef` (`ondeParou`), e o soltar lê de lá. Não
+consegui reproduzir este no navegador do computador — ele é de temporização, e
+a máquina daqui é rápida demais. Foi achado lendo o código, não medindo, e está
+anotado aqui por isso.
+
 ### 37. O que se pode ESCOLHER é mais do que o que se pode ADIVINHAR
 
 `ShapeKind` (`flow/shapes.ts`) são as três formas que a leitura sabe reconhecer
@@ -853,6 +895,8 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Tocar escolhe, arrastar move — o mesmo gesto | Separar em dois modos obrigaria a escolher o modo antes de saber o que se quer fazer. Quem solta sem andar escolheu; quem andou, moveu |
 | `touch-action: none` vai no `<svg>`, nunca no que está dentro dele | O navegador ignora a propriedade em elemento de dentro de um SVG. Estava no `<g>` da caixa, não fazia nada, e o gesto da caneta era roubado pra rolar a tela |
 | Um gesto de cada vez, e a caneta não cede ao dedo | A palma encosta antes da ponta. Dois gestos disputando a mesma tela levavam a caixa pro lado errado e depois travavam o painel |
+| Toda exclusividade tem data de validade | A caneta nem sempre manda `pointerup`. Dono de gesto sem prazo recusava todo toque seguinte e matava o painel — o defeito que o dono existia pra evitar |
+| Gravar nunca acontece dentro de uma função de `setState` | Ela roda durante a renderização; mexer na loja ali fecha um laço quando o React refaz a renderização, e só aparece no aparelho mais lento |
 | Gesto preso nunca tranca o painel: quem chega ganha | Se o dedo sai da tela sem o navegador avisar, um dono eterno seria o próprio defeito que se quer evitar |
 | "Caber" tem piso; abaixo dele a tela ROLA | Sem piso, cada arrasto encolhia o desenho e o seguinte ia mais longe — 1,34× por arrasto, medido. E um fluxograma a 10% não se lê de qualquer jeito |
 | A caixa só pode ser solta dentro da folha visível | Faz a folha crescer de pedaço em pedaço, em vez de num múltiplo a cada arrasto — e ninguém solta uma caixa onde não dá pra ver |
