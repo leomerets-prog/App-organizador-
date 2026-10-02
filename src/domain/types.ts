@@ -317,6 +317,24 @@ export interface FlowChartEdge {
    */
   saida?: Porta
   entrada?: Porta
+  /**
+   * Onde a seta ENCOSTA, ao longo da borda escolhida.
+   *
+   * Fração do lado, a partir do meio: 0 é o meio, -0,3 puxa pra esquerda (ou
+   * pra cima, num lado vertical), +0,3 pro outro. Existe porque duas setas que
+   * saem da mesma caixa pelo mesmo lado saem grudadas, e porque o trecho reto
+   * que desce da caixa só anda pro lado se o pé dele andar.
+   */
+  saidaDesvio?: number
+  entradaDesvio?: number
+  /**
+   * Onde a seta DOBRA, entre a saída e a entrada.
+   *
+   * Fração do caminho: 0,5 é o meio, que é o padrão. Mexer nisso é o que tira
+   * a dobra de cima de uma caixa, ou a afasta de outra seta que dobra no mesmo
+   * lugar.
+   */
+  dobra?: number
 }
 
 /**

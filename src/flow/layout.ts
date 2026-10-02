@@ -46,7 +46,16 @@ export interface GraphIn {
     /** O nome, porque é ele que decide a altura mínima da caixa. */
     label?: string
   }[]
-  edges: { id: Id; from: Id; to: Id; saida?: Porta; entrada?: Porta }[]
+  edges: {
+    id: Id
+    from: Id
+    to: Id
+    saida?: Porta
+    entrada?: Porta
+    saidaDesvio?: number
+    entradaDesvio?: number
+    dobra?: number
+  }[]
 }
 
 export interface PlacedNode {
@@ -339,7 +348,7 @@ export function layout(graph: GraphIn): Layout {
       from: e.from,
       to: e.to,
       retorno: volta,
-      points: de && para ? caminho(de, para, volta, total, e.saida, e.entrada) : [],
+      points: de && para ? caminho(de, para, volta, total, e) : [],
     }
   })
 
@@ -379,29 +388,38 @@ const FOLGA_LADO = 8
  *   fora, pela margem
  * - **as duas se sobrepõem** — cai no primeiro, que é o menos feio
  */
+export interface Ajuste {
+  saida?: Porta
+  entrada?: Porta
+  saidaDesvio?: number
+  entradaDesvio?: number
+  dobra?: number
+}
+
 function caminho(
   de: PlacedNode,
   para: PlacedNode,
   retorno: boolean,
   largura: number,
-  saida?: Porta,
-  entrada?: Porta,
+  ajuste: Ajuste,
 ): { x: number; y: number }[] {
+  const mexida =
+    ajuste.saida ||
+    ajuste.entrada ||
+    ajuste.saidaDesvio !== undefined ||
+    ajuste.entradaDesvio !== undefined ||
+    ajuste.dobra !== undefined
+
   // Escolha do usuário manda — inclusive num retorno. Quem está montando o
   // desenho sabe de que lado a seta fica legível; o contorno é só o palpite
   // do arranjo pra quando ninguém disse nada.
-  if (saida || entrada) {
-    const auto = portasAutomaticas(de, para)
-    return rota(de, saida ?? auto.saida, para, entrada ?? auto.entrada)
-  }
-
-  if (retorno) return contornando(de, para, largura)
+  if (!mexida && retorno) return contornando(de, para, largura)
 
   const { acima, aDireita, aEsquerda } = ondeEsta(de, para)
-  if (acima && !aDireita && !aEsquerda) return contornando(de, para, largura)
+  if (!mexida && acima && !aDireita && !aEsquerda) return contornando(de, para, largura)
 
   const auto = portasAutomaticas(de, para)
-  return rota(de, auto.saida, para, auto.entrada)
+  return rota(de, ajuste.saida ?? auto.saida, para, ajuste.entrada ?? auto.entrada, ajuste)
 }
 
 function ondeEsta(de: PlacedNode, para: PlacedNode) {
@@ -434,12 +452,27 @@ export function portasAutomaticas(
   return { saida: 'baixo', entrada: 'cima' }
 }
 
-/** O ponto exato de uma porta, na borda da caixa. */
-export function pontoDaPorta(n: PlacedNode, porta: Porta): { x: number; y: number } {
-  if (porta === 'cima') return { x: n.x + n.w / 2, y: n.y }
-  if (porta === 'baixo') return { x: n.x + n.w / 2, y: n.y + n.h }
-  if (porta === 'esquerda') return { x: n.x, y: n.y + n.h / 2 }
-  return { x: n.x + n.w, y: n.y + n.h / 2 }
+/** Até onde a seta pode escorregar na borda sem sair da caixa. */
+export const DESVIO_MAX = 0.42
+/** E onde a dobra pode ficar, sem colar numa das pontas. */
+export const DOBRA_MIN = 0.08
+export const DOBRA_MAX = 0.92
+
+const prender = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v))
+
+/**
+ * O ponto exato de uma porta, na borda da caixa.
+ *
+ * `desvio` escorrega o ponto ao longo dessa borda, a partir do meio. É o que
+ * permite tirar o trecho reto de cima do caminho de outra seta — e o que
+ * separa duas setas que saem da mesma caixa pelo mesmo lado.
+ */
+export function pontoDaPorta(n: PlacedNode, porta: Porta, desvio = 0): { x: number; y: number } {
+  const d = prender(desvio, -DESVIO_MAX, DESVIO_MAX)
+  if (porta === 'cima') return { x: n.x + n.w * (0.5 + d), y: n.y }
+  if (porta === 'baixo') return { x: n.x + n.w * (0.5 + d), y: n.y + n.h }
+  if (porta === 'esquerda') return { x: n.x, y: n.y + n.h * (0.5 + d) }
+  return { x: n.x + n.w, y: n.y + n.h * (0.5 + d) }
 }
 
 const ehVertical = (p: Porta) => p === 'cima' || p === 'baixo'
@@ -457,19 +490,21 @@ export function rota(
   saida: Porta,
   para: PlacedNode,
   entrada: Porta,
+  ajuste: Ajuste = {},
 ): { x: number; y: number }[] {
-  const a = pontoDaPorta(de, saida)
-  const b = pontoDaPorta(para, entrada)
+  const a = pontoDaPorta(de, saida, ajuste.saidaDesvio ?? 0)
+  const b = pontoDaPorta(para, entrada, ajuste.entradaDesvio ?? 0)
+  const dobra = prender(ajuste.dobra ?? 0.5, DOBRA_MIN, DOBRA_MAX)
 
   if (ehVertical(saida) && ehVertical(entrada)) {
-    if (Math.abs(a.x - b.x) < 2) return [a, b]
-    const meio = (a.y + b.y) / 2
+    if (Math.abs(a.x - b.x) < 2 && ajuste.dobra === undefined) return [a, b]
+    const meio = a.y + (b.y - a.y) * dobra
     return [a, { x: a.x, y: meio }, { x: b.x, y: meio }, b]
   }
 
   if (!ehVertical(saida) && !ehVertical(entrada)) {
-    if (Math.abs(a.y - b.y) < 2) return [a, b]
-    const meio = (a.x + b.x) / 2
+    if (Math.abs(a.y - b.y) < 2 && ajuste.dobra === undefined) return [a, b]
+    const meio = a.x + (b.x - a.x) * dobra
     return [a, { x: meio, y: a.y }, { x: meio, y: b.y }, b]
   }
 

@@ -71,6 +71,9 @@ export function mergeFlowchart(anterior: Flowchart | undefined, grafo: FlowGraph
         // tem opinião sobre elas, e remontar não pode esquecê-las.
         saida: velha?.saida,
         entrada: velha?.entrada,
+        saidaDesvio: velha?.saidaDesvio,
+        entradaDesvio: velha?.entradaDesvio,
+        dobra: velha?.dobra,
       }
     })
 

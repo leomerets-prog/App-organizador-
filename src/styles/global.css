@@ -2670,6 +2670,40 @@ input {
   outline-offset: 2px;
 }
 
+/* Largura e altura da caixa: a palavra na frente, e um − e um + do tamanho de
+   dedo. Os ícones que estavam aqui antes (⇤⇥, ⤒⤓) não diziam nada a ninguém. */
+.flow-medida {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.flow-medida > span {
+  margin-right: 2px;
+}
+
+.flow-medida button {
+  width: var(--tap);
+  height: var(--tap);
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 19px;
+}
+
+/* A seta escolhida tem barra própria, e ela se anuncia pela cor da seta. */
+.flow-barra-seta {
+  border-top: 2px solid var(--accent);
+}
+
+.flow-seta-nome.ativo {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
 /* Escolher o lado por onde a seta sai e entra. Fica no editor da seta, junto
    do nome, porque é lá que se mexe numa seta específica. */
 .flow-portas {

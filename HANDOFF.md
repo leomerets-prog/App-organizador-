@@ -883,6 +883,45 @@ garantia de que nenhum conteúdo futuro repita o truque.
 `minmax(0, 1fr)`. `1fr` sozinho também não segura — o mínimo automático de um
 item de grade é `min-content`.
 
+### 36k. Linha fina precisa de faixa larga
+
+*"Queria tipo assim clicar na linha das intersecções e mexer nelas, ou tirar a
+intersecção sem apagar a forma toda."*
+
+A seta tem dois píxeis de largura. Dois píxeis não são alvo de toque pra
+ninguém — e a resposta que eu tinha dado pra isso era ESCONDER a seta numa
+lista na lateral, o que resolve o alvo e cria outro problema: o usuário quer
+tocar na coisa que ele está vendo.
+
+Hoje cada seta tem, por cima da linha fina, **um segundo caminho invisível de
+26px** (`TOQUE_SETA`), com o manipulador de toque. Medido: um toque nove píxeis
+ao lado da linha escolhe a seta; sem a faixa, não faz nada.
+
+Três detalhes que não são detalhe:
+
+- a faixa fica **antes das caixas** no desenho, pra que as caixas continuem por
+  cima e a faixa larga nunca roube o toque de uma caixa vizinha
+- o caso de teste toca **ao lado** da linha, na perpendicular, e não em cima:
+  um toque em cima passa mesmo sem faixa, e o caso não provaria nada
+- tirar a ligação é botão próprio, e a frase dele diz o que sobrevive — *"✕
+  Tirar só a ligação"*. O medo de apagar a caixa junto era o que estava
+  impedindo de usar
+
+### 36l. A dobra da seta é uma FRAÇÃO, não um ponto
+
+A seta se mexe pelos mesmos dois gestos das caixas: toca pra escolher, arrasta
+pra mover. O que se arrasta é a **dobra** — o degrau do caminho.
+
+Ela é guardada como fração do vão entre as duas pontas (`dobra`, 0,08 a 0,92), e
+não como uma coordenada. É o que faz a dobra continuar onde deve quando as
+caixas se mexem depois: coordenada guardada vira lixo no primeiro arrasto de
+caixa. O mesmo vale pro ponto onde a seta ENCOSTA na borda (`saidaDesvio`,
+`entradaDesvio`), que é fração do lado.
+
+E a alça só aparece quando há degrau de verdade (caminho de quatro pontos). Numa
+reta, ou num cotovelo único, não há o que mover — e uma alça que não faz nada é
+pior que alça nenhuma.
+
 ### 37. O que se pode ESCOLHER é mais do que o que se pode ADIVINHAR
 
 `ShapeKind` (`flow/shapes.ts`) são as três formas que a leitura sabe reconhecer
@@ -971,6 +1010,10 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Tocar escolhe, arrastar move — o mesmo gesto | Separar em dois modos obrigaria a escolher o modo antes de saber o que se quer fazer. Quem solta sem andar escolheu; quem andou, moveu |
 | `touch-action: none` vai no `<svg>`, nunca no que está dentro dele | O navegador ignora a propriedade em elemento de dentro de um SVG. Estava no `<g>` da caixa, não fazia nada, e o gesto da caneta era roubado pra rolar a tela |
 | Um gesto de cada vez, e a caneta não cede ao dedo | A palma encosta antes da ponta. Dois gestos disputando a mesma tela levavam a caixa pro lado errado e depois travavam o painel |
+| Linha fina ganha faixa de toque invisível | Dois píxeis não são alvo de toque. Esconder a seta numa lista resolve o alvo e cria outro problema: o usuário quer tocar na coisa que está vendo |
+| O caso de toque numa linha toca AO LADO dela | Em cima passa mesmo sem faixa — e aí o caso não prova nada |
+| Botão de apagar diz o que SOBREVIVE | "Tirar só a ligação": o medo de levar a caixa junto era o que impedia de usar |
+| Posição de seta é fração, nunca coordenada | Coordenada guardada vira lixo no primeiro arrasto de caixa |
 | O tamanho da caixa é um mínimo; o texto pode pedir mais | Esconder o nome é pior que ficar grande. Uma caixa que recusasse crescer refaria o defeito que o tamanho ajustável veio consertar |
 | Quem MEDE o texto é quem DESENHA o texto | Duas contas parecidas em dois lugares: no dia em que uma mudar, o nome volta a ser cortado |
 | A seta pode ter o lado escolhido à mão | "Em geral certo" não é sempre certo; quem monta o desenho sabe de que lado a seta fica legível. E dá pra voltar pro automático |

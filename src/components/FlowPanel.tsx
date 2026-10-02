@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { useStore } from '../state/store'
-import { LINHA, limiteDeLetras, layout, quebrarTexto } from '../flow/layout'
+import { DOBRA_MAX, DOBRA_MIN, LINHA, limiteDeLetras, layout, quebrarTexto } from '../flow/layout'
 import type { PlacedNode } from '../flow/layout'
 import { rotulo } from '../flow/undo'
 import type { Flowchart, FlowColor, FlowShape, Porta } from '../domain/types'
@@ -133,6 +133,15 @@ const PASSO_ALTURA = 24
 
 const TEXTO = '#111827'
 const SETA = '#4b5563'
+const ESCOLHIDA = '#2563eb'
+
+/**
+ * A largura da faixa invisível que recebe o toque na seta.
+ *
+ * A linha tem dois píxeis. Dois píxeis não são alvo de toque pra ninguém, e
+ * era por isso que mexer numa seta só dava pela lista da lateral.
+ */
+const TOQUE_SETA = 26
 
 export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () => void }) {
   const updateFlowNode = useStore((s) => s.updateFlowNode)
@@ -154,6 +163,8 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
 
   /** A caixa escolhida; é dela que a barra de baixo fala. */
   const [escolhida, setEscolhida] = useState<string | null>(null)
+  /** Ou a SETA escolhida — uma coisa de cada vez, como em qualquer editor. */
+  const [setaEscolhida, setSetaEscolhida] = useState<string | null>(null)
   /** Esperando o segundo toque pra fechar uma ligação nova. */
   const [ligandoDe, setLigandoDe] = useState<string | null>(null)
   /** Posição ao vivo durante o arrasto, antes de gravar. */
@@ -208,6 +219,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
     () => new Map(chart.nodes.map((n) => [n.id, n])),
     [chart.nodes],
   )
+  const porSetaId = useMemo(() => new Map(chart.edges.map((e) => [e.id, e])), [chart.edges])
   const rotuloDaSeta = useMemo(
     () => new Map(chart.edges.map((e) => [e.id, e.label])),
     [chart.edges],
@@ -328,6 +340,8 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
       setEscolhida(posto.id)
       return
     }
+    // Uma coisa de cada vez: a barra fala de uma caixa OU de uma seta.
+    setSetaEscolhida(null)
 
     if (!assumirGesto(e)) return
 
@@ -474,10 +488,12 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
       // Segue sem captura.
     }
 
+    let andou = false
     const mover = (evento: Event) => {
       const ev = evento as PointerEvent
       if (ev.pointerId !== e.pointerId) return
       renovarGesto(e.pointerId)
+      if (Math.hypot(ev.clientX - inicio.x, ev.clientY - inicio.y) >= TOQUE) andou = true
       tela.scrollLeft = inicio.left - (ev.clientX - inicio.x)
       tela.scrollTop = inicio.top - (ev.clientY - inicio.y)
     }
@@ -491,6 +507,12 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
       window.removeEventListener('pointerup', soltar)
       window.removeEventListener('pointercancel', soltar)
       largarGesto(e.pointerId)
+      // Tocar no vazio desmarca: é o que todo mundo tenta quando quer sair de
+      // uma seleção, e sem isso a barra fica aberta sem ninguém ter pedido.
+      if (!andou) {
+        setEscolhida(null)
+        setSetaEscolhida(null)
+      }
     }
 
     gesto.current = { id: e.pointerId, tipo: e.pointerType, quando: Date.now(), abandonar: soltar }
@@ -516,6 +538,81 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
     await updateFlowNode(chart.id, id, {
       tamanho: { w: posto.w + dw, h: posto.h + dh },
     })
+  }
+
+  /**
+   * Toque na seta: escolhe, e arrastar move a dobra.
+   *
+   * Mesma gramática da caixa — toca pra escolher, arrasta pra mover — porque
+   * duas gramáticas no mesmo desenho obrigariam a lembrar qual vale pra quê.
+   *
+   * A dobra anda ao longo do caminho entre as duas pontas, em fração: é por
+   * isso que ela continua no lugar certo quando as caixas se mexem depois.
+   */
+  const pegarSeta = (
+    e: React.PointerEvent,
+    edgeId: string,
+    dobra: { x: number; y: number; eixo: 'x' | 'y'; de: number; ate: number } | null,
+  ) => {
+    e.stopPropagation()
+    if (ligandoDe) return
+    if (!assumirGesto(e)) return
+
+    const naTela = { x: e.clientX, y: e.clientY }
+    setTelaCongelada({ w: larguraTela, h: alturaTela })
+    const alvo = e.currentTarget as unknown as HTMLElement
+    try {
+      alvo.setPointerCapture(e.pointerId)
+    } catch {
+      // Segue sem captura.
+    }
+    let andou = false
+    let ultima: number | null = null
+
+    const mover = (evento: Event) => {
+      const ev = evento as PointerEvent
+      if (ev.pointerId !== e.pointerId) return
+      renovarGesto(e.pointerId)
+      if (!dobra) return
+      if (!andou && Math.hypot(ev.clientX - naTela.x, ev.clientY - naTela.y) < TOQUE) return
+      andou = true
+      const d = daTela(ev.clientX, ev.clientY)
+      if (!d) return
+      const vao = dobra.ate - dobra.de
+      if (Math.abs(vao) < 1) return
+      const fracao = (d[dobra.eixo] - dobra.de) / vao
+      ultima = Math.min(DOBRA_MAX, Math.max(DOBRA_MIN, fracao))
+      void updateFlowEdge(chart.id, edgeId, { dobra: ultima })
+    }
+
+    const desligar = () => {
+      alvo.removeEventListener('pointermove', mover)
+      alvo.removeEventListener('pointerup', soltar)
+      alvo.removeEventListener('pointercancel', soltar)
+      alvo.removeEventListener('lostpointercapture', soltar)
+      window.removeEventListener('pointerup', soltar)
+      window.removeEventListener('pointercancel', soltar)
+      setTelaCongelada(null)
+      largarGesto(e.pointerId)
+    }
+
+    const soltar = (evento?: Event) => {
+      if (evento && (evento as PointerEvent).pointerId !== e.pointerId) return
+      desligar()
+      if (!andou) {
+        // Escolher a seta desmarca a caixa: uma coisa de cada vez.
+        setEscolhida(null)
+        setSetaEscolhida((atual) => (atual === edgeId ? null : edgeId))
+      }
+    }
+
+    gesto.current = { id: e.pointerId, tipo: e.pointerType, quando: Date.now(), abandonar: soltar }
+    alvo.addEventListener('pointermove', mover)
+    alvo.addEventListener('pointerup', soltar)
+    alvo.addEventListener('pointercancel', soltar)
+    alvo.addEventListener('lostpointercapture', soltar)
+    window.addEventListener('pointerup', soltar)
+    window.addEventListener('pointercancel', soltar)
   }
 
   /** Cria a caixa num canto livre, embaixo de tudo, e já a deixa escolhida. */
@@ -802,8 +899,14 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
                 {chart.edges.map((e) => (
                   <div key={e.id} className="flow-seta-item">
                     <button
-                      className="flow-seta-nome"
-                      onClick={() => abrirEdicao(`seta:${e.id}`, e.label)}
+                      className={`flow-seta-nome ${setaEscolhida === e.id ? 'ativo' : ''}`}
+                      onClick={() => {
+                        // A lista é um índice: tocar nela escolhe a seta, e
+                        // tudo que dá pra fazer com ela aparece na barra —
+                        // o mesmo lugar de quando se toca na linha.
+                        setEscolhida(null)
+                        setSetaEscolhida((atual) => (atual === e.id ? null : e.id))
+                      }}
                     >
                       {curto(porId.get(e.from)?.label)} → {curto(porId.get(e.to)?.label)}
                       {e.label ? `: ${curto(e.label)}` : ''}
@@ -877,6 +980,17 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
                 >
                   <path d="M 0 0 L 10 5 L 0 10 z" fill={SETA} />
                 </marker>
+                <marker
+                  id="pontaViva"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill={ESCOLHIDA} />
+                </marker>
               </defs>
 
               {arranjo.edges.map((e) => {
@@ -884,16 +998,52 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
                 const d = e.points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
                 const meio = e.points[Math.floor(e.points.length / 2)]
                 const texto = rotuloDaSeta.get(e.id) ?? ''
+                const viva = setaEscolhida === e.id
+                const dobra = pegaDobra(e.points)
                 return (
                   <g key={e.id}>
                     <path
                       d={d}
                       fill="none"
-                      stroke={SETA}
-                      strokeWidth={2}
+                      stroke={viva ? ESCOLHIDA : SETA}
+                      strokeWidth={viva ? 4 : 2}
                       strokeDasharray={e.retorno ? '7 5' : undefined}
-                      markerEnd="url(#ponta)"
+                      markerEnd={viva ? 'url(#pontaViva)' : 'url(#ponta)'}
                     />
+                    {/*
+                      A FAIXA DE TOQUE.
+
+                      Invisível, grossa, e por cima da linha fina: uma seta tem
+                      dois píxeis de largura, e dois píxeis não são um alvo de
+                      toque. Era por isso que a única forma de mexer numa seta
+                      era pela lista da lateral — "queria clicar na linha das
+                      intersecções e mexer nelas".
+
+                      Fica ANTES das caixas no desenho, de propósito: as caixas
+                      ficam por cima, e a faixa larga nunca rouba o toque de
+                      uma caixa vizinha.
+                    */}
+                    <path
+                      d={d}
+                      fill="none"
+                      stroke="transparent"
+                      strokeWidth={TOQUE_SETA}
+                      style={{ cursor: 'pointer', touchAction: 'none' }}
+                      onPointerDown={(ev) => pegarSeta(ev, e.id, dobra)}
+                    />
+                    {viva && dobra && (
+                      // A alça da dobra: o que está escolhido tem que MOSTRAR
+                      // o que dá pra arrastar.
+                      <circle
+                        cx={dobra.x}
+                        cy={dobra.y}
+                        r={9}
+                        fill="#ffffff"
+                        stroke={ESCOLHIDA}
+                        strokeWidth={3}
+                        pointerEvents="none"
+                      />
+                    )}
                     {texto && (
                       <>
                         <rect
@@ -957,36 +1107,58 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
             />
           </label>
 
-          {/*
-            De que lado a seta sai e por onde ela entra.
-
-            "Automático" é o padrão e acerta na maioria: ele olha onde as duas
-            caixas estão. Mas "em geral certo" não é sempre certo — quem está
-            montando o desenho sabe de que lado a seta fica legível, e até
-            aqui não tinha como dizer.
-          */}
-          {editando.startsWith('seta:') &&
-            (() => {
-              const seta = chart.edges.find((x) => x.id === editando.slice(5))
-              if (!seta) return null
-              return (
-                <>
-                  <PortaEscolha
-                    titulo="Sai por"
-                    atual={seta.saida}
-                    onEscolher={(p) => void updateFlowEdge(chart.id, seta.id, { saida: p })}
-                  />
-                  <PortaEscolha
-                    titulo="Entra por"
-                    atual={seta.entrada}
-                    onEscolher={(p) => void updateFlowEdge(chart.id, seta.id, { entrada: p })}
-                  />
-                </>
-              )
-            })()}
-
           <button className="flow-ok" onClick={fecharEdicao}>
             Pronto
+          </button>
+        </div>
+      )}
+
+      {/*
+        A barra da SETA escolhida.
+
+        Nasceu de um pedido claro: "queria clicar na linha das intersecções e
+        mexer nelas, ou tirar a intersecção sem apagar a forma toda". Antes,
+        mexer numa seta só dava pela lista da lateral, e tirar uma ligação
+        parecia que ia levar a caixa junto. Aqui o que some é a ligação, e a
+        frase do botão diz isso.
+      */}
+      {!editando && setaEscolhida && porSetaId.get(setaEscolhida) && (
+        <div className="flow-barra flow-barra-seta">
+          <button
+            className="flow-ok"
+            onClick={() =>
+              abrirEdicao(`seta:${setaEscolhida}`, porSetaId.get(setaEscolhida)?.label ?? '')
+            }
+          >
+            ✎ Nome
+          </button>
+
+          <button
+            onClick={() => void flipFlowEdge(chart.id, setaEscolhida)}
+            title="Troca o sentido: o que apontava pra lá passa a apontar pra cá"
+          >
+            ⇄ Inverter
+          </button>
+
+          <PortaEscolha
+            titulo="Sai por"
+            atual={porSetaId.get(setaEscolhida)?.saida}
+            onEscolher={(p) => void updateFlowEdge(chart.id, setaEscolhida, { saida: p })}
+          />
+          <PortaEscolha
+            titulo="Entra por"
+            atual={porSetaId.get(setaEscolhida)?.entrada}
+            onEscolher={(p) => void updateFlowEdge(chart.id, setaEscolhida, { entrada: p })}
+          />
+
+          <button
+            onClick={() => {
+              void removeFlowEdge(chart.id, setaEscolhida)
+              setSetaEscolhida(null)
+            }}
+            title="Tira só esta ligação. As duas caixas continuam no fluxograma"
+          >
+            ✕ Tirar só a ligação
           </button>
         </div>
       )}
@@ -1034,34 +1206,38 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
             O tamanho é um MÍNIMO: a caixa cresce sozinha pra caber o nome, e
             por isso o "−" nunca consegue esconder texto.
           */}
-          <div className="flow-grupo">
+          <div className="flow-medida">
+            <span className="muted">Largura</span>
             <button
               onClick={() => void mudarTamanho(escolhida, -PASSO_LARGURA, 0)}
               aria-label="Mais estreita"
               title="Mais estreita"
             >
-              ⇤⇥
+              −
             </button>
             <button
               onClick={() => void mudarTamanho(escolhida, PASSO_LARGURA, 0)}
               aria-label="Mais larga"
               title="Mais larga"
             >
-              ⇥⇤
+              +
             </button>
+          </div>
+          <div className="flow-medida">
+            <span className="muted">Altura</span>
             <button
               onClick={() => void mudarTamanho(escolhida, 0, -PASSO_ALTURA)}
               aria-label="Mais baixa"
               title="Mais baixa"
             >
-              ⤒⤓
+              −
             </button>
             <button
               onClick={() => void mudarTamanho(escolhida, 0, PASSO_ALTURA)}
               aria-label="Mais alta"
               title="Mais alta"
             >
-              ⤓⤒
+              +
             </button>
           </div>
 
@@ -1454,6 +1630,29 @@ function Caixa({
  * A lista é um índice, não uma leitura: o nome inteiro mora na caixa. Cortar
  * aqui é o que mantém cada seta numa linha só — e a lateral do tamanho dela.
  */
+/**
+ * Onde fica a alça da dobra, e por qual eixo ela anda.
+ *
+ * Só existe quando o caminho tem um degrau de verdade (quatro pontos): numa
+ * reta, ou num cotovelo único, não há nada pra mover — e prometer uma alça que
+ * não faz nada é pior que não ter alça.
+ */
+function pegaDobra(
+  pontos: { x: number; y: number }[],
+): { x: number; y: number; eixo: 'x' | 'y'; de: number; ate: number } | null {
+  if (pontos.length !== 4) return null
+  const [p0, p1, p2, p3] = pontos
+  // Se o primeiro trecho é vertical, o degrau sobe e desce: a dobra anda em y.
+  const eixo: 'x' | 'y' = Math.abs(p0.x - p1.x) < 1 ? 'y' : 'x'
+  return {
+    x: (p1.x + p2.x) / 2,
+    y: (p1.y + p2.y) / 2,
+    eixo,
+    de: p0[eixo],
+    ate: p3[eixo],
+  }
+}
+
 function curto(texto: string | undefined, limite = 14): string {
   const t = (texto ?? '').trim()
   if (!t) return 'caixa'

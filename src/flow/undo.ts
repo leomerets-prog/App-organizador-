@@ -75,7 +75,11 @@ export function assinatura(chart: Flowchart): string {
     .join(';')
   const setas = [...chart.edges]
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    .map((e) => `${e.id}|${e.from}|${e.to}|${e.label}|${e.saida ?? '-'}|${e.entrada ?? '-'}`)
+    .map(
+      (e) =>
+        `${e.id}|${e.from}|${e.to}|${e.label}|${e.saida ?? '-'}|${e.entrada ?? '-'}` +
+        `|${num(e.saidaDesvio)}|${num(e.entradaDesvio)}|${num(e.dobra)}`,
+    )
     .join(';')
   return `${caixas}#${setas}`
 }
@@ -177,6 +181,10 @@ export function rotulo(antes: Flowchart, depois: Flowchart): string {
     if (!a) return 'leitura'
     if (a.from === d.to && a.to === d.from) return 'seta invertida'
     if (a.saida !== d.saida || a.entrada !== d.entrada) return 'lado da seta'
+    if (num(a.dobra) !== num(d.dobra)) return 'dobra da seta'
+    if (num(a.saidaDesvio) !== num(d.saidaDesvio) || num(a.entradaDesvio) !== num(d.entradaDesvio)) {
+      return 'onde a seta encosta'
+    }
     if (a.label !== d.label) return 'nome da seta'
   }
   return 'leitura'
@@ -184,6 +192,10 @@ export function rotulo(antes: Flowchart, depois: Flowchart): string {
 
 function lugar(pos: { x: number; y: number } | undefined): string {
   return pos ? `${Math.round(pos.x)},${Math.round(pos.y)}` : '-'
+}
+
+function num(v: number | undefined): string {
+  return typeof v === 'number' ? v.toFixed(3) : '-'
 }
 
 function tam(t: { w: number; h: number } | undefined): string {

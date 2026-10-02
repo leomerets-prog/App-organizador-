@@ -233,7 +233,14 @@ export interface AppState {
   updateFlowEdge: (
     chartId: Id,
     edgeId: Id,
-    patch: { label?: string; saida?: Porta; entrada?: Porta },
+    patch: {
+      label?: string
+      saida?: Porta
+      entrada?: Porta
+      saidaDesvio?: number
+      entradaDesvio?: number
+      dobra?: number
+    },
   ) => Promise<void>
   /**
    * Cria uma caixa no painel, na forma escolhida na lateral.
