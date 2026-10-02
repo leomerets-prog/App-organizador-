@@ -541,7 +541,28 @@ precisa de pouco; quem liga duas distantes precisa percorrer o caminho.
 em que medida do desenho ele deveria estar expresso. `MIN_WRITING_HEIGHT`
 (armadilha 14) é do mesmo tipo — e teve o mesmo defeito.
 
-### 30. A estrutura aparece antes dos nomes
+### 30. Remontar não pode apagar o que foi editado — e isso é um módulo puro
+
+O painel virou editor: arrastar caixa, ligar, ramificar, criar caixa, trocar
+forma e cor. E aí "Ler de novo" deixou de ser inofensivo: quem corrigiu quinze
+nomes, arrastou tudo pro lugar, criou duas ramificações e escolheu as cores não
+pode perder nada disso por tocar num botão — e vai tocar, porque desenhar mais
+na folha é o normal.
+
+Por isso a junção mora em `flow/merge.ts`, **pura e testada**, e não solta no
+store. As regras, em ordem:
+
+1. **O que o usuário fez à mão nunca some.** Caixa e ligação criadas no painel
+   não têm tinta por trás; a leitura jamais as encontraria
+2. **O que ele editou vence a leitura.** Nome, forma, posição, cor e direção
+   invertida sobrevivem
+3. **O que ele NÃO tocou segue a tinta.** Caixa apagada do desenho sai; caixa
+   nova entra — senão o fluxograma congela e para de acompanhar a folha
+
+Seis casos de teste cercam isso, inclusive os dois lados: o que sobrevive e o
+que tem que sair.
+
+### 31. A estrutura aparece antes dos nomes
 
 O fluxograma só era mostrado depois de passar o reconhecedor em CADA caixa.
 Com quinze caixas isso é mais de um minuto de tela parada escrito "lendo os
@@ -559,7 +580,7 @@ enfeite — nome, texto, enriquecimento — chega depois, com a tela já montada
 Segurar a tela inteira pelo acessório mais lento é o jeito mais fácil de
 transformar um recurso que funciona num recurso que "não foi".
 
-### 31. Fluxograma não se lê linha por linha
+### 32. Fluxograma não se lê linha por linha
 
 A zona de fluxograma é a única que `items/detect.ts` ignora (`ZONES_SEM_LINHA`).
 Lá uma caixa e a seta ao lado estão na mesma altura: a identificação por linha
@@ -569,7 +590,7 @@ leria as duas como um campo só, e um desenho de dez traços viraria quatro
 A leitura daquela zona é outra, mora em `flow/`, e o resultado é **um** registro
 — o desenho montado — em vez de um por linha.
 
-### 32. Prazo é dia do calendário, no fuso de casa
+### 33. Prazo é dia do calendário, no fuso de casa
 
 `new Date('2026-09-30')` é lido como **UTC** e, no Brasil, volta como dia 29. Um
 prazo que anda um dia pra trás sozinho destrói a confiança na lista inteira — e
@@ -592,7 +613,8 @@ src/
   items/       identificação dos campos (detect) e a lógica da Central —
                filtro, busca, resumo, ordem e faixas de prazo (central)
   audio/       gravação, contas do tocador (playback) e salvar pra fora (export)
-  flow/        leitura do fluxograma: formas (shapes), grafo (graph), arranjo (layout)
+  flow/        leitura do fluxograma: formas (shapes), grafo (graph), arranjo
+               (layout) e a junção com o que foi editado (merge)
   ocr/         transcrição da letra (ponte com o plugin Android)
   zones/       em que zona um ponto caiu, e a edição das faixas
   db/          IndexedDB (versão 3: traços, zonas, itens, áudio, imagens,
@@ -614,7 +636,8 @@ grava depois. É isso que mantém a escrita fluida.
 
 **O que é puro e testável:** `ink/erase.ts`, `ink/scribble.ts`,
 `ink/viewport.ts`, `items/detect.ts`, `items/central.ts`, `audio/playback.ts`,
-`flow/shapes.ts`, `flow/graph.ts`, `flow/layout.ts`, `ink/history.ts`,
+`flow/shapes.ts`, `flow/graph.ts`, `flow/layout.ts`, `flow/merge.ts`,
+`ink/history.ts`,
 `zones/edit.ts` e `lib/geometry.ts` não sabem nada de React nem de banco. Lógica nova de tinta, de
 identificação, de zona ou de filtro deve nascer ali.
 
@@ -647,6 +670,9 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | A pilha é esvaziada ao trocar de página | Voltar numa folha e ver sumir algo de outra seria pior que não ter voltar |
 | Caixa pode ser feita de vários traços | Com caneta, levantar a mão num canto é o normal. Exigir um traço fechado era exigir um jeito de desenhar que ninguém usa |
 | Ponta de seta tem que parecer ponta de seta | Ela decide a DIREÇÃO: errar uma inverte a seta e reorganiza o desenho inteiro. Letra pequena perto da ponta do traço não serve |
+| Tocar escolhe, arrastar move — o mesmo gesto | Separar em dois modos obrigaria a escolher o modo antes de saber o que se quer fazer. Quem solta sem andar escolheu; quem andou, moveu |
+| "Ligar" é a única ação de dois tempos, e se anuncia | Toda ação que espera um segundo toque precisa dizer na tela o que está esperando, senão vira um modo invisível |
+| Posição arrastada manda no arranjo automático | O arranjo acerta a estrutura; quem sabe o que fica bem ao lado de quê é quem desenhou |
 | Seta se mede pelo VÃO que atravessa, não por um comprimento fixo | Um número fixo tem que servir a um vão de 30px e a um de 300; alto perde as ligações curtas, baixo aceita qualquer rabisco |
 | O painel sabe mostrar o que ENTENDEU, não só o resultado | Cinco rodadas de "não funcionou" com números que diziam que errava, mas não onde. Um print da vista "Como eu li" responde de uma vez |
 | Encaixe de seta curto, com guardas em vez de folga apertada | Folga grande fazia a área de encaixe de uma caixa encostar na da vizinha; apertar demais perdeu ligações de verdade. Quem segura o falso positivo são as guardas (traço dentro de caixa nunca é seta, traço curto também não) |

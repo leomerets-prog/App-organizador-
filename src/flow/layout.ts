@@ -36,7 +36,13 @@ export const GAP_Y = 76
 export const MARGIN = 40
 
 export interface GraphIn {
-  nodes: { id: Id; kind: ShapeKind; bounds: { minX: number; minY: number; maxX: number; maxY: number } }[]
+  nodes: {
+    id: Id
+    kind: ShapeKind
+    bounds: { minX: number; minY: number; maxX: number; maxY: number }
+    /** Posição escolhida à mão; quando existe, manda no arranjo automático. */
+    pos?: { x: number; y: number }
+  }[]
   edges: { id: Id; from: Id; to: Id }[]
 }
 
@@ -48,6 +54,8 @@ export interface PlacedNode {
   y: number
   w: number
   h: number
+  /** A posição veio da mão do usuário, não do arranjo. */
+  manual?: boolean
 }
 
 export interface PlacedEdge {
@@ -193,12 +201,16 @@ export function layout(graph: GraphIn): Layout {
         id: n.id,
         kind: n.kind,
         level: l,
-        x,
+        // A posição escolhida à mão ganha do arranjo — mas a caixa continua
+        // ocupando o lugar dela na fila, pra que mover uma não embaralhe as
+        // outras de volta.
+        x: n.pos ? n.pos.x : x,
         // Centraliza na faixa: níveis que misturam losango e retângulo ficam
         // alinhados pelo meio, e não pelo topo.
-        y: y + (alturaDoNivel - h) / 2,
+        y: n.pos ? n.pos.y : y + (alturaDoNivel - h) / 2,
         w,
         h,
+        manual: n.pos ? true : undefined,
       }
       colocados.push(posto)
       porId.set(n.id, posto)
@@ -207,8 +219,19 @@ export function layout(graph: GraphIn): Layout {
     y += alturaDoNivel + GAP_Y
   }
 
-  const altura = y - GAP_Y + MARGIN
-  const total = largura + MARGIN * 2
+  /*
+   * A tela cresce pra caber o que foi arrastado.
+   *
+   * Sem isto, mover uma caixa pra fora do que o arranjo previu a esconderia —
+   * e a primeira coisa que alguém faz ao poder mover é justamente levar uma
+   * caixa pra um canto vazio.
+   */
+  let altura = y - GAP_Y + MARGIN
+  let total = largura + MARGIN * 2
+  for (const posto of colocados) {
+    total = Math.max(total, posto.x + posto.w + MARGIN)
+    altura = Math.max(altura, posto.y + posto.h + MARGIN)
+  }
 
   const setas: PlacedEdge[] = graph.edges.map((e) => {
     const de = porId.get(e.from)

@@ -254,7 +254,22 @@ export interface FlowChartNode {
   editado?: boolean
   /** Onde a caixa foi desenhada à mão — é o que dá a ordem esquerda/direita. */
   bounds: Bounds
+  /**
+   * Onde o usuário ARRASTOU a caixa, no desenho montado.
+   *
+   * Quando existe, manda no arranjo automático. O arranjo acerta a estrutura,
+   * mas quem sabe o que fica bem ao lado de quê é quem desenhou — e remontar
+   * não pode desfazer isso, pelo mesmo motivo que não desfaz um nome corrigido.
+   */
+  pos?: { x: number; y: number }
+  /** Cor escolhida pelo usuário; sem ela, a cor é a da forma. */
+  cor?: FlowColor
+  /** Caixa que o usuário criou no painel, sem tinta nenhuma por trás. */
+  criadaAMao?: boolean
 }
+
+/** As cores que uma caixa pode ter. Poucas, e cada uma com um sentido óbvio. */
+export type FlowColor = 'azul' | 'verde' | 'laranja' | 'vermelho' | 'roxo' | 'cinza'
 
 export interface FlowChartEdge {
   id: Id
@@ -262,7 +277,9 @@ export interface FlowChartEdge {
   to: Id
   label: string
   /** A direção veio da ponta de seta desenhada, ou só da ordem do traço? */
-  direcao: 'ponta' | 'ordem'
+  direcao: 'ponta' | 'ordem' | 'mao'
+  /** Ligação que o usuário fez no painel, sem traço nenhum por trás. */
+  criadaAMao?: boolean
 }
 
 /**

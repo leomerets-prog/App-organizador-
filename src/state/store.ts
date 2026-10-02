@@ -10,6 +10,7 @@ import type {
   Flowchart,
   FlowChartEdge,
   FlowChartNode,
+  FlowColor,
   FlowShape,
   Recording,
   Section,
@@ -46,6 +47,7 @@ import { forgetImage, placeNewImage, readImageFile } from '../ink/images'
 import { eraseAlongSegment } from '../ink/erase'
 import type { Pt } from '../lib/geometry'
 import { buildGraph, toFlowStrokes } from '../flow/graph'
+import { mergeFlowchart } from '../flow/merge'
 import {
   EMPTY_HISTORY,
   applyPatch,
@@ -208,8 +210,20 @@ export interface AppState {
   /** Lê o desenho da folha inteira e monta (ou remonta) o fluxograma. */
   buildFlowchart: () => Promise<void>
   /** Corrige o nome ou a forma de uma caixa; a correção sobrevive à remontagem. */
-  updateFlowNode: (chartId: Id, nodeId: Id, patch: { label?: string; kind?: FlowShape }) => Promise<void>
+  updateFlowNode: (
+    chartId: Id,
+    nodeId: Id,
+    patch: { label?: string; kind?: FlowShape; pos?: { x: number; y: number }; cor?: FlowColor },
+  ) => Promise<void>
   updateFlowEdge: (chartId: Id, edgeId: Id, patch: { label?: string }) => Promise<void>
+  /** Cria uma caixa no painel, onde o usuário tocou. */
+  addFlowNode: (chartId: Id, pos: { x: number; y: number }) => Promise<void>
+  removeFlowNode: (chartId: Id, nodeId: Id) => Promise<void>
+  /** Liga duas caixas: é assim que se acrescenta uma ramificação. */
+  addFlowEdge: (chartId: Id, from: Id, to: Id) => Promise<void>
+  removeFlowEdge: (chartId: Id, edgeId: Id) => Promise<void>
+  flipFlowEdge: (chartId: Id, edgeId: Id) => Promise<void>
+  resetFlowLayout: (chartId: Id) => Promise<void>
   /** Como está a leitura do desenho; é o que a tela mostra enquanto roda. */
   flowStatus: { state: 'parado' | 'lendo' | 'erro'; message: string }
   /** Guarda onde a escuta parou, pra retomar dali na próxima vez. */
@@ -376,6 +390,22 @@ async function aplicarPasso(
  * de letra isso não dava pra nenhuma — "li 0 nomes".
  */
 const PRAZO_NOMES = 180_000
+
+/**
+ * Grava o fluxograma: memória primeiro, banco depois.
+ *
+ * Todas as edições do painel passam por aqui, pra que nenhuma esqueça de
+ * gravar — é a regra da casa do resto do app, aplicada num lugar só.
+ */
+async function salvarChart(
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+  chart: Flowchart,
+): Promise<void> {
+  const atualizado = { ...chart, updatedAt: Date.now() }
+  set({ flowcharts: get().flowcharts.map((f) => (f.id === chart.id ? atualizado : f)) })
+  await repo.putFlowchart(atualizado)
+}
 
 /** Prazo de UMA caixa. Uma chamada presa não pode segurar as outras treze. */
 const PRAZO_CAIXA = 12_000
@@ -1566,29 +1596,9 @@ export const useStore = create<AppState>((set, get) => ({
     }
 
     const anterior = get().flowcharts.find((f) => f.pageId === pageId)
-    const nomeAntigo = new Map((anterior?.nodes ?? []).map((n) => [n.id, n]))
-    const rotuloAntigo = new Map((anterior?.edges ?? []).map((e) => [e.id, e.label]))
-
-    const nodes: FlowChartNode[] = grafo.nodes.map((n) => {
-      const velho = nomeAntigo.get(n.id)
-      return {
-        id: n.id,
-        // Forma trocada à mão também fica: o leitor erra entre losango e
-        // retângulo com mais frequência que erra o resto.
-        kind: velho?.editado ? velho.kind : n.kind,
-        label: velho?.editado ? velho.label : (velho?.label ?? ''),
-        editado: velho?.editado,
-        bounds: n.bounds,
-      }
-    })
-
-    const edges: FlowChartEdge[] = grafo.edges.map((e) => ({
-      id: e.id,
-      from: e.from,
-      to: e.to,
-      label: rotuloAntigo.get(e.id) ?? '',
-      direcao: e.direcao,
-    }))
+    // A junção com o que já foi editado é delicada demais pra ficar solta
+    // aqui: mora em `flow/merge.ts`, pura e testada.
+    const { nodes, edges } = mergeFlowchart(anterior, grafo)
 
     const chart: Flowchart = {
       id: anterior?.id ?? newId(),
@@ -1632,6 +1642,84 @@ export const useStore = create<AppState>((set, get) => ({
     }
     set({ flowcharts: get().flowcharts.map((f) => (f.id === chartId ? atualizado : f)) })
     await repo.putFlowchart(atualizado)
+  },
+
+  async addFlowNode(chartId, pos) {
+    const chart = get().flowcharts.find((f) => f.id === chartId)
+    if (!chart) return
+    const id = newId()
+    const node: FlowChartNode = {
+      id,
+      kind: 'acao',
+      label: '',
+      bounds: { minX: pos.x, minY: pos.y, maxX: pos.x + 200, maxY: pos.y + 80 },
+      pos,
+      criadaAMao: true,
+      editado: true,
+    }
+    await salvarChart(get, set, { ...chart, nodes: [...chart.nodes, node] })
+  },
+
+  async removeFlowNode(chartId, nodeId) {
+    const chart = get().flowcharts.find((f) => f.id === chartId)
+    if (!chart) return
+    await salvarChart(get, set, {
+      ...chart,
+      nodes: chart.nodes.filter((n) => n.id !== nodeId),
+      // Ligação sem as duas pontas não é ligação.
+      edges: chart.edges.filter((e) => e.from !== nodeId && e.to !== nodeId),
+    })
+  },
+
+  async addFlowEdge(chartId, from, to) {
+    const chart = get().flowcharts.find((f) => f.id === chartId)
+    if (!chart) return
+    if (from === to) return
+    // Duas setas iguais entre as mesmas caixas só sujam o desenho.
+    if (chart.edges.some((e) => e.from === from && e.to === to)) return
+    const edge: FlowChartEdge = {
+      id: newId(),
+      from,
+      to,
+      label: '',
+      direcao: 'mao',
+      criadaAMao: true,
+    }
+    await salvarChart(get, set, { ...chart, edges: [...chart.edges, edge] })
+  },
+
+  async removeFlowEdge(chartId, edgeId) {
+    const chart = get().flowcharts.find((f) => f.id === chartId)
+    if (!chart) return
+    await salvarChart(get, set, {
+      ...chart,
+      edges: chart.edges.filter((e) => e.id !== edgeId),
+    })
+  },
+
+  /** Inverte a seta — e marca que quem mandou foi o usuário, não a leitura. */
+  async flipFlowEdge(chartId, edgeId) {
+    const chart = get().flowcharts.find((f) => f.id === chartId)
+    if (!chart) return
+    await salvarChart(get, set, {
+      ...chart,
+      edges: chart.edges.map((e) =>
+        e.id === edgeId ? { ...e, from: e.to, to: e.from, direcao: 'mao' as const } : e,
+      ),
+    })
+  },
+
+  /** Devolve o arranjo automático, esquecendo as posições arrastadas. */
+  async resetFlowLayout(chartId) {
+    const chart = get().flowcharts.find((f) => f.id === chartId)
+    if (!chart) return
+    await salvarChart(get, set, {
+      ...chart,
+      nodes: chart.nodes.map((n) => {
+        const { pos: _fora, ...resto } = n
+        return resto
+      }),
+    })
   },
 
   async updateFlowEdge(chartId, edgeId, patch) {

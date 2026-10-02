@@ -2,6 +2,8 @@ import { classifyShape, countCorners, isClosedPath, polygonArea } from '../src/f
 import { buildGraph } from '../src/flow/graph'
 import type { FlowStroke } from '../src/flow/graph'
 import { backEdges, layout, levelize } from '../src/flow/layout'
+import { mergeFlowchart } from '../src/flow/merge'
+import type { Flowchart } from '../src/domain/types'
 
 /**
  * Do rabisco ao fluxograma.
@@ -726,6 +728,123 @@ casos.push(
       const { strokes } = desenhoDoUsuario()
       const g = buildGraph(strokes)
       return g.soltos.length === 3 ? null : `${g.soltos.length} soltos, esperava 3`
+    },
+  },
+)
+
+// ── Remontar sem perder o que foi editado ─────────────────────────────────
+
+/** Um fluxograma como o painel deixa depois de o usuário mexer nele. */
+function editado(): Flowchart {
+  return {
+    id: 'ch',
+    pageId: 'pg',
+    soltos: 0,
+    updatedAt: 1,
+    nodes: [
+      {
+        id: 'a',
+        kind: 'decisao',
+        label: 'Nome que eu corrigi',
+        editado: true,
+        cor: 'verde',
+        pos: { x: 500, y: 40 },
+        bounds: { minX: 0, minY: 0, maxX: 10, maxY: 10 },
+      },
+      {
+        id: 'minha',
+        kind: 'acao',
+        label: 'Caixa que eu criei',
+        criadaAMao: true,
+        editado: true,
+        bounds: { minX: 0, minY: 0, maxX: 10, maxY: 10 },
+      },
+    ],
+    edges: [
+      { id: 'minhaLigacao', from: 'a', to: 'minha', label: 'sim', direcao: 'mao', criadaAMao: true },
+    ],
+  }
+}
+
+/** O que a leitura devolveria de uma folha onde só existe a caixa "a". */
+function leituraDe(ids: string[]): ReturnType<typeof buildGraph> {
+  return {
+    nodes: ids.map((id) => ({
+      id,
+      kind: 'acao' as const,
+      bounds: { minX: 0, minY: 0, maxX: 10, maxY: 10 },
+      shapeStrokeIds: [id],
+      labelStrokeIds: [],
+    })),
+    edges: [],
+    soltos: [],
+    diagnostico: { tracos: 0, fechados: 0, juntados: 0, formas: 0, setas: 0, letra: 0, soltos: 0 },
+  }
+}
+
+casos.push(
+  {
+    nome: 'remontar não apaga a caixa que o usuário criou no painel',
+    rodar() {
+      const r = mergeFlowchart(editado(), leituraDe(['a']))
+      return r.nodes.some((n) => n.id === 'minha') ? null : 'a caixa criada à mão sumiu'
+    },
+  },
+  {
+    nome: 'remontar não apaga a ligação que ele fez à mão',
+    rodar() {
+      const r = mergeFlowchart(editado(), leituraDe(['a']))
+      const minha = r.edges.find((e) => e.id === 'minhaLigacao')
+      if (!minha) return 'a ligação feita à mão sumiu'
+      return minha.label === 'sim' ? null : 'o nome da ligação se perdeu'
+    },
+  },
+  {
+    nome: 'remontar guarda nome, forma, posição e cor que ele escolheu',
+    rodar() {
+      const r = mergeFlowchart(editado(), leituraDe(['a']))
+      const a = r.nodes.find((n) => n.id === 'a')
+      if (!a) return 'a caixa sumiu'
+      if (a.label !== 'Nome que eu corrigi') return 'o nome voltou ao da leitura'
+      if (a.kind !== 'decisao') return 'a forma voltou à da leitura'
+      if (a.pos?.x !== 500) return 'a posição arrastada se perdeu'
+      if (a.cor !== 'verde') return 'a cor escolhida se perdeu'
+      return null
+    },
+  },
+  {
+    // O outro lado da moeda: o que a tinta diz continua mandando no que o
+    // usuário NÃO tocou, senão o fluxograma congela e para de acompanhar a folha.
+    nome: 'mas a caixa que sumiu do desenho sai do fluxograma',
+    rodar() {
+      const antes = editado()
+      const r = mergeFlowchart(antes, leituraDe([]))
+      if (r.nodes.some((n) => n.id === 'a')) return 'a caixa apagada do desenho ficou'
+      // E a ligação dela, que perdeu uma ponta, vai junto.
+      return r.edges.length === 0 ? null : 'sobrou ligação sem as duas pontas'
+    },
+  },
+  {
+    nome: 'e a caixa nova no desenho entra',
+    rodar() {
+      const r = mergeFlowchart(editado(), leituraDe(['a', 'nova']))
+      return r.nodes.some((n) => n.id === 'nova') ? null : 'a caixa nova não entrou'
+    },
+  },
+  {
+    nome: 'direção invertida à mão vence a leitura na remontagem',
+    rodar() {
+      const antes: Flowchart = {
+        ...editado(),
+        edges: [{ id: 'e1', from: 'b', to: 'a', label: '', direcao: 'mao' }],
+      }
+      const grafo = leituraDe(['a', 'b'])
+      grafo.edges = [
+        { id: 'e1', from: 'a', to: 'b', strokeId: 'e1', labelStrokeIds: [], direcao: 'ordem' },
+      ]
+      const r = mergeFlowchart(antes, grafo)
+      const e = r.edges.find((x) => x.id === 'e1')
+      return e?.from === 'b' && e?.to === 'a' ? null : 'a inversão feita à mão foi desfeita'
     },
   },
 )

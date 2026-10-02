@@ -2498,6 +2498,60 @@ input {
   font-weight: 600;
 }
 
+ /* A barra do que está escolhido: tudo numa linha, nada escondido. */
+.flow-barra {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.flow-barra > button {
+  height: var(--tap);
+  padding: 0 14px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.flow-cores {
+  display: flex;
+  gap: 6px;
+}
+
+.flow-cor {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px solid;
+}
+
+.flow-cor.ativo {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+.flow-seta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.flow-seta-acao {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
 .flow-setas {
   display: flex;
   align-items: center;

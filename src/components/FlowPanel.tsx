@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import { layout } from '../flow/layout'
 import type { PlacedNode } from '../flow/layout'
-import type { Flowchart, FlowShape } from '../domain/types'
+import type { Flowchart, FlowColor, FlowShape } from '../domain/types'
 import { salvarImagem } from '../audio/export'
 
 /**
@@ -12,9 +12,17 @@ import { salvarImagem } from '../audio/export'
  * caixas do mesmo tamanho, em níveis, com as setas retas — que é o que faz um
  * fluxograma ser lido por outra pessoa em vez de decifrado.
  *
- * É um SVG de verdade, e não uma imagem: o nome de cada caixa é editável no
- * lugar, porque o reconhecedor erra e corrigir aqui é mais rápido que voltar à
- * folha e reescrever. O botão Salvar transforma em PNG na hora de sair.
+ * É um SVG de verdade, e não uma imagem — e por isso ele é EDITÁVEL aqui:
+ * arrastar caixa, ligar uma na outra, acrescentar ramificação, trocar forma,
+ * trocar cor, corrigir nome. O arranjo automático acerta a estrutura; quem
+ * sabe o que fica bem ao lado de quê é quem desenhou.
+ *
+ * A lógica do painel cabe numa frase: **toca pra escolher, arrasta pra mover,
+ * e o que dá pra fazer com o escolhido aparece numa barra só.** Nada de modo
+ * escondido — a única exceção é "Ligar", que precisa de um segundo toque e
+ * por isso avisa na tela o que está esperando.
+ *
+ * O botão Salvar transforma em PNG na hora de sair.
  */
 
 const FORMA_NOME: Record<FlowShape, string> = {
@@ -23,11 +31,26 @@ const FORMA_NOME: Record<FlowShape, string> = {
   terminal: 'Início / Fim',
 }
 
-const CORES: Record<FlowShape, { borda: string; fundo: string }> = {
-  acao: { borda: '#2563eb', fundo: '#eff6ff' },
-  decisao: { borda: '#d97706', fundo: '#fffbeb' },
-  terminal: { borda: '#059669', fundo: '#ecfdf5' },
+/** A cor que cada forma tem quando o usuário não escolheu nenhuma. */
+const COR_DA_FORMA: Record<FlowShape, FlowColor> = {
+  acao: 'azul',
+  decisao: 'laranja',
+  terminal: 'verde',
 }
+
+const CORES: Record<FlowColor, { borda: string; fundo: string; nome: string }> = {
+  azul: { borda: '#2563eb', fundo: '#eff6ff', nome: 'Azul' },
+  verde: { borda: '#059669', fundo: '#ecfdf5', nome: 'Verde' },
+  laranja: { borda: '#d97706', fundo: '#fffbeb', nome: 'Laranja' },
+  vermelho: { borda: '#dc2626', fundo: '#fef2f2', nome: 'Vermelho' },
+  roxo: { borda: '#7c3aed', fundo: '#f5f3ff', nome: 'Roxo' },
+  cinza: { borda: '#4b5563', fundo: '#f3f4f6', nome: 'Cinza' },
+}
+
+const CORES_LISTA = Object.keys(CORES) as FlowColor[]
+
+/** Quanto o dedo pode escorregar e o toque ainda contar como toque. */
+const TOQUE = 6
 
 const TEXTO = '#111827'
 const SETA = '#4b5563'
@@ -38,6 +61,19 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
   const buildFlowchart = useStore((s) => s.buildFlowchart)
   const flowStatus = useStore((s) => s.flowStatus)
 
+  const addFlowNode = useStore((s) => s.addFlowNode)
+  const removeFlowNode = useStore((s) => s.removeFlowNode)
+  const addFlowEdge = useStore((s) => s.addFlowEdge)
+  const removeFlowEdge = useStore((s) => s.removeFlowEdge)
+  const flipFlowEdge = useStore((s) => s.flipFlowEdge)
+  const resetFlowLayout = useStore((s) => s.resetFlowLayout)
+
+  /** A caixa escolhida; é dela que a barra de baixo fala. */
+  const [escolhida, setEscolhida] = useState<string | null>(null)
+  /** Esperando o segundo toque pra fechar uma ligação nova. */
+  const [ligandoDe, setLigandoDe] = useState<string | null>(null)
+  /** Posição ao vivo durante o arrasto, antes de gravar. */
+  const [arrastando, setArrastando] = useState<{ id: string; x: number; y: number } | null>(null)
   const [editando, setEditando] = useState<string | null>(null)
   const [rascunho, setRascunho] = useState('')
   const [salvo, setSalvo] = useState<string | null>(null)
@@ -48,8 +84,17 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
   const svgRef = useRef<SVGSVGElement | null>(null)
 
   const arranjo = useMemo(
-    () => layout({ nodes: chart.nodes, edges: chart.edges }),
-    [chart.nodes, chart.edges],
+    () =>
+      layout({
+        // A caixa sendo arrastada entra no arranjo já na posição do dedo: as
+        // setas acompanham o movimento, que é o que mostra se o lugar novo
+        // deixa o desenho legível ou não.
+        nodes: chart.nodes.map((n) =>
+          arrastando?.id === n.id ? { ...n, pos: { x: arrastando.x, y: arrastando.y } } : n,
+        ),
+        edges: chart.edges,
+      }),
+    [chart.nodes, chart.edges, arrastando],
   )
 
   const porId = useMemo(
@@ -75,6 +120,87 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
     } else {
       void updateFlowNode(chart.id, alvo, { label: rascunho.trim() })
     }
+  }
+
+  /**
+   * Converte um ponto da TELA pro sistema do desenho.
+   *
+   * Sem isto o arrasto anda numa velocidade diferente do dedo, porque o SVG é
+   * escalado pra caber na tela — e a caixa foge da mão.
+   */
+  const paraDesenho = (e: React.PointerEvent): { x: number; y: number } | null => {
+    const svg = svgRef.current
+    const ctm = svg?.getScreenCTM()
+    if (!svg || !ctm) return null
+    const p = svg.createSVGPoint()
+    p.x = e.clientX
+    p.y = e.clientY
+    const d = p.matrixTransform(ctm.inverse())
+    return { x: d.x, y: d.y }
+  }
+
+  /**
+   * Toque na caixa: escolhe, liga ou começa a arrastar.
+   *
+   * O arrasto e o toque entram pelo mesmo gesto, de propósito: separá-los em
+   * dois modos obrigaria a escolher o modo antes de saber o que se quer fazer.
+   * Quem solta sem andar escolheu; quem andou, moveu.
+   */
+  const pegarCaixa = (e: React.PointerEvent, posto: PlacedNode) => {
+    e.stopPropagation()
+
+    if (ligandoDe) {
+      if (ligandoDe !== posto.id) void addFlowEdge(chart.id, ligandoDe, posto.id)
+      setLigandoDe(null)
+      setEscolhida(posto.id)
+      return
+    }
+
+    const inicio = paraDesenho(e)
+    if (!inicio) return
+    const deslocamento = { x: inicio.x - posto.x, y: inicio.y - posto.y }
+    const alvo = e.currentTarget as unknown as HTMLElement
+    try {
+      // Captura: sem ela o dedo que sai de cima da caixa larga o arrasto no
+      // meio. Com ela, o movimento continua chegando até soltar.
+      alvo.setPointerCapture(e.pointerId)
+    } catch {
+      // Ponteiro já encerrado (ou sintético): o arrasto segue sem captura.
+    }
+    let andou = false
+
+    const mover = (evento: Event) => {
+      const ev = evento as PointerEvent
+      const svg = svgRef.current
+      const ctm = svg?.getScreenCTM()
+      if (!svg || !ctm) return
+      const p = svg.createSVGPoint()
+      p.x = ev.clientX
+      p.y = ev.clientY
+      const d = p.matrixTransform(ctm.inverse())
+      const x = d.x - deslocamento.x
+      const y = d.y - deslocamento.y
+      if (!andou && Math.hypot(x - posto.x, y - posto.y) < TOQUE) return
+      andou = true
+      setArrastando({ id: posto.id, x: Math.max(0, x), y: Math.max(0, y) })
+    }
+
+    const soltar = () => {
+      alvo.removeEventListener('pointermove', mover)
+      alvo.removeEventListener('pointerup', soltar)
+      alvo.removeEventListener('pointercancel', soltar)
+      setArrastando((atual) => {
+        if (atual && atual.id === posto.id) {
+          void updateFlowNode(chart.id, posto.id, { pos: { x: atual.x, y: atual.y } })
+        }
+        return null
+      })
+      if (!andou) setEscolhida((atual) => (atual === posto.id ? null : posto.id))
+    }
+
+    alvo.addEventListener('pointermove', mover)
+    alvo.addEventListener('pointerup', soltar)
+    alvo.addEventListener('pointercancel', soltar)
   }
 
   const salvar = async () => {
@@ -117,6 +243,24 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
             title="Mostra o que o app entendeu, por cima de onde você desenhou"
           >
             {comoLi ? '▦ Ver montado' : '◉ Como eu li'}
+          </button>
+          <button
+            onClick={() => {
+              // Nasce num canto livre, abaixo de tudo: achar uma caixa nova
+              // que apareceu embaixo é mais fácil que achar uma que nasceu
+              // por cima de outra.
+              const abaixo = Math.max(0, ...arranjo.nodes.map((n) => n.y + n.h)) + 40
+              void addFlowNode(chart.id, { x: 60, y: abaixo })
+            }}
+            title="Cria uma caixa nova, pra acrescentar um passo que não está no desenho"
+          >
+            + Caixa
+          </button>
+          <button
+            onClick={() => void resetFlowLayout(chart.id)}
+            title="Esquece as posições arrastadas e arruma tudo sozinho de novo"
+          >
+            ⇵ Arrumar
           </button>
           <button onClick={() => void buildFlowchart()} disabled={flowStatus.state === 'lendo'}>
             {flowStatus.state === 'lendo' ? 'Lendo…' : '↻ Ler de novo'}
@@ -258,7 +402,10 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
                 key={n.id}
                 posto={n}
                 label={dado.label}
-                onEdit={() => abrirEdicao(n.id, dado.label)}
+                cor={dado.cor}
+                escolhida={escolhida === n.id || ligandoDe === n.id}
+                ligando={!!ligandoDe}
+                onPointerDown={(e) => pegarCaixa(e, n)}
               />
             )
           })}
@@ -300,18 +447,103 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
         </div>
       )}
 
-      {/* As setas também ganham nome — é o "sim" e o "não" de toda decisão. */}
-      {!editando && chart.edges.length > 0 && (
+      {/*
+        A barra do que está escolhido.
+        
+        Tudo que dá pra fazer com a caixa escolhida mora aqui, numa linha só —
+        nada de menu escondido nem de modo que se liga antes de saber o que se
+        quer. "Ligar" é a única ação de dois tempos, e por isso ela se anuncia.
+      */}
+      {!editando && escolhida && porId.get(escolhida) && (
+        <div className="flow-barra">
+          <button
+            className="flow-ok"
+            onClick={() => abrirEdicao(escolhida, porId.get(escolhida)?.label ?? '')}
+          >
+            ✎ Nome
+          </button>
+
+          <div className="flow-formas">
+            {(Object.keys(FORMA_NOME) as FlowShape[]).map((f) => (
+              <button
+                key={f}
+                className={porId.get(escolhida)?.kind === f ? 'ativo' : ''}
+                onClick={() => void updateFlowNode(chart.id, escolhida, { kind: f })}
+                title={FORMA_NOME[f]}
+              >
+                {FORMA_NOME[f]}
+              </button>
+            ))}
+          </div>
+
+          <div className="flow-cores">
+            {CORES_LISTA.map((c) => (
+              <button
+                key={c}
+                className={`flow-cor ${porId.get(escolhida)?.cor === c ? 'ativo' : ''}`}
+                style={{ background: CORES[c].fundo, borderColor: CORES[c].borda }}
+                onClick={() => void updateFlowNode(chart.id, escolhida, { cor: c })}
+                aria-label={CORES[c].nome}
+                title={CORES[c].nome}
+              />
+            ))}
+          </div>
+
+          <button
+            className={ligandoDe ? 'flow-ok' : ''}
+            onClick={() => setLigandoDe(ligandoDe ? null : escolhida)}
+          >
+            {ligandoDe ? '✕ Cancelar ligação' : '→ Ligar a…'}
+          </button>
+
+          <button
+            onClick={() => {
+              void removeFlowNode(chart.id, escolhida)
+              setEscolhida(null)
+            }}
+            title="Tira a caixa do fluxograma; o desenho na folha continua lá"
+          >
+            ␡ Tirar
+          </button>
+        </div>
+      )}
+
+      {ligandoDe && (
+        <div className="flow-lendo">
+          Toque na caixa de destino pra fechar a ligação.
+        </div>
+      )}
+
+      {/* As setas: nome, inverter e tirar. Ficam numa lista porque uma seta é
+          fina demais pra ser um alvo de toque honesto num tablet. */}
+      {!editando && !escolhida && chart.edges.length > 0 && (
         <div className="flow-setas">
-          <span className="muted">Nome das setas:</span>
+          <span className="muted">Setas:</span>
           {chart.edges.map((e) => (
-            <button key={e.id} onClick={() => abrirEdicao(`seta:${e.id}`, e.label)}>
-              {porId.get(e.from)?.label || 'caixa'} → {porId.get(e.to)?.label || 'caixa'}
-              {e.label ? `: ${e.label}` : ''}
-            </button>
+            <span key={e.id} className="flow-seta-item">
+              <button onClick={() => abrirEdicao(`seta:${e.id}`, e.label)}>
+                {porId.get(e.from)?.label || 'caixa'} → {porId.get(e.to)?.label || 'caixa'}
+                {e.label ? `: ${e.label}` : ''}
+              </button>
+              <button
+                className="flow-seta-acao"
+                onClick={() => void flipFlowEdge(chart.id, e.id)}
+                title="Inverter o sentido desta seta"
+              >
+                ⇄
+              </button>
+              <button
+                className="flow-seta-acao"
+                onClick={() => void removeFlowEdge(chart.id, e.id)}
+                title="Tirar esta ligação"
+              >
+                ✕
+              </button>
+            </span>
           ))}
         </div>
       )}
+
     </div>
   )
 }
@@ -418,19 +650,43 @@ function ComoLi({ chart }: { chart: Flowchart }) {
 function Caixa({
   posto,
   label,
-  onEdit,
+  cor: corEscolhida,
+  escolhida,
+  ligando,
+  onPointerDown,
 }: {
   posto: PlacedNode
   label: string
-  onEdit: () => void
+  cor?: FlowColor
+  escolhida: boolean
+  ligando: boolean
+  onPointerDown: (e: React.PointerEvent) => void
 }) {
-  const cor = CORES[posto.kind]
+  const cor = CORES[corEscolhida ?? COR_DA_FORMA[posto.kind]]
   const cx = posto.x + posto.w / 2
   const cy = posto.y + posto.h / 2
   const linhas = quebrar(label || '…', posto.kind === 'decisao' ? 18 : 24)
 
   return (
-    <g className="flow-caixa" onClick={onEdit} style={{ cursor: 'pointer' }}>
+    <g
+      className="flow-caixa"
+      onPointerDown={onPointerDown}
+      style={{ cursor: ligando ? 'crosshair' : 'move', touchAction: 'none' }}
+    >
+      {/* O realce da escolhida fica POR BAIXO, pra não cobrir o nome. */}
+      {escolhida && (
+        <rect
+          x={posto.x - 7}
+          y={posto.y - 7}
+          width={posto.w + 14}
+          height={posto.h + 14}
+          rx={14}
+          fill="none"
+          stroke={ligando ? '#dc2626' : '#111827'}
+          strokeWidth={3}
+          strokeDasharray={ligando ? '8 5' : undefined}
+        />
+      )}
       {posto.kind === 'decisao' ? (
         <polygon
           points={`${cx},${posto.y} ${posto.x + posto.w},${cy} ${cx},${posto.y + posto.h} ${posto.x},${cy}`}
