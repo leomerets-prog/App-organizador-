@@ -508,6 +508,47 @@ function interpolarReta(a: { x: number; y: number }, b: { x: number; y: number }
 casos.push(
   {
     /*
+     * A vista "Como eu li" mostrou: as ligações encontradas estavam todas
+     * certas, mas quatro não eram encontradas — sempre as mais CURTAS, entre
+     * caixas quase encostadas. Cada uma partia a corrente num pedaço novo, e
+     * cada pedaço virava uma raiz a mais no desenho montado.
+     */
+    nome: 'o tiquinho entre duas caixas quase encostadas é uma seta',
+    rodar() {
+      const a = traco(retangulo(100, 100, 300, 70))
+      const b = traco(retangulo(100, 200, 300, 70)) // vão de 30px
+      // O tiquinho que liga as duas: dezesseis píxeis, porque o vão tem trinta.
+      const tique = traco(reta(250, 178, 250, 194))
+      const g = buildGraph([a, b, tique])
+
+      if (g.edges.length !== 1) return `${g.edges.length} setas, esperava 1`
+      if (g.edges[0].from !== a.id || g.edges[0].to !== b.id) return 'ligou errado'
+      return null
+    },
+  },
+  {
+    nome: 'mas um rabisco solto no meio do vão não é seta',
+    rodar() {
+      const a = traco(retangulo(100, 100, 300, 70))
+      const b = traco(retangulo(100, 400, 300, 70)) // vão de 230px
+      // Um risquinho perdido no meio do caminho, longe de ligar as duas.
+      const perdido = traco(reta(250, 250, 250, 266))
+      const g = buildGraph([a, b, perdido])
+      return g.edges.length === 0 ? null : `${g.edges.length} seta(s) do nada`
+    },
+  },
+  {
+    nome: 'e a seta que atravessa um vão grande continua valendo',
+    rodar() {
+      const a = traco(retangulo(100, 100, 300, 70))
+      const b = traco(retangulo(100, 400, 300, 70))
+      const seta = traco(reta(250, 172, 250, 398))
+      const g = buildGraph([a, b, seta])
+      return g.edges.length === 1 ? null : `${g.edges.length} setas`
+    },
+  },
+  {
+    /*
      * O defeito mais caro de todos: de 13 setas, 11 "acharam ponta" num
      * desenho que quase não tinha ponta nenhuma. O que estava sendo pego era a
      * LETRA da caixa vizinha — pequena e perto da ponta do traço. E ponta

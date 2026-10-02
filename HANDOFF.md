@@ -520,7 +520,28 @@ Um print dessa tela responde, de uma vez, o que três rodadas de números não
 responderam. **Quando um recurso interpreta o que o usuário fez, ele precisa
 saber MOSTRAR o que entendeu — não só o resultado.**
 
-### 29. A estrutura aparece antes dos nomes
+### 29. Limite fixo não serve a desenho de gente — a régua é o próprio desenho
+
+Último defeito da série, e o mais instrutivo. A vista "Como eu li" mostrou que
+TODAS as ligações encontradas estavam certas; só que quatro não eram
+encontradas. Sempre as mesmas: as mais curtas, entre caixas quase encostadas,
+onde o tiquinho que liga tem uns quinze píxeis. Cada uma partia a corrente num
+pedaço novo, e cada pedaço virava uma raiz a mais no desenho montado — o que de
+fora parecia "ele entendeu tudo errado".
+
+A causa era um `MIN_EDGE_LENGTH = 26` fixo. Esse número tem que servir a um vão
+de 30px e a um de 300, e não serve: alto demais perde as ligações curtas, baixo
+demais aceita qualquer rabisco.
+
+Hoje a régua é a geometria do próprio desenho (`atravessaOVao`): o traço precisa
+cobrir **metade do vão entre as duas caixas**. Quem liga duas caixas encostadas
+precisa de pouco; quem liga duas distantes precisa percorrer o caminho.
+
+**Vale pra todo limite deste app:** antes de escrever um número fixo, pergunte
+em que medida do desenho ele deveria estar expresso. `MIN_WRITING_HEIGHT`
+(armadilha 14) é do mesmo tipo — e teve o mesmo defeito.
+
+### 30. A estrutura aparece antes dos nomes
 
 O fluxograma só era mostrado depois de passar o reconhecedor em CADA caixa.
 Com quinze caixas isso é mais de um minuto de tela parada escrito "lendo os
@@ -538,7 +559,7 @@ enfeite — nome, texto, enriquecimento — chega depois, com a tela já montada
 Segurar a tela inteira pelo acessório mais lento é o jeito mais fácil de
 transformar um recurso que funciona num recurso que "não foi".
 
-### 30. Fluxograma não se lê linha por linha
+### 31. Fluxograma não se lê linha por linha
 
 A zona de fluxograma é a única que `items/detect.ts` ignora (`ZONES_SEM_LINHA`).
 Lá uma caixa e a seta ao lado estão na mesma altura: a identificação por linha
@@ -548,7 +569,7 @@ leria as duas como um campo só, e um desenho de dez traços viraria quatro
 A leitura daquela zona é outra, mora em `flow/`, e o resultado é **um** registro
 — o desenho montado — em vez de um por linha.
 
-### 31. Prazo é dia do calendário, no fuso de casa
+### 32. Prazo é dia do calendário, no fuso de casa
 
 `new Date('2026-09-30')` é lido como **UTC** e, no Brasil, volta como dia 29. Um
 prazo que anda um dia pra trás sozinho destrói a confiança na lista inteira — e
@@ -626,6 +647,7 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | A pilha é esvaziada ao trocar de página | Voltar numa folha e ver sumir algo de outra seria pior que não ter voltar |
 | Caixa pode ser feita de vários traços | Com caneta, levantar a mão num canto é o normal. Exigir um traço fechado era exigir um jeito de desenhar que ninguém usa |
 | Ponta de seta tem que parecer ponta de seta | Ela decide a DIREÇÃO: errar uma inverte a seta e reorganiza o desenho inteiro. Letra pequena perto da ponta do traço não serve |
+| Seta se mede pelo VÃO que atravessa, não por um comprimento fixo | Um número fixo tem que servir a um vão de 30px e a um de 300; alto perde as ligações curtas, baixo aceita qualquer rabisco |
 | O painel sabe mostrar o que ENTENDEU, não só o resultado | Cinco rodadas de "não funcionou" com números que diziam que errava, mas não onde. Um print da vista "Como eu li" responde de uma vez |
 | Encaixe de seta curto, com guardas em vez de folga apertada | Folga grande fazia a área de encaixe de uma caixa encostar na da vizinha; apertar demais perdeu ligações de verdade. Quem segura o falso positivo são as guardas (traço dentro de caixa nunca é seta, traço curto também não) |
 | A estrutura aparece antes dos nomes | Esperar o reconhecedor passar em 15 caixas é mais de um minuto de tela parada; o que se quer ver é o desenho, e o nome é enfeite que chega depois |

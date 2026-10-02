@@ -45,8 +45,16 @@ import type { ShapeKind } from './shapes'
  */
 const SNAP = 26
 
-/** Traço mais curto que isto não é seta: é letra, acento, pingo. */
-const MIN_EDGE_LENGTH = 26
+/**
+ * Traço mais curto que isto não é seta nem num vão minúsculo: é pingo.
+ *
+ * Baixo de propósito. Era 26, e isso cortava justamente as ligações mais
+ * curtas do desenho — entre duas caixas quase encostadas, o tiquinho que as
+ * liga tem vinte e poucos píxeis. Quatro ligações se perderam assim, e cada
+ * uma partiu a corrente num pedaço novo. Quem separa seta de letra não é o
+ * comprimento absoluto: é `atravessaOVao`, logo abaixo.
+ */
+const MIN_EDGE_LENGTH = 10
 
 /** Traço menor que isto, perto do fim de uma seta, é ponta de seta. */
 const ARROWHEAD_SIZE = 46
@@ -220,6 +228,7 @@ export function buildGraph(strokes: readonly FlowStroke[]): FlowGraph {
     const origem = caixaEm(caixas, s.points[0])
     const destino = caixaEm(caixas, s.points[s.points.length - 1])
     if (!origem || !destino || origem.id === destino.id) continue
+    if (!atravessaOVao(origem, destino, s.points[0], s.points[s.points.length - 1])) continue
 
     edges.push({
       id: s.id,
@@ -414,6 +423,24 @@ export function chainOpenStrokes(
   }
 
   return cadeias
+}
+
+/**
+ * O traço atravessa mesmo o vão entre as duas caixas?
+ *
+ * É esta a pergunta que separa uma seta de um rabisco perdido no meio do
+ * caminho — e ela se mede pela GEOMETRIA DO DESENHO, não por um número fixo.
+ * Um limite fixo tem que servir a um vão de 30px e a um de 300, e não serve:
+ * alto demais perde as ligações curtas, baixo demais aceita qualquer coisa.
+ *
+ * Aqui a régua é o próprio vão: quem liga duas caixas quase encostadas precisa
+ * de pouco; quem liga duas caixas distantes precisa percorrer o caminho.
+ */
+function atravessaOVao(a: FlowNode, b: FlowNode, p0: Pt, p1: Pt): boolean {
+  const vaoX = Math.max(0, Math.max(a.bounds.minX - b.bounds.maxX, b.bounds.minX - a.bounds.maxX))
+  const vaoY = Math.max(0, Math.max(a.bounds.minY - b.bounds.maxY, b.bounds.minY - a.bounds.maxY))
+  const vao = Math.hypot(vaoX, vaoY)
+  return dist(p0, p1) >= Math.max(MIN_EDGE_LENGTH, vao * 0.5)
 }
 
 /**
