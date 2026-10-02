@@ -1,7 +1,7 @@
 import type { Bounds, Id, Stroke } from '../domain/types'
 import type { Pt } from '../lib/geometry'
 import { boundsContain, boundsOf, dist, padBounds, pathLength, pointToSegment } from '../lib/geometry'
-import { classifyShape, isClosedPath } from './shapes'
+import { classifyShape, countCorners, isClosedPath } from './shapes'
 import type { ShapeKind } from './shapes'
 
 /**
@@ -33,8 +33,17 @@ import type { ShapeKind } from './shapes'
 
 // ─── Medidas da leitura (px de página) ───────────────────────────────────────
 
-/** Folga pra considerar que a ponta da seta "encostou" na caixa. */
-const SNAP = 34
+/**
+ * Folga pra considerar que a ponta da seta "encostou" na caixa.
+ *
+ * Pequena de propósito. Era 34, e com caixas a 35px uma da outra isso fazia a
+ * área de encaixe de uma encostar na da outra: traço de letra perto da borda
+ * virava seta entre as duas. Quem desenha uma seta encosta nas caixas.
+ */
+const SNAP = 14
+
+/** Traço mais curto que isto não é seta: é letra, acento, pingo. */
+const MIN_EDGE_LENGTH = 26
 
 /** Traço menor que isto, perto do fim de uma seta, é ponta de seta. */
 const ARROWHEAD_SIZE = 46
@@ -181,14 +190,34 @@ export function buildGraph(strokes: readonly FlowStroke[]): FlowGraph {
     (s) => !usados.has(s.id) && !dentroDeCaixa.has(s.id) && !isClosedPath(s.points),
   )
 
-  // 2. Setas: traço aberto com as duas pontas em caixas diferentes.
+  /*
+   * 2. Setas — e aqui o rigor é o que decide tudo.
+   *
+   * Num fluxograma de verdade as caixas ficam a poucos píxeis umas das outras.
+   * Com uma folga de encaixe generosa, a área de encaixe de uma caixa encosta
+   * na da vizinha: aí QUALQUER traço de letra perto da borda tem as duas
+   * pontas "em caixas diferentes" e vira seta. O desenho sai com setas que
+   * ninguém fez, e o arranjo vira uma árvore no lugar da corrente.
+   *
+   * Três exigências, por isso:
+   *
+   * 1. o traço precisa SAIR das duas caixas — quem fica inteiro dentro de uma
+   *    é letra, por mais perto da borda que esteja
+   * 2. precisa ter comprimento de seta, não de letra
+   * 3. as pontas precisam estar em caixas diferentes, cada uma dentro ou a
+   *    poucos píxeis da sua
+   */
   const edges: FlowEdge[] = []
   const ligacoes = new Set<Id>()
   for (const s of abertos) {
     if (s.points.length < 2) continue
+    if (pathLength(s.points) < MIN_EDGE_LENGTH) continue
+    if (dentroDeAlgumaCaixa(caixas, s.points)) continue
+
     const origem = caixaEm(caixas, s.points[0])
     const destino = caixaEm(caixas, s.points[s.points.length - 1])
     if (!origem || !destino || origem.id === destino.id) continue
+
     edges.push({
       id: s.id,
       from: origem.id,
@@ -203,12 +232,30 @@ export function buildGraph(strokes: readonly FlowStroke[]): FlowGraph {
 
   const sobrando = strokes.filter((s) => !usados.has(s.id))
 
-  // 3. Pontas de seta — e é delas que vem a direção de verdade.
+  /*
+   * 3. Pontas de seta — e é delas que vem a direção de verdade.
+   *
+   * Exatamente por mandarem na direção, uma ponta errada é cara: ela INVERTE a
+   * seta. Num fluxograma em corrente, meia dúzia de setas invertidas vira uma
+   * árvore de cinco raízes, e o desenho montado não se parece com o desenhado.
+   *
+   * Foi o que aconteceu: de treze setas, onze "acharam ponta". O desenho do
+   * usuário quase não tinha ponta nenhuma — o que estava sendo pego era a
+   * LETRA da caixa logo acima ou logo abaixo, pequena e perto da ponta do
+   * traço. Daí as duas exigências novas:
+   *
+   * - ponta de seta não mora DENTRO de uma caixa; letra, sim
+   * - ponta de seta tem um bico: um ou dois cantos vivos, e não é fechada
+   */
   const pontas = new Set<Id>()
   for (const s of sobrando) {
     const b = boundsOf(s.points)
     const tamanho = Math.hypot(b.maxX - b.minX, b.maxY - b.minY)
     if (tamanho > ARROWHEAD_SIZE) continue
+    if (dentroDeAlgumaCaixa(caixas, s.points)) continue
+    if (isClosedPath(s.points)) continue
+    const bicos = countCorners(s.points, false)
+    if (bicos < 1 || bicos > 2) continue
     const centro = { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 }
 
     for (const e of edges) {
@@ -364,6 +411,18 @@ export function chainOpenStrokes(
   }
 
   return cadeias
+}
+
+/**
+ * O traço inteiro cabe dentro de alguma caixa?
+ *
+ * Se cabe, é letra — não interessa que as pontas estejam perto da vizinha.
+ * É esta pergunta que separa a palavra escrita rente à borda de baixo de uma
+ * seta de verdade saindo dali.
+ */
+function dentroDeAlgumaCaixa(caixas: readonly FlowNode[], pontos: readonly Pt[]): boolean {
+  const b = boundsOf(pontos)
+  return caixas.some((c) => boundsContain(c.bounds, b))
 }
 
 /** A caixa em que este ponto encosta (dentro, ou a menos de `SNAP` da borda). */

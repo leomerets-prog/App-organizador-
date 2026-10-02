@@ -507,6 +507,91 @@ function interpolarReta(a: { x: number; y: number }, b: { x: number; y: number }
 
 casos.push(
   {
+    /*
+     * O defeito mais caro de todos: de 13 setas, 11 "acharam ponta" num
+     * desenho que quase não tinha ponta nenhuma. O que estava sendo pego era a
+     * LETRA da caixa vizinha — pequena e perto da ponta do traço. E ponta
+     * errada INVERTE a seta: meia dúzia de inversões vira a corrente numa
+     * árvore de cinco raízes.
+     */
+    nome: 'letra perto da ponta do traço não inverte a seta',
+    rodar() {
+      const a = traco(retangulo(100, 100, 300, 90))
+      const b = traco(retangulo(100, 240, 300, 90))
+      const seta = traco(reta(250, 192, 250, 238))
+      /*
+       * UMA letra da primeira linha da caixa de baixo, logo abaixo de onde a
+       * seta chega. Pequena (uns 28px) e a menos de 30px da ponta — que é
+       * exatamente o perfil que o leitor tomava por ponta de seta.
+       */
+      const letra = traco([
+        ...reta(245, 250, 258, 250, 4),
+        ...reta(258, 250, 251, 268, 4),
+        ...reta(251, 268, 263, 268, 4),
+      ])
+      const g = buildGraph([a, b, seta, letra])
+
+      if (g.edges.length !== 1) return `${g.edges.length} setas`
+      if (g.edges[0].direcao === 'ponta') return 'a letra foi tomada por ponta de seta'
+      if (g.edges[0].from !== a.id || g.edges[0].to !== b.id) return 'a seta saiu invertida'
+      return null
+    },
+  },
+  {
+    nome: 'ponta de seta de verdade continua mandando na direção',
+    rodar() {
+      const a = traco(retangulo(100, 100, 300, 90))
+      const b = traco(retangulo(100, 240, 300, 90))
+      // Desenhada de baixo pra cima, com o bico lá embaixo, no vão.
+      const seta = traco(reta(250, 238, 250, 192))
+      const bico = traco([...reta(240, 228, 250, 240, 4), ...reta(250, 240, 260, 228, 4)])
+      const g = buildGraph([a, b, seta, bico])
+
+      if (g.edges.length !== 1) return `${g.edges.length} setas`
+      if (g.edges[0].direcao !== 'ponta') return 'não achou a ponta de verdade'
+      if (g.edges[0].from !== a.id || g.edges[0].to !== b.id) return 'a direção saiu errada'
+      return null
+    },
+  },
+  {
+    /*
+     * O defeito que transformou a corrente do usuário numa árvore de cinco
+     * raízes: caixas a 35px uma da outra, e a letra escrita rente à borda de
+     * baixo tinha as duas pontas "em caixas diferentes". Treze setas saíram,
+     * mas ligando o que ninguém ligou.
+     */
+    nome: 'letra rente à borda não vira seta entre caixas vizinhas',
+    rodar() {
+      const a = traco(retangulo(100, 100, 300, 90))
+      const b = traco(retangulo(100, 225, 300, 90)) // 35px abaixo
+      // Uma palavra escrita bem no pé da caixa de cima.
+      const letra = traco(palavra(130, 180, 180))
+      const seta = traco(reta(250, 192, 250, 223))
+      const g = buildGraph([a, b, letra, seta])
+
+      if (g.edges.length !== 1) {
+        return `${g.edges.length} setas, esperava 1 (a letra virou seta)`
+      }
+      if (g.edges[0].strokeId !== seta.id) return 'a seta encontrada não é a seta'
+      const caixaA = g.nodes.find((n) => n.id === a.id)
+      return caixaA?.labelStrokeIds.includes(letra.id) ? null : 'a letra não ficou com a caixa'
+    },
+  },
+  {
+    nome: 'uma corrente de caixas sai como corrente, não como árvore',
+    rodar() {
+      const { strokes } = desenhoDoUsuario()
+      const g = buildGraph(strokes)
+      // Numa corrente só a primeira caixa não recebe seta.
+      const recebe = new Set(g.edges.map((e) => e.to))
+      const raizes = g.nodes.filter((n) => !recebe.has(n.id))
+      if (raizes.length !== 1) return `${raizes.length} caixas sem seta chegando, esperava 1`
+      const saem = new Set(g.edges.map((e) => e.from))
+      const folhas = g.nodes.filter((n) => !saem.has(n.id))
+      return folhas.length === 1 ? null : `${folhas.length} caixas sem seta saindo, esperava 1`
+    },
+  },
+  {
     // ESTE é o caso que faltava. Quase ninguém desenha um retângulo sem
     // levantar a caneta, e um lado solto não é caixa nenhuma.
     nome: 'caixa desenhada em dois traços ainda é uma caixa',

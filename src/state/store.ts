@@ -368,11 +368,17 @@ async function aplicarPasso(
   get().scheduleFieldSync()
 }
 
-/** Prazo da leitura dos nomes inteira. Passou disso, o resto fica em branco. */
-const PRAZO_NOMES = 25_000
+/**
+ * Prazo da leitura dos nomes inteira.
+ *
+ * Generoso porque ninguém está esperando: o fluxograma já está na tela e os
+ * nomes vão caindo dentro das caixas. Era 25s, e com caixas de trinta traços
+ * de letra isso não dava pra nenhuma — "li 0 nomes".
+ */
+const PRAZO_NOMES = 180_000
 
 /** Prazo de UMA caixa. Uma chamada presa não pode segurar as outras treze. */
-const PRAZO_CAIXA = 6_000
+const PRAZO_CAIXA = 12_000
 
 /**
  * Lê o nome de cada caixa, com o fluxograma já na tela.

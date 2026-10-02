@@ -481,7 +481,31 @@ feito do jeito mais limpo possível — e foi exatamente por onde o recurso
 quebrou com gente de verdade. Teste de desenho precisa imitar a MÃO, não a
 geometria.
 
-### 27. A estrutura aparece antes dos nomes
+### 27. Ponta de seta errada INVERTE a seta — e vira a leitura do avesso
+
+O caso mais caro desta série, e o mais difícil de ver. O painel do usuário
+dizia: 15 caixas, 13 setas, **2 setas sem ponta desenhada**. Ou seja, o leitor
+achou ponta em ONZE — num desenho que quase não tinha ponta nenhuma.
+
+O que estava sendo pego era a **letra** da caixa vizinha: pequena, e a poucos
+píxeis da ponta do traço. E como é a ponta que decide a direção, metade das
+setas saía invertida. Uma corrente de catorze caixas virou uma árvore de cinco
+raízes — o desenho montado não se parecia nada com o desenhado, e de fora
+parecia "não funcionou" de novo.
+
+Hoje uma ponta de seta precisa parecer uma: **não mora dentro de uma caixa**
+(letra mora), **não é fechada**, e **tem bico** — um ou dois cantos vivos.
+
+Duas lições, as duas caras:
+
+- **Sinal que inverte sentido precisa ser muito mais exigente que sinal que
+  só acrescenta.** Uma caixa a mais é um erro visível e local; uma seta
+  invertida reorganiza o desenho inteiro
+- **O número que denunciou foi o que ninguém pediu.** "2 setas sem ponta"
+  parecia detalhe; foi o que apontou o defeito. Diagnóstico na tela paga
+  rodadas de adivinhação
+
+### 28. A estrutura aparece antes dos nomes
 
 O fluxograma só era mostrado depois de passar o reconhecedor em CADA caixa.
 Com quinze caixas isso é mais de um minuto de tela parada escrito "lendo os
@@ -499,7 +523,7 @@ enfeite — nome, texto, enriquecimento — chega depois, com a tela já montada
 Segurar a tela inteira pelo acessório mais lento é o jeito mais fácil de
 transformar um recurso que funciona num recurso que "não foi".
 
-### 28. Fluxograma não se lê linha por linha
+### 29. Fluxograma não se lê linha por linha
 
 A zona de fluxograma é a única que `items/detect.ts` ignora (`ZONES_SEM_LINHA`).
 Lá uma caixa e a seta ao lado estão na mesma altura: a identificação por linha
@@ -509,7 +533,7 @@ leria as duas como um campo só, e um desenho de dez traços viraria quatro
 A leitura daquela zona é outra, mora em `flow/`, e o resultado é **um** registro
 — o desenho montado — em vez de um por linha.
 
-### 29. Prazo é dia do calendário, no fuso de casa
+### 30. Prazo é dia do calendário, no fuso de casa
 
 `new Date('2026-09-30')` é lido como **UTC** e, no Brasil, volta como dia 29. Um
 prazo que anda um dia pra trás sozinho destrói a confiança na lista inteira — e
@@ -586,6 +610,8 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Voltar/avançar cobrem só a tinta | Zona, item e ficha a tela já desfaz num toque. "Voltar" precisa significar a mesma coisa toda vez |
 | A pilha é esvaziada ao trocar de página | Voltar numa folha e ver sumir algo de outra seria pior que não ter voltar |
 | Caixa pode ser feita de vários traços | Com caneta, levantar a mão num canto é o normal. Exigir um traço fechado era exigir um jeito de desenhar que ninguém usa |
+| Ponta de seta tem que parecer ponta de seta | Ela decide a DIREÇÃO: errar uma inverte a seta e reorganiza o desenho inteiro. Letra pequena perto da ponta do traço não serve |
+| Encaixe de seta é curto (14px), não generoso | Num fluxograma as caixas ficam a poucos píxeis; folga grande faz a área de encaixe de uma encostar na da outra, e aí qualquer traço vira seta |
 | A estrutura aparece antes dos nomes | Esperar o reconhecedor passar em 15 caixas é mais de um minuto de tela parada; o que se quer ver é o desenho, e o nome é enfeite que chega depois |
 | A leitura mostra os números do que viu | "Não achei caixa nenhuma" é um beco. Com os números, uma foto da tela diz onde parou — e poupa rodadas de adivinhação de parte a parte |
 | O fluxograma lê a folha inteira, não uma zona | O desenho passa de uma folha, o traço guarda a zona de quando foi escrito, e ninguém escolhe o modelo certo antes de desenhar. Geometria basta pra separar caixa, seta e letra |
