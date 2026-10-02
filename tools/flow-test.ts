@@ -3,6 +3,15 @@ import { buildGraph } from '../src/flow/graph'
 import type { FlowStroke } from '../src/flow/graph'
 import { backEdges, layout, levelize } from '../src/flow/layout'
 import { mergeFlowchart } from '../src/flow/merge'
+import {
+  MAX_PASSOS,
+  SEM_HISTORIA,
+  mudou as mudouFlow,
+  push as pushUndo,
+  redo as redoFlow,
+  rotulo as rotuloFlow,
+  undo as undoFlow,
+} from '../src/flow/undo'
 import type { Flowchart } from '../src/domain/types'
 
 /**
@@ -845,6 +854,113 @@ casos.push(
       const r = mergeFlowchart(antes, grafo)
       const e = r.edges.find((x) => x.id === 'e1')
       return e?.from === 'b' && e?.to === 'a' ? null : 'a inversão feita à mão foi desfeita'
+    },
+  },
+)
+
+// ── Voltar e avançar no painel ────────────────────────────────────────────
+
+/** O mesmo fluxograma com uma caixa movida pra outro lugar. */
+function movido(base: Flowchart, x: number): Flowchart {
+  return {
+    ...base,
+    updatedAt: base.updatedAt + 1,
+    nodes: base.nodes.map((n) => (n.id === 'a' ? { ...n, pos: { x, y: 40 } } : n)),
+  }
+}
+
+casos.push(
+  {
+    nome: 'voltar devolve o fluxograma como estava antes do passo',
+    rodar() {
+      const antes = editado()
+      const depois = movido(antes, 900)
+      const pilha = pushUndo(SEM_HISTORIA, antes)
+      const passo = undoFlow(pilha, depois)
+      if (!passo) return 'não havia o que voltar'
+      return passo.chart.nodes.find((n) => n.id === 'a')?.pos?.x === 500
+        ? null
+        : 'a caixa não voltou pro lugar de antes'
+    },
+  },
+  {
+    nome: 'e avançar refaz o que o voltar desfez',
+    rodar() {
+      const antes = editado()
+      const depois = movido(antes, 900)
+      const voltou = undoFlow(pushUndo(SEM_HISTORIA, antes), depois)
+      if (!voltou) return 'não havia o que voltar'
+      const refez = redoFlow(voltou.history, voltou.chart)
+      if (!refez) return 'não havia o que avançar'
+      return refez.chart.nodes.find((n) => n.id === 'a')?.pos?.x === 900
+        ? null
+        : 'o avançar não trouxe de volta a posição nova'
+    },
+  },
+  {
+    /*
+     * A armadilha que fez esta pilha existir do jeito que está: tocar em "azul"
+     * numa caixa que já era azul não pode gastar um passo. Se gastasse, o ↶
+     * seguinte piscaria sem mexer na tela, e quem olha conclui que o desfazer
+     * não funciona — justamente quando ele mais importa.
+     */
+    nome: 'edição que não muda nada não vira passo',
+    rodar() {
+      const a = editado()
+      const igual: Flowchart = { ...a, updatedAt: a.updatedAt + 50 }
+      if (mudouFlow(a, igual)) return 'só o relógio mudou e contou como mudança'
+      // E o contrário: mudança de verdade tem que contar.
+      return mudouFlow(a, movido(a, 900)) ? null : 'mover a caixa não contou como mudança'
+    },
+  },
+  {
+    // Trocar de página troca de fluxograma: aplicar aqui a fotografia de outro
+    // desenho substituiria o que está aberto por algo que nunca esteve nele.
+    nome: 'a pilha de outro fluxograma não vale pra este',
+    rodar() {
+      const outro: Flowchart = { ...editado(), id: 'outro' }
+      const pilha = pushUndo(SEM_HISTORIA, outro)
+      return undoFlow(pilha, editado()) === null ? null : 'voltou usando a pilha do outro desenho'
+    },
+  },
+  {
+    nome: 'a pilha para de crescer no limite',
+    rodar() {
+      let pilha = SEM_HISTORIA
+      for (let i = 0; i < MAX_PASSOS + 15; i++) pilha = pushUndo(pilha, movido(editado(), i))
+      if (pilha.feitos.length !== MAX_PASSOS) return `guardou ${pilha.feitos.length} passos`
+      // O que cai é o mais ANTIGO: o passo de agora precisa estar lá.
+      const topo = pilha.feitos[pilha.feitos.length - 1]
+      return topo.nodes.find((n) => n.id === 'a')?.pos?.x === MAX_PASSOS + 14
+        ? null
+        : 'o passo mais recente se perdeu'
+    },
+  },
+  {
+    nome: 'fazer algo depois de voltar apaga o avançar',
+    rodar() {
+      const antes = editado()
+      const voltou = undoFlow(pushUndo(SEM_HISTORIA, antes), movido(antes, 900))
+      if (!voltou) return 'não havia o que voltar'
+      if (voltou.history.desfeitos.length !== 1) return 'o avançar não ficou guardado'
+      const depois = pushUndo(voltou.history, voltou.chart)
+      return depois.desfeitos.length === 0 ? null : 'o avançar sobreviveu a um passo novo'
+    },
+  },
+  {
+    nome: 'o passo se nomeia sozinho pela comparação',
+    rodar() {
+      const a = editado()
+      if (rotuloFlow(a, movido(a, 900)) !== 'caixa movida') return 'mover não virou "caixa movida"'
+      const semPos: Flowchart = { ...a, nodes: a.nodes.map(({ pos: _f, ...r }) => r) }
+      if (rotuloFlow(a, semPos) !== 'arrumar') return 'arrumar não foi reconhecido'
+      const comCor: Flowchart = {
+        ...a,
+        nodes: a.nodes.map((n) => (n.id === 'a' ? { ...n, cor: 'roxo' as const } : n)),
+      }
+      if (rotuloFlow(a, comCor) !== 'cor') return 'trocar a cor não virou "cor"'
+      const semSeta: Flowchart = { ...a, edges: [] }
+      return rotuloFlow(a, semSeta) === 'ligação tirada' ? null : 'tirar a seta não foi reconhecido'
     },
   },
 )

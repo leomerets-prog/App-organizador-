@@ -49,6 +49,14 @@ import type { Pt } from '../lib/geometry'
 import { buildGraph, toFlowStrokes } from '../flow/graph'
 import { mergeFlowchart } from '../flow/merge'
 import {
+  SEM_HISTORIA,
+  mudou as mudouChart,
+  push as pushChart,
+  redo as redoChart,
+  undo as undoChart,
+} from '../flow/undo'
+import type { FlowHistory } from '../flow/undo'
+import {
   EMPTY_HISTORY,
   applyPatch,
   drawStep,
@@ -216,14 +224,33 @@ export interface AppState {
     patch: { label?: string; kind?: FlowShape; pos?: { x: number; y: number }; cor?: FlowColor },
   ) => Promise<void>
   updateFlowEdge: (chartId: Id, edgeId: Id, patch: { label?: string }) => Promise<void>
-  /** Cria uma caixa no painel, onde o usuário tocou. */
-  addFlowNode: (chartId: Id, pos: { x: number; y: number }) => Promise<void>
+  /**
+   * Cria uma caixa no painel, na forma escolhida na lateral.
+   *
+   * Devolve o id pra quem chamou poder deixá-la já escolhida — uma caixa nova
+   * que nasce longe da vista e sem a barra aberta parece não ter nascido.
+   */
+  addFlowNode: (
+    chartId: Id,
+    pos: { x: number; y: number },
+    kind?: FlowShape,
+  ) => Promise<Id | null>
   removeFlowNode: (chartId: Id, nodeId: Id) => Promise<void>
   /** Liga duas caixas: é assim que se acrescenta uma ramificação. */
   addFlowEdge: (chartId: Id, from: Id, to: Id) => Promise<void>
   removeFlowEdge: (chartId: Id, edgeId: Id) => Promise<void>
   flipFlowEdge: (chartId: Id, edgeId: Id) => Promise<void>
   resetFlowLayout: (chartId: Id) => Promise<void>
+  /**
+   * Voltar e avançar DENTRO do painel.
+   *
+   * Pilha separada da tinta de propósito: no painel "voltar" significa desfazer
+   * uma edição do fluxograma, e na folha significa tirar um traço. Misturar as
+   * duas faria o mesmo botão fazer coisas diferentes conforme a tela aberta.
+   */
+  flowHistory: FlowHistory
+  undoFlow: (chartId: Id) => Promise<void>
+  redoFlow: (chartId: Id) => Promise<void>
   /** Como está a leitura do desenho; é o que a tela mostra enquanto roda. */
   flowStatus: { state: 'parado' | 'lendo' | 'erro'; message: string }
   /** Guarda onde a escuta parou, pra retomar dali na próxima vez. */
@@ -396,8 +423,31 @@ const PRAZO_NOMES = 180_000
  *
  * Todas as edições do painel passam por aqui, pra que nenhuma esqueça de
  * gravar — é a regra da casa do resto do app, aplicada num lugar só.
+ *
+ * E por passarem todas por aqui, é aqui que o DESFAZER se abastece: quem edita
+ * não precisa lembrar de registrar o passo, e nenhuma edição nova nasce sem
+ * desfazer. Passo que não mudaria nada não entra na pilha — ↶ que não faz nada
+ * na tela é pior que ↶ nenhum.
  */
 async function salvarChart(
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+  chart: Flowchart,
+): Promise<void> {
+  const antes = get().flowcharts.find((f) => f.id === chart.id)
+  if (antes && mudouChart(antes, chart)) {
+    set({ flowHistory: pushChart(get().flowHistory, antes) })
+  }
+  await gravarChart(get, set, chart)
+}
+
+/**
+ * O mesmo, sem mexer na pilha de desfazer.
+ *
+ * É por aqui que o próprio ↶ grava: se ele registrasse um passo, voltar
+ * empilharia um passo novo e o ↷ nunca chegaria em lugar nenhum.
+ */
+async function gravarChart(
   get: () => AppState,
   set: (partial: Partial<AppState>) => void,
   chart: Flowchart,
@@ -624,6 +674,7 @@ export const useStore = create<AppState>((set, get) => ({
   recordings: [],
   flowcharts: [],
   flowStatus: { state: 'parado', message: '' },
+  flowHistory: SEM_HISTORIA,
   history: EMPTY_HISTORY,
   sheetHeight: SHEET,
   images: [],
@@ -699,6 +750,9 @@ export const useStore = create<AppState>((set, get) => ({
       ...content,
       loadingPage: false,
       history: forPage(get().history, id),
+      // O desfazer do painel é por fluxograma, e cada folha tem o seu: guardar
+      // as fotografias da folha que saiu só ocuparia memória.
+      flowHistory: SEM_HISTORIA,
       sheetHeight: sheetOf(get().pages.find((p) => p.id === id)),
     })
     // Folhas escritas antes desta versão (ou com a identificação desligada)
@@ -1624,6 +1678,16 @@ export const useStore = create<AppState>((set, get) => ({
     set({
       flowcharts: [...get().flowcharts.filter((f) => f.id !== chart.id), chart],
       flowStatus: { state: 'parado', message: '' },
+      /*
+       * "Ler de novo" é um passo de desfazer como os outros — e o mais
+       * importante deles.
+       *
+       * A junção preserva o que foi editado, mas o resto acompanha a tinta: uma
+       * caixa apagada da folha sai do fluxograma, e quem tocou no botão sem
+       * querer perde o arranjo inteiro. Com a fotografia guardada aqui, ↶
+       * devolve o desenho como estava antes da releitura.
+       */
+      flowHistory: anterior ? pushChart(get().flowHistory, anterior) : get().flowHistory,
     })
     await repo.putFlowchart(chart)
 
@@ -1633,24 +1697,19 @@ export const useStore = create<AppState>((set, get) => ({
   async updateFlowNode(chartId, nodeId, patch) {
     const chart = get().flowcharts.find((f) => f.id === chartId)
     if (!chart) return
-    const atualizado: Flowchart = {
+    await salvarChart(get, set, {
       ...chart,
-      nodes: chart.nodes.map((n) =>
-        n.id === nodeId ? { ...n, ...patch, editado: true } : n,
-      ),
-      updatedAt: Date.now(),
-    }
-    set({ flowcharts: get().flowcharts.map((f) => (f.id === chartId ? atualizado : f)) })
-    await repo.putFlowchart(atualizado)
+      nodes: chart.nodes.map((n) => (n.id === nodeId ? { ...n, ...patch, editado: true } : n)),
+    })
   },
 
-  async addFlowNode(chartId, pos) {
+  async addFlowNode(chartId, pos, kind = 'acao') {
     const chart = get().flowcharts.find((f) => f.id === chartId)
-    if (!chart) return
+    if (!chart) return null
     const id = newId()
     const node: FlowChartNode = {
       id,
-      kind: 'acao',
+      kind,
       label: '',
       bounds: { minX: pos.x, minY: pos.y, maxX: pos.x + 200, maxY: pos.y + 80 },
       pos,
@@ -1658,6 +1717,7 @@ export const useStore = create<AppState>((set, get) => ({
       editado: true,
     }
     await salvarChart(get, set, { ...chart, nodes: [...chart.nodes, node] })
+    return id
   },
 
   async removeFlowNode(chartId, nodeId) {
@@ -1725,13 +1785,35 @@ export const useStore = create<AppState>((set, get) => ({
   async updateFlowEdge(chartId, edgeId, patch) {
     const chart = get().flowcharts.find((f) => f.id === chartId)
     if (!chart) return
-    const atualizado: Flowchart = {
+    await salvarChart(get, set, {
       ...chart,
       edges: chart.edges.map((e) => (e.id === edgeId ? { ...e, ...patch } : e)),
-      updatedAt: Date.now(),
-    }
-    set({ flowcharts: get().flowcharts.map((f) => (f.id === chartId ? atualizado : f)) })
-    await repo.putFlowchart(atualizado)
+    })
+  },
+
+  /**
+   * ↶ e ↷ do painel.
+   *
+   * Gravam pelo caminho que NÃO registra passo (`gravarChart`): se voltar
+   * empilhasse um passo novo, a pilha cresceria a cada toque e o ↷ nunca
+   * sairia do lugar.
+   */
+  async undoFlow(chartId) {
+    const chart = get().flowcharts.find((f) => f.id === chartId)
+    if (!chart) return
+    const passo = undoChart(get().flowHistory, chart)
+    if (!passo) return
+    set({ flowHistory: passo.history })
+    await gravarChart(get, set, passo.chart)
+  },
+
+  async redoFlow(chartId) {
+    const chart = get().flowcharts.find((f) => f.id === chartId)
+    if (!chart) return
+    const passo = redoChart(get().flowHistory, chart)
+    if (!passo) return
+    set({ flowHistory: passo.history })
+    await gravarChart(get, set, passo.chart)
   },
 
   // ─── Imagens ───────────────────────────────────────────────────────────────

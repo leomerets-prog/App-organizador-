@@ -1,5 +1,4 @@
-import type { Id } from '../domain/types'
-import type { ShapeKind } from './shapes'
+import type { FlowShape, Id } from '../domain/types'
 
 /**
  * O arranjo: do rabisco pro fluxograma de verdade.
@@ -38,7 +37,7 @@ export const MARGIN = 40
 export interface GraphIn {
   nodes: {
     id: Id
-    kind: ShapeKind
+    kind: FlowShape
     bounds: { minX: number; minY: number; maxX: number; maxY: number }
     /** Posição escolhida à mão; quando existe, manda no arranjo automático. */
     pos?: { x: number; y: number }
@@ -48,7 +47,7 @@ export interface GraphIn {
 
 export interface PlacedNode {
   id: Id
-  kind: ShapeKind
+  kind: FlowShape
   level: number
   x: number
   y: number
@@ -75,8 +74,18 @@ export interface Layout {
   height: number
 }
 
-export function sizeOf(kind: ShapeKind): { w: number; h: number } {
-  return kind === 'decisao' ? { w: DECISION_W, h: DECISION_H } : { w: NODE_W, h: NODE_H }
+/**
+ * O tamanho de cada forma.
+ *
+ * Todas ocupam a mesma caixa, de propósito: um fluxograma com caixas de
+ * tamanhos diferentes se lê como se as maiores importassem mais, e não é isso
+ * que a forma quer dizer. As duas exceções têm motivo de desenho — o losango
+ * estreita no meio, e o cilindro perde altura útil nas duas tampas.
+ */
+export function sizeOf(kind: FlowShape): { w: number; h: number } {
+  if (kind === 'decisao') return { w: DECISION_W, h: DECISION_H }
+  if (kind === 'banco') return { w: NODE_W, h: NODE_H + 22 }
+  return { w: NODE_W, h: NODE_H }
 }
 
 /**

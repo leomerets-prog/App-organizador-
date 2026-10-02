@@ -2306,13 +2306,23 @@ input {
  * O painel do fluxograma montado. Toma a tela como a Central: aqui não se
  * desenha, se confere e se corrige o que o leitor entendeu.
  */
+/*
+ * Coluna, e não grade de linhas contadas.
+ *
+ * Era `grid-template-rows: auto auto auto 1fr auto`: cinco linhas escritas à
+ * mão pra um painel que mostra de quatro a dez filhos, conforme o que haja pra
+ * avisar. Quem fica com a sobra passa a depender de quantos avisos apareceram
+ * naquele momento, que é uma conta que ninguém vai refazer ao acrescentar uma
+ * linha de aviso. Numa coluna, quem fica com a sobra é quem pede a sobra, e
+ * quem pede é a tela de mexer no desenho.
+ */
 .flow-panel {
   position: fixed;
   inset: 0;
   z-index: 24;
   background: var(--bg);
-  display: grid;
-  grid-template-rows: auto auto auto 1fr auto;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
 }
 
@@ -2324,6 +2334,40 @@ input {
   flex-wrap: wrap;
   padding: 12px 18px;
   border-bottom: 1px solid var(--line);
+}
+
+.flow-titulo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* ☰ — esconde a lateral quando a tela é estreita e o desenho é largo. */
+.flow-rail {
+  width: var(--tap);
+  height: var(--tap);
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 17px;
+}
+
+/* Botões que andam juntos (↶ ↷, − % +) ficam colados: são um comando só. */
+.flow-grupo {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.flow-acoes .flow-grupo button {
+  padding: 0 12px;
+  min-width: 46px;
+}
+
+.flow-acoes .flow-zoom {
+  font-variant-numeric: tabular-nums;
+  min-width: 68px;
 }
 
 .flow-topo h2 {
@@ -2409,13 +2453,80 @@ input {
 
 /* O desenho em si fica sempre sobre branco, nos dois temas: ele vai virar
    imagem pra outra pessoa, e precisa ser igual ao que vai sair salvo. */
+/* A lateral e o desenho dividem a sobra da coluna; o desenho fica com ela. */
+.flow-corpo {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.flow-lateral {
+  width: 194px;
+  flex: none;
+  overflow: auto;
+  padding: 12px 10px 20px;
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.flow-lateral h3 {
+  margin: 2px 4px 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+.flow-paleta {
+  display: grid;
+  gap: 6px;
+}
+
+/* Cada forma é o próprio desenho, não um nome: escolher pela figura é o que
+   faz a lateral de um editor de fluxograma funcionar sem ler nada. */
+.flow-paleta button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 4px 8px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  text-align: left;
+}
+
+.flow-paleta button:active {
+  border-color: var(--line);
+  background: var(--surface-2);
+}
+
+/* Cabeçalho que abre e fecha uma seção da lateral. */
+.flow-secao {
+  display: block;
+  width: 100%;
+  margin-top: 16px;
+  padding: 8px 4px;
+  border: none;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  text-align: left;
+}
+
 .flow-tela {
+  flex: 1;
   overflow: auto;
   padding: 20px;
-  display: grid;
-  place-items: start center;
   background: var(--surface-2);
   min-height: 0;
+  min-width: 0;
 }
 
 .flow-svg {
@@ -2470,9 +2581,14 @@ input {
   gap: 6px;
 }
 
+/* Trocar a forma do que está escolhido: a figura, e não o nome dela, pelo
+   mesmo motivo da lateral — e porque seis nomes não cabem numa barra. */
 .flow-formas button {
+  display: grid;
+  place-items: center;
+  width: var(--tap);
   height: var(--tap);
-  padding: 0 12px;
+  padding: 0;
   border-radius: 9px;
   border: 1px solid var(--line);
   background: var(--surface-2);
@@ -2536,36 +2652,44 @@ input {
   outline-offset: 2px;
 }
 
+/* A lista de setas, na lateral: uma por linha, com o nome tomando a largura e
+   as duas ações no fim. Embaixo do desenho ela crescia pros lados e comia a
+   tela de quem estava mexendo nas caixas. */
+.flow-setas {
+  display: grid;
+  gap: 4px;
+  padding: 4px 0 0;
+}
+
+.flow-setas p {
+  margin: 4px;
+  font-size: 12px;
+}
+
 .flow-seta-item {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
+}
+
+.flow-seta-nome {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
 }
 
 .flow-seta-acao {
-  width: 34px;
-  height: 34px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--surface-2);
-  color: var(--text-dim);
-  font-size: 13px;
-}
-
-.flow-setas {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 10px 18px;
-  border-top: 1px solid var(--line);
-  font-size: 12px;
+  width: 32px;
+  flex: none;
 }
 
 .flow-setas button {
   height: 34px;
-  padding: 0 12px;
-  border-radius: 999px;
+  padding: 0 10px;
+  border-radius: 9px;
   border: 1px solid var(--line);
   background: var(--surface-2);
   color: var(--text-dim);

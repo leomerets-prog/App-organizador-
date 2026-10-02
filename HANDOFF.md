@@ -623,6 +623,72 @@ Por isso a conversão do campo de data é feita a dedo, campo a campo, em
 `inicioDoDia`/`fimDoDia` (em `items/central.ts`), nunca comparação de instantes
 crus. **Não troque nada disso por `toISOString()` nem por `Date.parse`.**
 
+### 35. Medida de gesto tirada ANTES da régua mudar
+
+Parente da armadilha 31, e foi o que sobrou dela. O arrasto congelava a tela
+num tamanho **maior** que o atual (`+700`) pra ter onde soltar a caixa. Isso
+trocava a régua no instante do toque: a distância entre o dedo e o canto da
+caixa tinha sido medida com a régua velha e passava a ser usada com a nova. A
+caixa não ficava lenta nem rápida — ela **pulava** no primeiro movimento e
+seguia o dedo dali em diante, deslocada. De fora, "não consigo arrastar
+livremente pra onde eu quero".
+
+Dois consertos, e os dois valem como regra:
+
+1. **A folga de arrastar existe o tempo todo** (`FOLGA`, na conta do tamanho da
+   tela), e não só durante o arrasto. Congelar passa a congelar no tamanho que
+   a tela já tem — nada muda no instante do toque
+2. **A distância dedo↔caixa é medida no PRIMEIRO MOVIMENTO**, com a régua que
+   está valendo, e não no `pointerdown`
+
+**A regra:** nenhuma medida de gesto pode atravessar uma troca de régua. Ou se
+mede depois da troca, ou não se troca.
+
+O caso do navegador mede o passeio **com o dedo ainda encostado** — depois de
+soltar, a tela se reajusta e a conta deixaria de falar do que está sendo
+testado — e a folga é de 8px de propósito: com o defeito o pulo era de uns
+24px, e uma folga generosa deixaria passar justamente o que o usuário sentia.
+
+### 36. Desfazer do painel é FOTOGRAFIA, não remendo
+
+A tinta (`ink/history.ts`) guarda os dois lados de cada passo porque um traço
+pesa. O fluxograma é outra coisa: uma dúzia de caixas e uma dúzia de setas — o
+desenho inteiro é menor que UM traço. Então cada passo guarda o fluxograma
+inteiro (`flow/undo.ts`).
+
+Isso compra o que importa: **"Ler de novo" vira um passo como qualquer outro.**
+Remontar a partir da tinta não tem operação inversa pra calcular; com a
+fotografia, voltar é devolver a que está guardada. E é o passo que mais precisa
+disso — a remontagem respeita o que foi editado, mas o resto acompanha a folha,
+e quem tocar no botão sem querer perderia o arranjo.
+
+Duas coisas que parecem detalhe e não são:
+
+- **Passo que não muda nada não entra na pilha.** Tocar em "azul" numa caixa
+  que já era azul e depois apertar ↶ mostraria o botão piscar e a tela parada —
+  e a conclusão é que o desfazer não funciona. Quem grava compara a
+  `assinatura` dos dois lados (que ignora `updatedAt` de propósito: ele muda a
+  cada gravação e faria toda gravação parecer mudança)
+- **O ↶ grava pelo caminho que NÃO registra passo** (`gravarChart`). Se
+  registrasse, voltar empilharia um passo novo e o ↷ nunca sairia do lugar
+
+Toda edição do painel passa por `salvarChart`, e é por isso que nenhuma precisa
+lembrar de registrar o passo — nem de se nomear: o nome do passo ("caixa
+movida", "cor") sai da comparação das duas fotografias.
+
+### 37. O que se pode ESCOLHER é mais do que o que se pode ADIVINHAR
+
+`ShapeKind` (`flow/shapes.ts`) são as três formas que a leitura sabe reconhecer
+num rabisco: retângulo, losango e cantos redondos se separam pela geometria do
+traço. `FlowShape` (`domain/types.ts`) é maior — tem também paralelogramo,
+documento e cilindro, que são convenção de fluxograma mas que **ninguém desenha
+à mão de um jeito que dê pra separar de um retângulo torto**.
+
+Por isso as duas listas são diferentes, e `flow/layout.ts` fala a maior. Não
+tente ensinar a leitura a adivinhar as três novas: o preço de errar uma forma é
+alto (ela muda o sentido do passo) e o ganho é zero — escolher na lateral custa
+um toque.
+
 ---
 
 ## Mapa do código
@@ -636,7 +702,8 @@ src/
                filtro, busca, resumo, ordem e faixas de prazo (central)
   audio/       gravação, contas do tocador (playback) e salvar pra fora (export)
   flow/        leitura do fluxograma: formas (shapes), grafo (graph), arranjo
-               (layout) e a junção com o que foi editado (merge)
+               (layout), a junção com o que foi editado (merge) e o voltar/
+               avançar do painel (undo)
   ocr/         transcrição da letra (ponte com o plugin Android)
   zones/       em que zona um ponto caiu, e a edição das faixas
   db/          IndexedDB (versão 3: traços, zonas, itens, áudio, imagens,
@@ -695,6 +762,14 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Nenhuma régua muda enquanto o dedo está encostado | A tela que se ajusta sozinha + arrasto = laço de realimentação. Travou o app no primeiro arrasto de verdade |
 | Limite de gesto se mede em píxeis DE TELA | Em píxeis do desenho, um fluxograma reduzido faz seis píxeis virarem dois de dedo, e nenhum toque conta como toque |
 | Tocar escolhe, arrastar move — o mesmo gesto | Separar em dois modos obrigaria a escolher o modo antes de saber o que se quer fazer. Quem solta sem andar escolheu; quem andou, moveu |
+| Nenhuma medida de gesto atravessa uma troca de régua | Medir a distância dedo↔caixa antes de congelar a tela e usá-la depois fazia a caixa pular no primeiro movimento. A folga de arrastar existe o tempo todo, pra que nada mude no instante do toque |
+| O desfazer do painel guarda o fluxograma INTEIRO | Ele é menor que um traço, e assim "Ler de novo" vira um passo como os outros — remontar não tem operação inversa pra calcular |
+| Edição que não muda nada não vira passo | ↶ que pisca sem mexer na tela é pior que ↶ nenhum: quem vê conclui que o desfazer não funciona |
+| Zoom em degraus, não em pinça | No tablet a pinça briga com o arrasto da caixa; o mesmo dedo não pode significar as duas coisas |
+| O degrau do zoom sai do tamanho MEDIDO na tela | Em "Caber" não existe número escolhido, e supor um fazia o + não mudar nada num fluxograma que já cabia em tamanho real |
+| As formas moram numa lateral, como num editor de fluxograma | Pedido com a tela do draw.io na mão. Escolher pela figura, e não pelo nome, é o que faz a lateral funcionar sem ler nada |
+| A lista de setas é da lateral, e nasce fechada | Embaixo do desenho ela comia o espaço de mexer no fluxo, que é o que o painel existe pra fazer |
+| Painel em COLUNA, não em grade de linhas contadas | `grid-template-rows` com cinco linhas pra um painel que mostra de quatro a dez filhos faz "quem fica com a sobra" depender de quantos avisos apareceram |
 | "Ligar" é a única ação de dois tempos, e se anuncia | Toda ação que espera um segundo toque precisa dizer na tela o que está esperando, senão vira um modo invisível |
 | Posição arrastada manda no arranjo automático | O arranjo acerta a estrutura; quem sabe o que fica bem ao lado de quê é quem desenhou |
 | Seta se mede pelo VÃO que atravessa, não por um comprimento fixo | Um número fixo tem que servir a um vão de 30px e a um de 300; alto perde as ligações curtas, baixo aceita qualquer rabisco |

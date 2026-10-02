@@ -242,8 +242,25 @@ export interface Recording {
 
 // ─── Fluxograma ──────────────────────────────────────────────────────────────
 
-/** Retângulo (ação), losango (decisão), redondo (início/fim). */
-export type FlowShape = 'acao' | 'decisao' | 'terminal'
+/**
+ * As formas que uma caixa pode ter.
+ *
+ * As três primeiras são as que a LEITURA sabe reconhecer num rabisco
+ * (`flow/shapes.ts`): retângulo, losango e cantos redondos se distinguem pela
+ * geometria do traço. As outras vêm da lateral do painel, escolhidas à mão —
+ * paralelogramo, documento e cilindro são convenção de fluxograma, mas ninguém
+ * desenha os três de um jeito que dê pra separar de um retângulo torto.
+ *
+ * Por isso a lista é maior que a de `ShapeKind`: o que se pode ESCOLHER é mais
+ * do que o que se pode ADIVINHAR.
+ */
+export type FlowShape =
+  | 'acao'
+  | 'decisao'
+  | 'terminal'
+  | 'dados'
+  | 'documento'
+  | 'banco'
 
 export interface FlowChartNode {
   id: Id
