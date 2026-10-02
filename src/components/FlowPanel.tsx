@@ -49,8 +49,15 @@ const CORES: Record<FlowColor, { borda: string; fundo: string; nome: string }> =
 
 const CORES_LISTA = Object.keys(CORES) as FlowColor[]
 
-/** Quanto o dedo pode escorregar e o toque ainda contar como toque. */
-const TOQUE = 6
+/**
+ * Quanto o dedo pode escorregar e o toque ainda contar como toque.
+ *
+ * Medido em píxeis DE TELA, não do desenho. Com o fluxograma reduzido pra
+ * caber na largura, seis píxeis de desenho viram dois de dedo — e aí nenhum
+ * toque de gente conta como toque: tudo vira arrasto, e a barra de edição
+ * nunca abre. Foi o que aconteceu no tablet.
+ */
+const TOQUE = 14
 
 const TEXTO = '#111827'
 const SETA = '#4b5563'
@@ -74,6 +81,16 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
   const [ligandoDe, setLigandoDe] = useState<string | null>(null)
   /** Posição ao vivo durante o arrasto, antes de gravar. */
   const [arrastando, setArrastando] = useState<{ id: string; x: number; y: number } | null>(null)
+  /**
+   * Tamanho da tela CONGELADO enquanto se arrasta.
+   *
+   * Sem isto o arrasto entra num laço: a caixa anda pra fora, a tela cresce
+   * pra caber, o SVG encolhe pra caber na largura, o mesmo dedo passa a valer
+   * mais píxeis de desenho, a caixa anda mais, a tela cresce de novo. O app
+   * trava sem fechar. Congelando o tamanho, a régua para de se mexer no meio
+   * do movimento — e o desenho se ajusta de uma vez quando o dedo solta.
+   */
+  const [telaCongelada, setTelaCongelada] = useState<{ w: number; h: number } | null>(null)
   const [editando, setEditando] = useState<string | null>(null)
   const [rascunho, setRascunho] = useState('')
   const [salvo, setSalvo] = useState<string | null>(null)
@@ -159,6 +176,10 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
     const inicio = paraDesenho(e)
     if (!inicio) return
     const deslocamento = { x: inicio.x - posto.x, y: inicio.y - posto.y }
+    // Onde o dedo encostou, em píxeis de TELA — é por esta medida que se
+    // decide se foi toque ou arrasto.
+    const naTela = { x: e.clientX, y: e.clientY }
+    setTelaCongelada({ w: arranjo.width + 700, h: arranjo.height + 700 })
     const alvo = e.currentTarget as unknown as HTMLElement
     try {
       // Captura: sem ela o dedo que sai de cima da caixa larga o arrasto no
@@ -178,10 +199,10 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
       p.x = ev.clientX
       p.y = ev.clientY
       const d = p.matrixTransform(ctm.inverse())
+      if (!andou && Math.hypot(ev.clientX - naTela.x, ev.clientY - naTela.y) < TOQUE) return
+      andou = true
       const x = d.x - deslocamento.x
       const y = d.y - deslocamento.y
-      if (!andou && Math.hypot(x - posto.x, y - posto.y) < TOQUE) return
-      andou = true
       setArrastando({ id: posto.id, x: Math.max(0, x), y: Math.max(0, y) })
     }
 
@@ -189,6 +210,11 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
       alvo.removeEventListener('pointermove', mover)
       alvo.removeEventListener('pointerup', soltar)
       alvo.removeEventListener('pointercancel', soltar)
+      // Rede de segurança: se o dedo sair da caixa e soltar fora dela, é a
+      // janela que avisa. Sem isto a caixa fica grudada no dedo pra sempre.
+      window.removeEventListener('pointerup', soltar)
+      window.removeEventListener('pointercancel', soltar)
+      setTelaCongelada(null)
       setArrastando((atual) => {
         if (atual && atual.id === posto.id) {
           void updateFlowNode(chart.id, posto.id, { pos: { x: atual.x, y: atual.y } })
@@ -201,6 +227,8 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
     alvo.addEventListener('pointermove', mover)
     alvo.addEventListener('pointerup', soltar)
     alvo.addEventListener('pointercancel', soltar)
+    window.addEventListener('pointerup', soltar)
+    window.addEventListener('pointercancel', soltar)
   }
 
   const salvar = async () => {
@@ -331,12 +359,18 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
         <svg
           ref={svgRef}
           className="flow-svg"
-          viewBox={`0 0 ${arranjo.width} ${arranjo.height}`}
-          width={arranjo.width}
-          height={arranjo.height}
+          viewBox={`0 0 ${telaCongelada?.w ?? arranjo.width} ${telaCongelada?.h ?? arranjo.height}`}
+          width={telaCongelada?.w ?? arranjo.width}
+          height={telaCongelada?.h ?? arranjo.height}
           xmlns="http://www.w3.org/2000/svg"
         >
-          <rect x={0} y={0} width={arranjo.width} height={arranjo.height} fill="#ffffff" />
+          <rect
+            x={0}
+            y={0}
+            width={telaCongelada?.w ?? arranjo.width}
+            height={telaCongelada?.h ?? arranjo.height}
+            fill="#ffffff"
+          />
 
           <defs>
             <marker

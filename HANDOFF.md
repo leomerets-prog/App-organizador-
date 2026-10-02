@@ -562,7 +562,29 @@ store. As regras, em ordem:
 Seis casos de teste cercam isso, inclusive os dois lados: o que sobrevive e o
 que tem que sair.
 
-### 31. A estrutura aparece antes dos nomes
+### 31. Arrastar numa tela que se ajusta sozinha é um laço
+
+O app travou (sem fechar) no primeiro arrasto de verdade. A causa é um laço de
+realimentação que não aparece em teste nenhum com o mouse:
+
+> a caixa anda pra fora → a tela cresce pra caber → o SVG encolhe pra caber na
+> largura → **o mesmo dedo passa a valer mais píxeis de desenho** → a caixa anda
+> mais → a tela cresce de novo
+
+A régua se mexia no meio do movimento. Hoje o tamanho da tela é **congelado**
+enquanto o dedo anda (`telaCongelada`), com folga pra onde arrastar, e o
+desenho se ajusta de uma vez quando solta.
+
+E o toque não abria a barra de edição por um parente do mesmo erro: o limite
+de "andou ou não andou" era medido em píxeis DO DESENHO. Com o fluxograma
+reduzido pra caber na largura, seis píxeis de desenho viram dois de dedo — e
+aí nenhum toque de gente conta como toque, tudo vira arrasto. Agora a medida é
+em píxeis DE TELA.
+
+**A regra:** num gesto, toda medida que decide o comportamento tem que estar em
+píxeis de tela, e nenhuma régua pode mudar enquanto o dedo está encostado.
+
+### 32. A estrutura aparece antes dos nomes
 
 O fluxograma só era mostrado depois de passar o reconhecedor em CADA caixa.
 Com quinze caixas isso é mais de um minuto de tela parada escrito "lendo os
@@ -580,7 +602,7 @@ enfeite — nome, texto, enriquecimento — chega depois, com a tela já montada
 Segurar a tela inteira pelo acessório mais lento é o jeito mais fácil de
 transformar um recurso que funciona num recurso que "não foi".
 
-### 32. Fluxograma não se lê linha por linha
+### 33. Fluxograma não se lê linha por linha
 
 A zona de fluxograma é a única que `items/detect.ts` ignora (`ZONES_SEM_LINHA`).
 Lá uma caixa e a seta ao lado estão na mesma altura: a identificação por linha
@@ -590,7 +612,7 @@ leria as duas como um campo só, e um desenho de dez traços viraria quatro
 A leitura daquela zona é outra, mora em `flow/`, e o resultado é **um** registro
 — o desenho montado — em vez de um por linha.
 
-### 33. Prazo é dia do calendário, no fuso de casa
+### 34. Prazo é dia do calendário, no fuso de casa
 
 `new Date('2026-09-30')` é lido como **UTC** e, no Brasil, volta como dia 29. Um
 prazo que anda um dia pra trás sozinho destrói a confiança na lista inteira — e
@@ -670,6 +692,8 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | A pilha é esvaziada ao trocar de página | Voltar numa folha e ver sumir algo de outra seria pior que não ter voltar |
 | Caixa pode ser feita de vários traços | Com caneta, levantar a mão num canto é o normal. Exigir um traço fechado era exigir um jeito de desenhar que ninguém usa |
 | Ponta de seta tem que parecer ponta de seta | Ela decide a DIREÇÃO: errar uma inverte a seta e reorganiza o desenho inteiro. Letra pequena perto da ponta do traço não serve |
+| Nenhuma régua muda enquanto o dedo está encostado | A tela que se ajusta sozinha + arrasto = laço de realimentação. Travou o app no primeiro arrasto de verdade |
+| Limite de gesto se mede em píxeis DE TELA | Em píxeis do desenho, um fluxograma reduzido faz seis píxeis virarem dois de dedo, e nenhum toque conta como toque |
 | Tocar escolhe, arrastar move — o mesmo gesto | Separar em dois modos obrigaria a escolher o modo antes de saber o que se quer fazer. Quem solta sem andar escolheu; quem andou, moveu |
 | "Ligar" é a única ação de dois tempos, e se anuncia | Toda ação que espera um segundo toque precisa dizer na tela o que está esperando, senão vira um modo invisível |
 | Posição arrastada manda no arranjo automático | O arranjo acerta a estrutura; quem sabe o que fica bem ao lado de quê é quem desenhou |
