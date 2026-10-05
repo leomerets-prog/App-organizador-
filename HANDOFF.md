@@ -1055,6 +1055,10 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Tocar escolhe, arrastar move — o mesmo gesto | Separar em dois modos obrigaria a escolher o modo antes de saber o que se quer fazer. Quem solta sem andar escolheu; quem andou, moveu |
 | `touch-action: none` vai no `<svg>`, nunca no que está dentro dele | O navegador ignora a propriedade em elemento de dentro de um SVG. Estava no `<g>` da caixa, não fazia nada, e o gesto da caneta era roubado pra rolar a tela |
 | Um gesto de cada vez, e a caneta não cede ao dedo | A palma encosta antes da ponta. Dois gestos disputando a mesma tela levavam a caixa pro lado errado e depois travavam o painel |
+| Antes de construir o caro e incerto, meça | Transcrever depende do aparelho, não do código. A sonda tenta de verdade e devolve TUDO que descobriu, inclusive em que etapa parou |
+| O app não entende a reunião; quem entende é quem está nela | As marcas de momento dão a linha do tempo sem exigir que o app compreenda nada — e não prometem o que não dá pra cumprir offline |
+| Marca nasce sem nome | Quem está na reunião não para pra escrever. Exigir o nome na hora é garantir que ninguém marque nada |
+| Botão que não se vê não existe | Cada botão novo numa linha de largura fixa empurra o anterior pra fora; já aconteceu três vezes. O caso pergunta se algum controle saiu da caixa |
 | Texto solto é uma FORMA, não uma lista à parte | Herda arrastar, tamanho, cor, desfazer e remontagem de graça. Uma lista própria repetiria tudo isso, com defeitos novos |
 | Botão invisível não se reconhece | O texto solto é quase invisível no desenho, de propósito — mas o ícone dele na lateral precisa mostrar linhas de letra |
 | O título estica o viewBox pra cima, não empurra o desenho | Com `transform`, toda conta de arrasto passaria a precisar descontar o deslocamento, e a primeira que esquecesse jogaria a caixa pra longe do dedo |

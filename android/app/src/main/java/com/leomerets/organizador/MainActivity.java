@@ -33,6 +33,14 @@ public class MainActivity extends BridgeActivity {
         } catch (Throwable error) {
             Log.e(TAG, "organizador: salvar arquivo indisponível neste aparelho", error);
         }
+        // Em try próprio, como os outros: a sonda da fala é o acessório mais
+        // incerto de todos, e é justamente por isso que ela não pode levar o
+        // caderno junto se o aparelho não tiver reconhecedor nenhum.
+        try {
+            registerPlugin(SpeechPlugin.class);
+        } catch (Throwable error) {
+            Log.e(TAG, "organizador: reconhecimento de fala indisponível neste aparelho", error);
+        }
         super.onCreate(savedInstanceState);
     }
 }

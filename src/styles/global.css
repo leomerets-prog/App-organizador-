@@ -870,6 +870,7 @@ input {
 
 .rec-chip {
   display: grid;
+  min-width: 0;
   gap: 6px;
   padding: 8px 10px;
   border-radius: var(--radius);
@@ -882,10 +883,15 @@ input {
   background: var(--accent-soft);
 }
 
+/* Quebra linha, e isto não é enfeite: o cartão tem 340px, e cada botão novo
+   (⚑ Marcar, ⌁ Testar) empurrava o anterior pra fora da vista. Sem a quebra,
+   o ✕ de apagar saía da tela — e um botão que não se vê não existe. */
 .rec-linha {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .rec-play {
@@ -931,6 +937,171 @@ input {
   border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--text);
+  font-weight: 600;
+}
+
+/* A sonda da transcrição. Fica com cara de instrumento, e não de recurso:
+   é um teste, e a tela diz isso. */
+.rec-sonda {
+  flex-shrink: 0;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.rec-sonda-saida {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.rec-sonda-titulo {
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.rec-sonda-titulo span {
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+.rec-sonda-saida ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 2px;
+}
+
+.rec-sonda-andando {
+  margin-top: 6px;
+  color: var(--text-dim);
+}
+
+.rec-sonda-boa {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.rec-sonda-boa p {
+  margin: 6px 0 0;
+}
+
+.rec-sonda-ruim {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--danger);
+}
+
+/* Marcar o momento: mesmo tamanho do Salvar, mas com a cor do acento, porque
+   é o botão usado DURANTE a reunião, com pressa e sem olhar. */
+.rec-marcar {
+  flex-shrink: 0;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* A linha do tempo da reunião. Uma marca por linha, o relógio em destaque:
+   é por ele que se procura o trecho. */
+.rec-marcas {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
+  margin-top: 6px;
+}
+
+.rec-marca {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.rec-marca-ir {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.rec-marca-ir strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.rec-marca-acao {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.rec-marca-editor {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.rec-marca-editor label {
+  display: grid;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.rec-marca-editor input {
+  height: var(--tap);
+  padding: 0 10px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.rec-marca-ok {
+  height: var(--tap);
+  padding: 0 16px;
+  border-radius: 9px;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 14px;
   font-weight: 600;
 }
 

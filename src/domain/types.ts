@@ -238,6 +238,26 @@ export interface Recording {
    * e começa do zero como sempre começou.
    */
   positionMs?: number
+  /**
+   * Momentos marcados na escuta.
+   *
+   * Um toque durante a reunião (ou ouvindo depois) carimba o instante, e o
+   * nome vem quando der. É o que transforma uma hora de áudio numa lista de
+   * assuntos com hora marcada — sem precisar que o app ENTENDA a conversa, que
+   * é coisa que ele não sabe fazer.
+   *
+   * Opcional: gravação antiga simplesmente não tem nenhuma.
+   */
+  marcas?: Marca[]
+}
+
+/** Um momento marcado dentro de uma gravação. */
+export interface Marca {
+  id: Id
+  /** Em que ponto do áudio, em ms desde o começo da gravação. */
+  ms: number
+  /** O que estava acontecendo. Pode nascer vazio e ganhar nome depois. */
+  texto: string
 }
 
 // ─── Fluxograma ──────────────────────────────────────────────────────────────

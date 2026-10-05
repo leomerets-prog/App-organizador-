@@ -12,6 +12,7 @@ import type {
   FlowChartNode,
   FlowColor,
   FlowShape,
+  Marca,
   Porta,
   Recording,
   Section,
@@ -49,6 +50,11 @@ import { eraseAlongSegment } from '../ink/erase'
 import type { Pt } from '../lib/geometry'
 import { buildGraph, toFlowStrokes } from '../flow/graph'
 import { mergeFlowchart } from '../flow/merge'
+import {
+  adicionar,
+  remover as removerMarca,
+  renomear as renomearMarca,
+} from '../audio/marcas'
 import {
   SEM_HISTORIA,
   mudou as mudouChart,
@@ -275,6 +281,15 @@ export interface AppState {
   flowStatus: { state: 'parado' | 'lendo' | 'erro'; message: string }
   /** Guarda onde a escuta parou, pra retomar dali na próxima vez. */
   setRecordingPosition: (id: Id, positionMs: number) => Promise<void>
+  /**
+   * Marcar o momento da escuta, e cuidar das marcas depois.
+   *
+   * Nasce sem nome de propósito: quem está na reunião toca e segue ouvindo.
+   * Exigir o nome na hora é garantir que ninguém marque nada.
+   */
+  marcarMomento: (id: Id, ms: number) => Promise<void>
+  renomearMarca: (id: Id, marcaId: Id, texto: string) => Promise<void>
+  tirarMarca: (id: Id, marcaId: Id) => Promise<void>
 
   addImage: (file: File | Blob, visible: { x: number; y: number; w: number; h: number }) => Promise<void>
   updateImageRect: (id: Id, rect: PageImage['rect']) => Promise<void>
@@ -475,6 +490,18 @@ async function gravarChart(
   const atualizado = { ...chart, updatedAt: Date.now() }
   set({ flowcharts: get().flowcharts.map((f) => (f.id === chart.id ? atualizado : f)) })
   await repo.putFlowchart(atualizado)
+}
+
+/** Grava as marcas: memória primeiro, banco depois — a regra da casa. */
+async function gravarMarcas(
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+  rec: Recording,
+  marcas: Marca[],
+): Promise<void> {
+  const atualizado = { ...rec, marcas }
+  set({ recordings: get().recordings.map((r) => (r.id === rec.id ? atualizado : r)) })
+  await repo.updateRecording(atualizado)
 }
 
 /** Prazo de UMA caixa. Uma chamada presa não pode segurar as outras treze. */
@@ -1647,6 +1674,25 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setActiveRecording: (activeRecordingId) => set({ activeRecordingId }),
+
+  async marcarMomento(id, ms) {
+    const rec = get().recordings.find((r) => r.id === id)
+    if (!rec) return
+    const marcas = adicionar(rec.marcas ?? [], { id: newId(), ms: Math.max(0, Math.round(ms)), texto: '' })
+    await gravarMarcas(get, set, rec, marcas)
+  },
+
+  async renomearMarca(id, marcaId, texto) {
+    const rec = get().recordings.find((r) => r.id === id)
+    if (!rec) return
+    await gravarMarcas(get, set, rec, renomearMarca(rec.marcas ?? [], marcaId, texto))
+  },
+
+  async tirarMarca(id, marcaId) {
+    const rec = get().recordings.find((r) => r.id === id)
+    if (!rec) return
+    await gravarMarcas(get, set, rec, removerMarca(rec.marcas ?? [], marcaId))
+  },
 
   async setRecordingPosition(id, positionMs) {
     const rec = get().recordings.find((r) => r.id === id)

@@ -12,6 +12,9 @@ import {
   worthSaving,
 } from '../audio/playback'
 import { salvarAudio } from '../audio/export'
+import { relogio } from '../audio/marcas'
+import { estadoDaFala, sondaPossivel, tentarTranscrever } from '../audio/fala'
+import type { EstadoDaFala, ResultadoDaFala } from '../audio/fala'
 import { formatRate } from '../state/prefs'
 import { getRecordingBlob } from '../db/repo'
 import { newId } from '../lib/id'
@@ -38,6 +41,48 @@ export function AudioBar() {
   const addRecording = useStore((s) => s.addRecording)
   const removeRecording = useStore((s) => s.removeRecording)
   const setRecordingPosition = useStore((s) => s.setRecordingPosition)
+  const marcarMomento = useStore((s) => s.marcarMomento)
+  const renomearMarca = useStore((s) => s.renomearMarca)
+  const tirarMarca = useStore((s) => s.tirarMarca)
+  /*
+   * A SONDA DA TRANSCRIÇÃO.
+   *
+   * Isto é um teste, e está escrito na tela que é um teste. Transcrever
+   * reunião é caro de construir e o resultado depende do aparelho — então
+   * antes de gastar versões, a pergunta: o tablet dele consegue?
+   */
+  const [sonda, setSonda] = useState<EstadoDaFala | null>(null)
+  const [sondando, setSondando] = useState<string | null>(null)
+  const [sondaResultado, setSondaResultado] = useState<ResultadoDaFala | null>(null)
+
+  const testarTranscricao = async (rec: Recording) => {
+    setSondaResultado(null)
+    setSondando('Perguntando ao aparelho o que ele sabe fazer…')
+    try {
+      const estado = await estadoDaFala()
+      setSonda(estado)
+      if (!estado.ok || !estado.temReconhecedor) {
+        setSondando(null)
+        return
+      }
+      const blob = await getRecordingBlob(rec.id)
+      if (!blob) throw new Error('Não achei o arquivo desta gravação.')
+      const resultado = await tentarTranscrever(blob, (m) => setSondando(m))
+      setSondaResultado(resultado)
+    } catch (err) {
+      setSondaResultado({
+        ok: false,
+        erro: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      setSondando(null)
+    }
+  }
+
+  /** Qual marca está ganhando nome agora. */
+  const [editandoMarca, setEditandoMarca] = useState<
+    { recId: string; marcaId: string; texto: string } | null
+  >(null)
   const audioRate = useStore((s) => s.audioRate)
   const cycleAudioRate = useStore((s) => s.cycleAudioRate)
 
@@ -255,6 +300,24 @@ export function AudioBar() {
     if (loadedId === rec.id && audioRef.current) audioRef.current.currentTime = alvo / 1000
   }
 
+  /**
+   * Levar a escuta pro instante de uma marca.
+   *
+   * Se a gravação não está carregada, carrega e toca: tocar numa marca é
+   * dizer "quero ouvir ISTO", e parar na posição certa sem começar a tocar
+   * obrigaria um segundo toque pra fazer o que já foi pedido.
+   */
+  const irParaMarca = async (rec: Recording, ms: number) => {
+    setPositions((p) => ({ ...p, [rec.id]: ms }))
+    if (loadedId === rec.id && audioRef.current) {
+      audioRef.current.currentTime = ms / 1000
+      if (playingId !== rec.id) await tocar(rec)
+      return
+    }
+    await tocar(rec)
+    if (audioRef.current) audioRef.current.currentTime = ms / 1000
+  }
+
   const salvar = async (rec: Recording) => {
     setError(null)
     setSaved(null)
@@ -301,6 +364,87 @@ export function AudioBar() {
 
       {error && <span className="audio-error">{error}</span>}
 
+      {/*
+        O resultado da sonda, dito por inteiro.
+        
+        Inclusive quando falha, e principalmente quando falha: uma sonda que
+        responde só "não funcionou" não serve pra decidir nada. Versão do
+        Android, se há reconhecedor, se há reconhecedor offline, se o
+        decodificador deu conta e o que o reconhecedor disse.
+      */}
+      {(sondando || sonda || sondaResultado) && (
+        <div className="rec-sonda-saida">
+          <div className="rec-sonda-titulo">
+            Teste de transcrição <span>— isto ainda não é um recurso, é uma medição</span>
+          </div>
+
+          {sonda && (
+            <ul>
+              <li>Android: {sonda.android ?? '?'}</li>
+              <li>Reconhecedor de fala: {sonda.temReconhecedor ? 'sim' : 'NÃO'}</li>
+              <li>
+                Funciona sem internet: {sonda.temOffline ? 'sim' : 'não (ou Android abaixo do 13)'}
+              </li>
+              <li>
+                Aceita ler um arquivo: {sonda.aceitaArquivo ? 'sim' : 'NÃO (Android abaixo do 12)'}
+              </li>
+              {sonda.erro && <li>Erro: {sonda.erro}</li>}
+            </ul>
+          )}
+
+          {sondando && <div className="rec-sonda-andando">{sondando}</div>}
+
+          {sondaResultado && (
+            <div className={sondaResultado.ok ? 'rec-sonda-boa' : 'rec-sonda-ruim'}>
+              {sondaResultado.ok ? (
+                <>
+                  <strong>Transcreveu.</strong>{' '}
+                  {sondaResultado.segundos !== undefined &&
+                    `${Math.round(sondaResultado.segundos)}s de áudio chegaram ao reconhecedor.`}
+                  <p>{sondaResultado.texto}</p>
+                </>
+              ) : (
+                <>
+                  <strong>Não transcreveu</strong>
+                  {sondaResultado.etapa && ` (parou em: ${sondaResultado.etapa})`}.{' '}
+                  {sondaResultado.erro}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Dar nome à marca: um campo só, sobre a lista, como no fluxograma. */}
+      {editandoMarca && (
+        <div className="rec-marca-editor">
+          <label>
+            <span>O que foi dito aqui</span>
+            <input
+              autoFocus
+              value={editandoMarca.texto}
+              onChange={(e) => setEditandoMarca({ ...editandoMarca, texto: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  void renomearMarca(editandoMarca.recId, editandoMarca.marcaId, editandoMarca.texto)
+                  setEditandoMarca(null)
+                }
+                if (e.key === 'Escape') setEditandoMarca(null)
+              }}
+            />
+          </label>
+          <button
+            className="rec-marca-ok"
+            onClick={() => {
+              void renomearMarca(editandoMarca.recId, editandoMarca.marcaId, editandoMarca.texto)
+              setEditandoMarca(null)
+            }}
+          >
+            Pronto
+          </button>
+        </div>
+      )}
+
       <div className="rec-list">
         {recordings.map((rec) => {
           const duracao = duracaoDe(rec)
@@ -331,6 +475,21 @@ export function AudioBar() {
                   {formatRate(audioRate)}
                 </button>
 
+                {/*
+                  Marcar o momento.
+                  
+                  Fica ao lado do ▶ porque é usado COM a reunião acontecendo:
+                  um toque, sem parar de ouvir, sem escrever nada. O nome vem
+                  depois — exigir o nome na hora é garantir que ninguém marque.
+                */}
+                <button
+                  className="rec-marcar"
+                  onClick={() => void marcarMomento(rec.id, posicao)}
+                  title="Marcar este instante da gravação"
+                >
+                  ⚑ Marcar
+                </button>
+
                 <button
                   className="rec-save"
                   onClick={() => void salvar(rec)}
@@ -339,6 +498,19 @@ export function AudioBar() {
                 >
                   {savingId === rec.id ? '…' : '⤓'} Salvar
                 </button>
+
+                {/* Só aparece no aplicativo: no navegador não existe
+                    reconhecedor de fala do Android pra testar. */}
+                {sondaPossivel() && (
+                  <button
+                    className="rec-sonda"
+                    onClick={() => void testarTranscricao(rec)}
+                    disabled={sondando !== null}
+                    title="TESTE: ver se este tablet consegue transcrever o começo desta gravação"
+                  >
+                    ⌁ Testar transcrição
+                  </button>
+                )}
 
                 <button className="rec-del" onClick={() => apagar(rec)} aria-label="Excluir gravação">
                   ✕
@@ -364,6 +536,43 @@ export function AudioBar() {
                   {formatPosition(posicao)} / {formatLength(duracao)}
                 </span>
               </div>
+
+              {/* A linha do tempo da reunião: cada marca leva a escuta pro
+                  instante dela, e o nome se escreve quando der. */}
+              {(rec.marcas?.length ?? 0) > 0 && (
+                <div className="rec-marcas">
+                  {[...(rec.marcas ?? [])]
+                    .sort((a, b) => a.ms - b.ms)
+                    .map((m) => (
+                      <span key={m.id} className="rec-marca">
+                        <button
+                          className="rec-marca-ir"
+                          onClick={() => void irParaMarca(rec, m.ms)}
+                          title="Ouvir a partir daqui"
+                        >
+                          <strong>{relogio(m.ms)}</strong>
+                          {m.texto ? ` ${m.texto}` : ' —'}
+                        </button>
+                        <button
+                          className="rec-marca-acao"
+                          onClick={() => setEditandoMarca({ recId: rec.id, marcaId: m.id, texto: m.texto })}
+                          aria-label="Dar nome a esta marca"
+                          title="Dar nome a esta marca"
+                        >
+                          ✎
+                        </button>
+                        <button
+                          className="rec-marca-acao"
+                          onClick={() => void tirarMarca(rec.id, m.id)}
+                          aria-label="Tirar esta marca"
+                          title="Tirar esta marca"
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))}
+                </div>
+              )}
 
               {saved?.id === rec.id && (
                 <div className="rec-salvo">✓ Salvo — {saved.onde}</div>

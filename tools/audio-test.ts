@@ -1,4 +1,6 @@
 import { limpar } from '../src/audio/export'
+import { adicionar, marcaDe, relogio, remover, renomear } from '../src/audio/marcas'
+import type { Marca } from '../src/domain/types'
 import {
   formatLength,
   formatPosition,
@@ -160,6 +162,76 @@ const casos: Caso[] = [
         return `o resto da limpeza mudou: "${limpar('Ação / Decisão: 50% ou "mais"')}"`
       }
       return limpar('   ') === 'audio' ? null : 'nome vazio deveria cair no padrão'
+    },
+  },
+
+  // ── Momentos marcados na gravação ───────────────────────────────────────
+  {
+    nome: 'a marca entra na ordem do tempo, não na de criação',
+    rodar() {
+      let marcas: Marca[] = []
+      marcas = adicionar(marcas, { id: 'b', ms: 60_000, texto: '' })
+      marcas = adicionar(marcas, { id: 'a', ms: 10_000, texto: '' })
+      marcas = adicionar(marcas, { id: 'c', ms: 30_000, texto: '' })
+      const ordem = marcas.map((m) => m.id).join('')
+      return ordem === 'acb' ? null : `saiu na ordem ${ordem}`
+    },
+  },
+  {
+    /*
+     * O dedo escorrega e o botão recebe dois toques. Duas marcas a trezentos
+     * milissegundos uma da outra não dizem nada diferente — só sujam a lista
+     * que existe pra ser lida de relance.
+     */
+    nome: 'toque repetido não vira duas marcas',
+    rodar() {
+      let marcas: Marca[] = [{ id: 'a', ms: 20_000, texto: '' }]
+      marcas = adicionar(marcas, { id: 'b', ms: 20_300, texto: '' })
+      if (marcas.length !== 1) return `ficaram ${marcas.length} marcas`
+      // Mas uma marca de verdade, longe, entra.
+      marcas = adicionar(marcas, { id: 'c', ms: 25_000, texto: '' })
+      return marcas.length === 2 ? null : 'a marca seguinte não entrou'
+    },
+  },
+  {
+    nome: 'a marca que vale é a última que já passou',
+    rodar() {
+      const marcas: Marca[] = [
+        { id: 'a', ms: 10_000, texto: 'abertura' },
+        { id: 'b', ms: 40_000, texto: 'prazo' },
+      ]
+      if (marcaDe(marcas, 5_000) !== null) return 'antes da primeira deveria ser nenhuma'
+      if (marcaDe(marcas, 39_000)?.id !== 'a') return 'no meio, deveria valer a primeira'
+      // E não a mais PRÓXIMA: a 39s a seta está mais perto de "prazo", mas
+      // "prazo" ainda não começou.
+      return marcaDe(marcas, 41_000)?.id === 'b' ? null : 'depois, deveria valer a segunda'
+    },
+  },
+  {
+    nome: 'tirar e renomear mexem só na marca certa',
+    rodar() {
+      const marcas: Marca[] = [
+        { id: 'a', ms: 1_000, texto: 'um' },
+        { id: 'b', ms: 2_000, texto: 'dois' },
+      ]
+      const renomeada = renomear(marcas, 'b', '  decisão do prazo  ')
+      if (renomeada.find((m) => m.id === 'b')?.texto !== 'decisão do prazo') {
+        return 'o nome não foi gravado sem os espaços'
+      }
+      if (renomeada.find((m) => m.id === 'a')?.texto !== 'um') return 'mexeu na marca errada'
+      const sobrou = remover(renomeada, 'a')
+      return sobrou.length === 1 && sobrou[0].id === 'b' ? null : 'tirou a marca errada'
+    },
+  },
+  {
+    nome: 'o relógio da marca ganha a hora quando passa de uma',
+    rodar() {
+      if (relogio(0) !== '0:00') return `0ms virou ${relogio(0)}`
+      if (relogio(65_000) !== '1:05') return `65s virou ${relogio(65_000)}`
+      if (relogio(3_725_000) !== '1:02:05') return `1h02m05s virou ${relogio(3_725_000)}`
+      // Trunca: a marca aponta pro ponto de voltar, e arredondar pra cima
+      // faria voltar DEPOIS do que se quer ouvir.
+      return relogio(59_900) === '0:59' ? null : `59,9s virou ${relogio(59_900)}`
     },
   },
 ]
