@@ -93,6 +93,27 @@ export async function salvarImagem(blob: Blob, nome: string): Promise<SaveResult
 }
 
 /**
+ * Salvar um texto (hoje, a transcrição da reunião).
+ *
+ * Mesmo caminho do áudio e da imagem, pelo mesmo motivo dito por ele: *"não
+ * posso perder nada dessa conversa"*. Uma transcrição que só existe dentro do
+ * aplicativo morre com o aplicativo — e esta é a que ele vai ter corrigido à
+ * mão, que é o trabalho mais caro de todos de refazer.
+ *
+ * O `﻿` na frente é pra planilha e editor do Windows: sem ele, abrir o
+ * arquivo mostra "reuniÃ£o" em vez de "reunião".
+ */
+export async function salvarTexto(texto: string, nome: string): Promise<SaveResult> {
+  const limpo = limpar(nome.replace(/\.txt$/i, '')) + '.txt'
+  const blob = new Blob(['﻿' + texto], { type: 'text/plain;charset=utf-8' })
+  if (!noAplicativo()) {
+    baixarNoNavegador(blob, limpo)
+    return { onde: 'downloads deste navegador' }
+  }
+  return await enviarEmPedacos(blob, limpo, 'text/plain')
+}
+
+/**
  * Nome do arquivo.
  *
  * Leva o rótulo da gravação (que já é a data e a hora) porque é por ele que o

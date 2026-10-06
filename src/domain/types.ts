@@ -249,6 +249,33 @@ export interface Recording {
    * Opcional: gravação antiga simplesmente não tem nenhuma.
    */
   marcas?: Marca[]
+  /**
+   * O que o reconhecedor de fala ouviu — um RASCUNHO, não um registro.
+   *
+   * Opcional: gravação que nunca foi transcrita simplesmente não tem, e
+   * continua valendo sozinha como sempre valeu.
+   */
+  transcricao?: Transcricao
+}
+
+/**
+ * Uma transcrição da gravação.
+ *
+ * `corrigida` segue a mesma regra do texto manuscrito escrito à mão: correção
+ * do usuário vale mais que qualquer leitura automática e nunca é sobrescrita
+ * sem ele pedir. Ver a própria correção sumir é o que faz alguém parar de
+ * confiar no recurso — e aqui a correção pode ser uma reunião inteira revisada.
+ */
+export interface Transcricao {
+  texto: string
+  /** Quando foi feita, em epoch ms. */
+  em: number
+  /** Quantos segundos de áudio o reconhecedor chegou a ouvir. */
+  segundos?: number
+  /** Quantas palavras do caderno foram entregues como dica. */
+  dicas?: number
+  /** Mexida à mão depois? Então nenhuma transcrição nova passa por cima. */
+  corrigida?: boolean
 }
 
 /** Um momento marcado dentro de uma gravação. */

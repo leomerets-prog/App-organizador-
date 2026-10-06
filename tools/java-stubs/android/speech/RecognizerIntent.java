@@ -23,4 +23,14 @@ public class RecognizerIntent {
      * quando o arquivo acaba — que é o que serve pra transcrever gravação.
      */
     public static final String EXTRA_SEGMENTED_SESSION = "android.speech.extra.SEGMENTED_SESSION";
+    /**
+     * REGRA DE EXECUÇÃO: lista de palavras pras quais o reconhecedor deve
+     * PUXAR o resultado — nomes de pessoas, de setores, siglas. Existe do
+     * Android 13 (API 33) pra cima; abaixo disso é um extra desconhecido e o
+     * reconhecedor ignora sem reclamar.
+     *
+     * Não é vocabulário fechado: ele continua podendo devolver qualquer
+     * palavra. Só fica mais propenso a estas quando o som é parecido.
+     */
+    public static final String EXTRA_BIASING_STRINGS = "android.speech.extra.BIASING_STRINGS";
 }

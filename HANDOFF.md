@@ -991,7 +991,10 @@ src/
                pilha de voltar/avançar (history)
   items/       identificação dos campos (detect) e a lógica da Central —
                filtro, busca, resumo, ordem e faixas de prazo (central)
-  audio/       gravação, contas do tocador (playback) e salvar pra fora (export)
+  audio/       gravação, contas do tocador (playback), salvar pra fora
+               (export), marcas de momento (marcas), transcrição da reunião —
+               ponte com o reconhecedor (fala), escolha das palavras-dica
+               (dicas) e a regra que protege a correção à mão (transcricao)
   flow/        leitura do fluxograma: formas (shapes), grafo (graph), arranjo
                (layout), a junção com o que foi editado (merge) e o voltar/
                avançar do painel (undo)
@@ -1004,8 +1007,10 @@ src/
   components/  folha, navegação, barras, painel
   lib/         geometria
 tools/         testes de rabisco, borracha, campos, zonas, Central, áudio,
-               fluxograma, voltar/avançar, e o roteiro que abre o app num
-               Android de verdade
+               fluxograma, voltar/avançar; a compilação do plugin nativo contra
+               sombras (check-java) e a medição do caminho do áudio com tom
+               puro (resample-test + ReamostraTest); e o roteiro que abre o app
+               num Android de verdade
 android/       projeto Capacitor (gerado, mas versionado)
 keystore/      chave de assinatura — não trocar
 ```
@@ -1055,6 +1060,12 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Tocar escolhe, arrastar move — o mesmo gesto | Separar em dois modos obrigaria a escolher o modo antes de saber o que se quer fazer. Quem solta sem andar escolheu; quem andou, moveu |
 | `touch-action: none` vai no `<svg>`, nunca no que está dentro dele | O navegador ignora a propriedade em elemento de dentro de um SVG. Estava no `<g>` da caixa, não fazia nada, e o gesto da caneta era roubado pra rolar a tela |
 | Um gesto de cada vez, e a caneta não cede ao dedo | A palma encosta antes da ponta. Dois gestos disputando a mesma tela levavam a caixa pro lado errado e depois travavam o painel |
+| O que o reconhecedor erra já está escrito na folha | Ele troca nome próprio, sigla, nome de setor — e o usuário escreveu isso à mão durante a reunião. `EXTRA_BIASING_STRINGS` entrega essas palavras e puxa o resultado pra elas |
+| Jogar amostra fora sem filtrar é piorar o áudio | Reamostrar pegando uma a cada três dobra o agudo pra dentro da voz: medido, um tom de 15 kHz chega com pico 30000, tão alto quanto a fala. Tirando a média, 2346 |
+| Transcrição é rascunho, e a tela precisa dizer isso | Texto bonito sem aviso nenhum convida a copiar errado pra dentro de uma ata. O selo "rascunho do reconhecedor" é a informação mais importante da caixa |
+| Correção à mão nunca é sobrescrita — nem pela transcrição | Meia hora de reunião revisada palavra por palavra é o trabalho mais caro do app, e um toque em "Transcrever de novo" apagaria tudo em silêncio |
+| Tela parada é indistinguível de tela travada | Reunião longa leva minutos pro reconhecedor. O texto chega aos pedaços (`notifyListeners`) justamente pra que dê pra ver que está andando |
+| Caractere combinante literal no código é armadilha | Um `[\u0300-\u036f]` escrito com os caracteres de verdade fica invisível no editor e some numa edição qualquer, sem erro nenhum |
 | Sonda que cala não decide nada | "Não transcreveu" sem número nenhum não diz se a culpa é do áudio ou do serviço de fala. Segundos, pico da onda, formato e trilha dos avisos |
 | Conferência de VERSÃO não é conferência de capacidade | "Aceita ler um arquivo: sim" era só `SDK_INT >= 31`; o serviço do aparelho pode ignorar mesmo no Android 16 |
 | A emenda entre folhas é pintura, nunca espaço | Abrir um vão de verdade mexeria em todas as coordenadas já gravadas — o jeito mais fácil de perder o caderno de alguém |
@@ -1184,6 +1195,17 @@ ainda podem precisar de ajuste — eles estão todos nomeados no topo de
 ambiente (não há SDK do Android aqui) e não há tablet pra testar: quem prova que
 ele compila é a esteira do GitHub, e quem prova que ele LÊ é o usuário. A
 qualidade do reconhecimento com a letra dele é desconhecida.
+
+**A transcrição da REUNIÃO foi vista funcionando — uma vez, com 60 segundos.**
+O tablet dele (Android 16) transcreveu áudio de arquivo, sem internet, pelo
+caminho de sessão segmentada, com texto legível. O relato dele sobre a
+qualidade foi *"ele trocou palavras"*, e é o esperado de reconhecedor de
+aparelho. O que ainda não foi visto: uma reunião INTEIRA de uma vez (o limite
+de um minuto era da sonda e saiu), e se as palavras-dica do caderno melhoram o
+resultado na prática — `EXTRA_BIASING_STRINGS` é documentado, mas o serviço de
+fala do aparelho pode ignorar sem reclamar, exatamente como ignorou o arquivo
+antes do modo segmentado. A tela relata quantas dicas foram entregues; quem
+responde se adiantou é comparar duas transcrições da mesma gravação.
 
 **A identificação depende de o usuário escrever dentro das faixas.** Quem
 escreve uma tarefa no meio da zona de anotação vê ela chegar como `nota` — e aí

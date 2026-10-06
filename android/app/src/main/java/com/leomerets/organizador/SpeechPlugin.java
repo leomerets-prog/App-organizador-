@@ -14,6 +14,7 @@ import android.speech.SpeechRecognizer;
 import android.util.Base64;
 import android.util.Log;
 
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -65,20 +66,28 @@ public class SpeechPlugin extends Plugin {
 
     private static final String TAG = "Organizador";
 
-    /**
-     * Quanto da gravação a sonda tenta transcrever.
-     *
-     * Um minuto responde a pergunta e cabe numa sessão de reconhecimento. A
-     * reunião inteira precisaria do picote e da costura, que é justamente o
-     * trabalho que esta sonda existe pra decidir se vale a pena.
-     */
-    private static final long LIMITE_US = 60L * 1_000_000L;
-
     /** O reconhecedor espera 16 kHz mono; é o que todo serviço de fala usa. */
     private static final int TAXA = 16_000;
 
-    /** Prazo da sessão. Preso aqui, "não voltou nunca" viraria tela parada. */
-    private static final long PRAZO_MS = 90_000L;
+    /**
+     * O PRAZO, agora proporcional ao tamanho da gravação.
+     *
+     * Era fixo em 90 segundos, de quando isto só provava os primeiros sessenta.
+     * Com a reunião inteira, um prazo fixo mataria a sessão no meio e devolveria
+     * meia ata — pior que não devolver nada, porque parece completa.
+     *
+     * O reconhecedor de aparelho costuma andar mais rápido que o tempo real,
+     * mas não sempre; uma vez e meia a duração, com piso de dois minutos, dá
+     * folga sem deixar a tela pendurada pra sempre quando ele simplesmente não
+     * responde.
+     */
+    private static final long PRAZO_MINIMO_MS = 120_000L;
+    private static final long PRAZO_MAXIMO_MS = 20L * 60_000L;
+
+    private static long prazoPara(double segundos) {
+        long proporcional = (long) (segundos * 1500);
+        return Math.max(PRAZO_MINIMO_MS, Math.min(PRAZO_MAXIMO_MS, proporcional));
+    }
 
     private final Map<String, File> emAberto = new HashMap<>();
 
@@ -163,12 +172,19 @@ public class SpeechPlugin extends Plugin {
             return;
         }
         final String idioma = call.getString("idioma", "pt-BR");
+        /*
+         * Até onde ler a gravação. Zero (o normal agora) quer dizer até o fim —
+         * o corte em um minuto era da sonda, que só precisava responder "dá ou
+         * não dá".
+         */
+        final long limiteUs = segundosPedidos(call) * 1_000_000L;
+        final ArrayList<String> palavras = palavrasDoPedido(call);
 
         File cru;
         final Decodificado medida;
         try {
             cru = File.createTempFile("sonda-", ".pcm", getContext().getCacheDir());
-            medida = decodificarParaPcm(origem, cru);
+            medida = decodificarParaPcm(origem, cru, limiteUs);
         } catch (Throwable error) {
             Log.e(TAG, "organizador: sonda não decodificou o áudio", error);
             JSObject r = new JSObject();
@@ -196,7 +212,7 @@ public class SpeechPlugin extends Plugin {
          */
         getActivity().runOnUiThread(() -> {
             try {
-                ouvirArquivo(call, pcm, idioma, medida);
+                ouvirArquivo(call, pcm, idioma, medida, palavras);
             } catch (Throwable error) {
                 Log.e(TAG, "organizador: sonda não pôs o reconhecedor de pé", error);
                 JSObject r = new JSObject();
@@ -208,7 +224,61 @@ public class SpeechPlugin extends Plugin {
         });
     }
 
-    private void ouvirArquivo(PluginCall call, File pcm, String idioma, Decodificado medida) throws Exception {
+    /**
+     * Até quantos segundos da gravação ler. Zero, ausente ou negativo = tudo.
+     *
+     * `getInt(nome)` pode voltar nulo, e desembrulhar nulo num `int` estoura a
+     * chamada inteira com uma mensagem que não ajuda ninguém.
+     */
+    private static long segundosPedidos(PluginCall call) {
+        try {
+            Integer pedido = call.getInt("limiteSegundos");
+            if (pedido == null || pedido <= 0) {
+                return Long.MAX_VALUE / 1_000_000L;
+            }
+            return pedido;
+        } catch (Throwable ignored) {
+            return Long.MAX_VALUE / 1_000_000L;
+        }
+    }
+
+    /**
+     * AS PALAVRAS DO CADERNO — o que ele escreveu na folha, como dica.
+     *
+     * É a diferença entre "trocou palavras" e "acertou": o reconhecedor erra
+     * justamente no que não é vocabulário comum — nomes de pessoas, de setores,
+     * de sistemas, siglas. E essas palavras já estão escritas na folha da
+     * reunião, de próprio punho, antes mesmo de a transcrição começar.
+     *
+     * Do Android 13 pra cima há um campo oficial pra isso. Abaixo, vai ignorado
+     * sem reclamar — a transcrição continua, só menos ajudada.
+     */
+    private static ArrayList<String> palavrasDoPedido(PluginCall call) {
+        ArrayList<String> fora = new ArrayList<>();
+        try {
+            JSArray lista = call.getArray("palavras");
+            if (lista == null) {
+                return fora;
+            }
+            for (int i = 0; i < lista.length(); i++) {
+                Object item = lista.opt(i);
+                String palavra = item == null ? null : String.valueOf(item).trim();
+                if (palavra != null && palavra.length() > 1) {
+                    fora.add(palavra);
+                }
+            }
+        } catch (Throwable ignored) {
+            // Dica é cortesia: sem ela a transcrição continua, só menos ajudada.
+        }
+        return fora;
+    }
+
+    private void ouvirArquivo(
+            PluginCall call,
+            File pcm,
+            String idioma,
+            Decodificado medida,
+            ArrayList<String> palavras) throws Exception {
         if (Build.VERSION.SDK_INT < 31) {
             JSObject r = new JSObject();
             r.put("ok", false);
@@ -238,6 +308,17 @@ public class SpeechPlugin extends Plugin {
         if (Build.VERSION.SDK_INT >= 33) {
             // "A sessão acaba quando o arquivo acabar" — é isso que o valor diz.
             pedido.putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, RecognizerIntent.EXTRA_AUDIO_SOURCE);
+            if (!palavras.isEmpty()) {
+                /*
+                 * `putStringArrayListExtra`, e não um array: o campo é
+                 * documentado como ArrayList<String>, e o reconhecedor lê de
+                 * volta com `getStringArrayListExtra`. Mandado como String[],
+                 * o que ele acha é nulo — e ele ignora CALADO, sem erro
+                 * nenhum. Tipo errado aqui não quebra nada; só faz a dica não
+                 * existir, que é a pior forma de falhar.
+                 */
+                pedido.putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, palavras);
+            }
         }
 
         final List<String> pedacos = new ArrayList<>();
@@ -250,6 +331,7 @@ public class SpeechPlugin extends Plugin {
          * áudio ou o serviço de fala do aparelho.
          */
         final StringBuilder trilha = new StringBuilder();
+        final long prazo = prazoPara(medida.amostras / (double) TAXA);
 
         final Runnable responder = () -> {
             if (respondeu[0]) {
@@ -266,19 +348,14 @@ public class SpeechPlugin extends Plugin {
             } catch (Throwable ignored) {
                 // Idem.
             }
-            StringBuilder tudo = new StringBuilder();
-            for (String p : pedacos) {
-                if (tudo.length() > 0) {
-                    tudo.append(' ');
-                }
-                tudo.append(p);
-            }
+            String tudo = juntar(pedacos);
             JSObject r = new JSObject();
             r.put("ok", tudo.length() > 0);
             r.put("etapa", "reconhecer");
-            r.put("texto", tudo.toString());
+            r.put("texto", tudo);
             medida.contar(r);
             r.put("trilha", trilha.toString());
+            r.put("dicas", palavras.size());
             if (tudo.length() == 0) {
                 /*
                  * O caso que o usuário encontrou: nem resultado, nem erro.
@@ -289,7 +366,7 @@ public class SpeechPlugin extends Plugin {
                 r.put(
                         "erro",
                         trilha.length() == 0
-                                ? "O reconhecedor não deu sinal nenhum em " + (PRAZO_MS / 1000)
+                                ? "O reconhecedor não deu sinal nenhum em " + (prazo / 1000)
                                         + "s — nem resultado, nem erro. O serviço de fala deste"
                                         + " aparelho provavelmente ignora o arquivo e fica"
                                         + " esperando o microfone."
@@ -365,6 +442,23 @@ public class SpeechPlugin extends Plugin {
                         : segment.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                 if (lista != null && !lista.isEmpty()) {
                     pedacos.add(lista.get(0));
+                    /*
+                     * Conta o andamento ANTES do fim.
+                     *
+                     * Uma reunião de meia hora leva minutos pra transcrever, e
+                     * o `resolve` só vem no fim. Sem isto, a tela fica parada o
+                     * tempo todo — e tela parada é indistinguível de tela
+                     * travada, que é justamente o que ele já relatou três vezes
+                     * no fluxograma.
+                     */
+                    try {
+                        JSObject passo = new JSObject();
+                        passo.put("texto", juntar(pedacos));
+                        passo.put("trechos", pedacos.size());
+                        notifyListeners("andamento", passo);
+                    } catch (Throwable ignored) {
+                        // Contar o andamento nunca pode atrapalhar o resultado.
+                    }
                 }
             }
 
@@ -381,7 +475,22 @@ public class SpeechPlugin extends Plugin {
 
         // Rede de segurança: reconhecedor que não volta não pode deixar a tela
         // esperando pra sempre.
-        getBridge().getWebView().postDelayed(responder, PRAZO_MS);
+        getBridge().getWebView().postDelayed(responder, prazo);
+    }
+
+    /** Os trechos do reconhecedor costurados num texto só. */
+    private static String juntar(List<String> pedacos) {
+        StringBuilder tudo = new StringBuilder();
+        for (String p : pedacos) {
+            if (p == null || p.isEmpty()) {
+                continue;
+            }
+            if (tudo.length() > 0) {
+                tudo.append(' ');
+            }
+            tudo.append(p);
+        }
+        return tudo.toString();
     }
 
     /** O que cada código de erro quer dizer, em português de gente. */
@@ -403,11 +512,12 @@ public class SpeechPlugin extends Plugin {
     // ─── Do webm/opus pro áudio cru ──────────────────────────────────────────
 
     /**
-     * Decodifica o começo da gravação em PCM 16 bits, mono, 16 kHz.
+     * Decodifica a gravação em PCM 16 bits, mono, 16 kHz — o que o
+     * reconhecedor come.
      *
-     * A reamostragem é a mais simples que existe (pega uma amostra a cada N) e
-     * isso é de propósito: a sonda responde "dá ou não dá", e um reamostrador
-     * decente é trabalho pra quando a resposta for sim.
+     * `limiteUs` corta a leitura num ponto do áudio. A sonda usava um minuto
+     * porque só precisava responder "dá ou não dá"; a resposta foi sim, e
+     * agora o normal é ler até o fim.
      *
      * Devolve quantas amostras saíram — zero quer dizer que o decodificador
      * não deu conta do formato, que é uma resposta tão útil quanto a outra.
@@ -433,7 +543,7 @@ public class SpeechPlugin extends Plugin {
         }
     }
 
-    private static Decodificado decodificarParaPcm(File origem, File destino) throws Exception {
+    private static Decodificado decodificarParaPcm(File origem, File destino, long limiteUs) throws Exception {
         MediaExtractor extrator = new MediaExtractor();
         MediaCodec decodificador = null;
         final Decodificado saiu = new Decodificado();
@@ -466,9 +576,7 @@ public class SpeechPlugin extends Plugin {
             boolean acabouEntrada = false;
             boolean acabouSaida = false;
             int bits = 0;
-            // Resto da divisão guardado entre blocos: sem ele, cada bloco
-            // recomeçaria a contagem e a reamostragem andaria aos trancos.
-            int sobra = 0;
+            final Reamostrador estado = new Reamostrador();
 
             while (!acabouSaida) {
                 if (!acabouEntrada) {
@@ -477,7 +585,7 @@ public class SpeechPlugin extends Plugin {
                         ByteBuffer buffer = decodificador.getInputBuffer(entrada);
                         int lidos = buffer == null ? -1 : extrator.readSampleData(buffer, 0);
                         long quando = extrator.getSampleTime();
-                        if (lidos < 0 || quando > LIMITE_US) {
+                        if (lidos < 0 || quando > limiteUs) {
                             decodificador.queueInputBuffer(entrada, 0, 0, 0,
                                     MediaCodec.BUFFER_FLAG_END_OF_STREAM);
                             acabouEntrada = true;
@@ -508,7 +616,7 @@ public class SpeechPlugin extends Plugin {
                             bits = bitsDaSaida(decodificador);
                             saiu.codificacao = bits == 32 ? "float 32" : bits + " bits";
                         }
-                        sobra = escreverReamostrado(saida, bloco, canais, taxaOrigem, sobra, bits, saiu);
+                        escreverReamostrado(saida, bloco, canais, taxaOrigem, estado, bits, saiu);
                     }
                     decodificador.releaseOutputBuffer(saidaIdx, false);
                     if ((info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
@@ -555,48 +663,109 @@ public class SpeechPlugin extends Plugin {
     }
 
     /**
+     * O ESTADO DA REAMOSTRAGEM, que atravessa os blocos.
+     *
+     * O decodificador entrega o áudio aos pedaços, e nenhum pedaço acaba numa
+     * fronteira redonda. Sem guardar o meio da conta aqui, cada bloco
+     * recomeçaria do zero e a reamostragem andaria aos trancos — um estalo a
+     * cada bloco, dezenas por segundo.
+     */
+    private static final class Reamostrador {
+        /** O meio da divisão entre a taxa da gravação e a do reconhecedor. */
+        int conta;
+        /** A soma do balde atual, pra tirar a média. */
+        long soma;
+        int quantas;
+        /** A última amostra emitida, pra quando a taxa precisa SUBIR. */
+        int ultimo;
+    }
+
+    /**
      * Joga o bloco decodificado no arquivo, em mono e na taxa do reconhecedor.
      *
-     * Devolve o resto da divisão, que a próxima chamada continua: é ele que
-     * impede a reamostragem de recomeçar a cada bloco.
+     * POR QUE A MÉDIA, E NÃO "UMA A CADA N".
+     *
+     * A primeira versão pegava uma amostra a cada N e jogava o resto fora. Pra
+     * responder "este tablet transcreve?" aquilo bastou. Pra transcrever de
+     * verdade, não: jogar amostras fora sem filtrar antes é o que se chama
+     * aliasing — tudo o que está acima de 8 kHz na gravação não desaparece, ele
+     * DOBRA pra dentro da faixa da voz e vira chiado em cima das consoantes. E
+     * consoante borrada é exatamente como o reconhecedor troca "pedir" por
+     * "pedi", "Marcela" por "mas cela".
+     *
+     * A média dos valores que estão sendo colapsados é o filtro mais simples
+     * que existe, e resolve a maior parte disso de graça: nada de amostra
+     * jogada fora, tudo entra na conta.
+     *
+     * Os canais também passaram a ser MISTURADOS em vez de descartados. Numa
+     * gravação de dois canais, metade da voz estava sendo deixada de lado.
      */
-    private static int escreverReamostrado(
+    private static void escreverReamostrado(
             OutputStream saida,
             byte[] bloco,
             int canais,
             int taxaOrigem,
-            int sobra,
+            Reamostrador estado,
             int bits,
             Decodificado saiu) throws Exception {
         int bytesPorValor = bits / 8;
         int porAmostra = bytesPorValor * canais;
-        if (porAmostra <= 0) {
-            return sobra;
+        if (porAmostra <= 0 || taxaOrigem <= 0) {
+            return;
         }
         int total = bloco.length / porAmostra;
-        byte[] fora = new byte[total * 2];
+        // Folga de quatro: quando a taxa precisa SUBIR, sai mais do que entra.
+        int cabem = (int) ((long) total * TAXA / taxaOrigem) + 4;
+        byte[] fora = new byte[cabem * 2];
         int escritos = 0;
-        int conta = sobra;
         for (int i = 0; i < total; i++) {
-            conta += TAXA;
-            if (conta < taxaOrigem) {
-                continue;
+            estado.soma += misturaDe(bloco, i * porAmostra, bits, canais, bytesPorValor);
+            estado.quantas++;
+            estado.conta += TAXA;
+            boolean primeira = true;
+            while (estado.conta >= taxaOrigem && escritos + 2 <= fora.length) {
+                estado.conta -= taxaOrigem;
+                if (primeira) {
+                    if (estado.quantas > 0) {
+                        estado.ultimo = (int) (estado.soma / estado.quantas);
+                    }
+                    estado.soma = 0;
+                    estado.quantas = 0;
+                    primeira = false;
+                }
+                /*
+                 * O PICO, limitado a 32767.
+                 *
+                 * Uma amostra de 16 bits vai de -32768 a 32767, e o valor
+                 * absoluto de -32768 é 32768 — que foi o que apareceu na tela
+                 * dele: "32768 de 32767", um número acima do próprio máximo.
+                 * Não atrapalhava a transcrição, mas um medidor que passa do
+                 * fim da régua faz duvidar de tudo que ele mede.
+                 */
+                int forca = Math.min(Math.abs(estado.ultimo), 32767);
+                if (forca > saiu.pico) {
+                    saiu.pico = forca;
+                }
+                fora[escritos++] = (byte) (estado.ultimo & 0xff);
+                fora[escritos++] = (byte) ((estado.ultimo >> 8) & 0xff);
+                saiu.amostras++;
             }
-            conta -= taxaOrigem;
-            // Mono: fica o primeiro canal. Misturar os dois é mais bonito e
-            // não muda a resposta da sonda.
-            int valor = amostraDe(bloco, i * porAmostra, bits);
-            if (Math.abs(valor) > saiu.pico) {
-                saiu.pico = Math.abs(valor);
-            }
-            fora[escritos++] = (byte) (valor & 0xff);
-            fora[escritos++] = (byte) ((valor >> 8) & 0xff);
-            saiu.amostras++;
         }
         if (escritos > 0) {
             saida.write(fora, 0, escritos);
         }
-        return conta;
+    }
+
+    /** Os canais de uma amostra, misturados num valor só. */
+    private static int misturaDe(byte[] bloco, int base, int bits, int canais, int bytesPorValor) {
+        if (canais <= 1) {
+            return amostraDe(bloco, base, bits);
+        }
+        long soma = 0;
+        for (int c = 0; c < canais; c++) {
+            soma += amostraDe(bloco, base + c * bytesPorValor, bits);
+        }
+        return (int) (soma / canais);
     }
 
     /** Uma amostra, qualquer que seja o formato do decodificador, em 16 bits. */

@@ -954,6 +954,110 @@ input {
   white-space: nowrap;
 }
 
+/* Abre e fecha os detalhes técnicos. Discreto de propósito: eles deixaram de
+   ser o produto quando a transcrição virou recurso. */
+.rec-sonda-abrir {
+  align-self: flex-start;
+  margin: 6px 0;
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+/* ─── O texto da reunião ─────────────────────────────────────────────────────
+
+   Mora na ficha da gravação. A largura é livre e o texto QUEBRA: uma reunião
+   de meia hora dá parágrafos longos, e `white-space: pre-wrap` preserva a
+   quebra que ele mesmo puser ao corrigir. */
+.rec-texto {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.rec-texto-topo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+/* O aviso de rascunho. Ele JÁ VIU o reconhecedor trocar palavras — um texto
+   bonito sem aviso nenhum convida a copiar errado pra dentro de uma ata. */
+.rec-texto-selo {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(234, 179, 8, 0.16);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.rec-texto-selo.bom {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.rec-texto-acao {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.rec-texto-corpo {
+  margin: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  /* Preserva a quebra de linha da correção dele, e quebra sozinho o resto. */
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+/* O campo de correção. Fonte igual à do texto lido pra que corrigir não mude
+   o tamanho das letras no meio da leitura. */
+.rec-texto-campo {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.rec-texto-botoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.rec-texto-andando,
+.rec-texto-pé {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
 .rec-sonda-saida {
   margin: 8px 0;
   padding: 10px 12px;

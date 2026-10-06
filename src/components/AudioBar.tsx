@@ -15,6 +15,8 @@ import { salvarAudio } from '../audio/export'
 import { relogio } from '../audio/marcas'
 import { estadoDaFala, sondaPossivel, tentarTranscrever } from '../audio/fala'
 import type { EstadoDaFala, ResultadoDaFala } from '../audio/fala'
+import { palavrasDeDica } from '../audio/dicas'
+import { salvarTexto } from '../audio/export'
 import { formatRate } from '../state/prefs'
 import { getRecordingBlob } from '../db/repo'
 import { newId } from '../lib/id'
@@ -45,37 +47,117 @@ export function AudioBar() {
   const renomearMarca = useStore((s) => s.renomearMarca)
   const tirarMarca = useStore((s) => s.tirarMarca)
   /*
-   * A SONDA DA TRANSCRIÇÃO.
+   * A TRANSCRIÇÃO.
    *
-   * Isto é um teste, e está escrito na tela que é um teste. Transcrever
-   * reunião é caro de construir e o resultado depende do aparelho — então
-   * antes de gastar versões, a pergunta: o tablet dele consegue?
+   * Isto era uma sonda — um teste pra descobrir se o tablet dele dava conta,
+   * antes de gastar versões construindo. A sonda rodou e respondeu SIM:
+   * Android 16, reconhecedor de aparelho, sem internet, um minuto de reunião
+   * transcrito com texto legível. Então virou recurso.
+   *
+   * O relato dele sobre o resultado foi "ele trocou palavras", e é verdade:
+   * reconhecedor de aparelho erra, principalmente em nome próprio. Três coisas
+   * atacam isso — áudio melhor decodificado, as PALAVRAS DO CADERNO entregues
+   * como dica, e o texto ficando editável pra ele corrigir por cima.
    */
   const [sonda, setSonda] = useState<EstadoDaFala | null>(null)
   const [sondando, setSondando] = useState<string | null>(null)
   const [sondaResultado, setSondaResultado] = useState<ResultadoDaFala | null>(null)
+  /** O texto chegando aos pedaços, enquanto o reconhecedor trabalha. */
+  const [aoVivo, setAoVivo] = useState<string>('')
+  /*
+   * O MESMO texto, numa ref.
+   *
+   * O `aoVivo` lido dentro da função assíncrona seria o do momento em que ela
+   * começou — sempre vazio. É o mesmo tipo de erro que já apareceu no
+   * fluxograma: closure velha fingindo ser estado atual. A ref é o valor de
+   * agora; o estado é só pra pintar a tela.
+   */
+  const aoVivoRef = useRef('')
+  /** Qual gravação está sendo transcrita agora. */
+  const [transcrevendoId, setTranscrevendoId] = useState<string | null>(null)
+  /** Qual transcrição está aberta pra corrigir, e o texto em edição. */
+  const [corrigindo, setCorrigindo] = useState<{ recId: string; texto: string } | null>(null)
+  /** Os detalhes técnicos ficam fechados: já serviram, agora atrapalham. */
+  const [verDetalhes, setVerDetalhes] = useState(false)
 
-  const testarTranscricao = async (rec: Recording) => {
+  const items = useStore((s) => s.items)
+  const zones = useStore((s) => s.zones)
+  const pages = useStore((s) => s.pages)
+  const guardarTranscricao = useStore((s) => s.guardarTranscricao)
+  const corrigirTranscricao = useStore((s) => s.corrigirTranscricao)
+  const tirarTranscricao = useStore((s) => s.tirarTranscricao)
+
+  /**
+   * AS PALAVRAS DESTA FOLHA, pra puxar o reconhecedor.
+   *
+   * Tudo que ele escreveu nesta página: o que foi lido da letra dele, o nome
+   * de quem ficou responsável, as observações digitadas, os rótulos das zonas
+   * e o título da folha. São exatamente os nomes que o reconhecedor troca — e
+   * estavam ali o tempo todo, escritos antes de a transcrição começar.
+   */
+  const palavrasDaFolha = (): string[] => {
+    const fontes: string[] = []
+    const pagina = pages.find((p) => p.id === activePageId)
+    if (pagina?.title) fontes.push(pagina.title)
+    for (const z of zones) {
+      if (z.pageId === activePageId && z.label) fontes.push(z.label)
+    }
+    for (const it of items) {
+      if (it.pageId !== activePageId) continue
+      if (it.title) fontes.push(it.title)
+      if (it.assignee) fontes.push(it.assignee)
+      if (it.note) fontes.push(it.note)
+    }
+    return palavrasDeDica(fontes)
+  }
+
+  const transcrever = async (rec: Recording) => {
     setSondaResultado(null)
+    setAoVivo('')
+    aoVivoRef.current = ''
+    setTranscrevendoId(rec.id)
     setSondando('Perguntando ao aparelho o que ele sabe fazer…')
     try {
       const estado = await estadoDaFala()
       setSonda(estado)
       if (!estado.ok || !estado.temReconhecedor) {
-        setSondando(null)
+        setVerDetalhes(true)
         return
       }
       const blob = await getRecordingBlob(rec.id)
       if (!blob) throw new Error('Não achei o arquivo desta gravação.')
-      const resultado = await tentarTranscrever(blob, (m) => setSondando(m))
+      const palavras = palavrasDaFolha()
+      const resultado = await tentarTranscrever(blob, {
+        aviso: (m) => setSondando(m),
+        aoVivo: (parcial) => {
+          aoVivoRef.current = parcial.texto
+          setAoVivo(parcial.texto)
+        },
+        palavras,
+      })
       setSondaResultado(resultado)
+      if (!resultado.ok) setVerDetalhes(true)
+      /*
+       * Guarda mesmo quando o reconhecedor devolveu só um pedaço: meia
+       * reunião transcrita vale mais que nenhuma, e perder isso obrigaria a
+       * rodar tudo de novo.
+       */
+      const texto = resultado.texto?.trim() || aoVivoRef.current.trim()
+      if (texto) {
+        await guardarTranscricao(rec.id, texto, {
+          segundos: resultado.segundos,
+          dicas: resultado.dicas ?? palavras.length,
+        })
+      }
     } catch (err) {
       setSondaResultado({
         ok: false,
         erro: err instanceof Error ? err.message : String(err),
       })
+      setVerDetalhes(true)
     } finally {
       setSondando(null)
+      setTranscrevendoId(null)
     }
   }
 
@@ -336,6 +418,33 @@ export function AudioBar() {
     }
   }
 
+  /**
+   * Salvar a transcrição como arquivo de texto.
+   *
+   * Mesmo motivo do áudio: o que fica só dentro do aplicativo morre com o
+   * aplicativo. E se ele corrigiu a reunião inteira à mão, esse é o trabalho
+   * mais caro de refazer de tudo que existe aqui.
+   */
+  const salvarTranscricao = async (rec: Recording) => {
+    const texto = rec.transcricao?.texto
+    if (!texto) return
+    setError(null)
+    setSaved(null)
+    setSavingId(rec.id)
+    try {
+      const { onde } = await salvarTexto(texto, `Organizador ${rec.label} - transcricao`)
+      setSaved({ id: rec.id, onde })
+    } catch (err) {
+      setError(
+        err instanceof Error && err.message
+          ? `Não deu pra salvar o texto: ${err.message}`
+          : 'Não deu pra salvar o texto.',
+      )
+    } finally {
+      setSavingId(null)
+    }
+  }
+
   const apagar = (rec: Recording) => {
     if (playingId === rec.id) {
       audioRef.current?.pause()
@@ -365,17 +474,24 @@ export function AudioBar() {
       {error && <span className="audio-error">{error}</span>}
 
       {/*
-        O resultado da sonda, dito por inteiro.
+        OS DETALHES TÉCNICOS, agora fechados.
         
-        Inclusive quando falha, e principalmente quando falha: uma sonda que
-        responde só "não funcionou" não serve pra decidir nada. Versão do
-        Android, se há reconhecedor, se há reconhecedor offline, se o
-        decodificador deu conta e o que o reconhecedor disse.
+        Eles existiam porque a transcrição era uma medição e os números eram o
+        produto. Agora o produto é o texto, e estes números só interessam
+        quando algo dá errado — por isso abrem sozinhos no erro e ficam
+        fechados no acerto. Mas continuam aqui por inteiro: foram eles que
+        mostraram que o problema era a sessão segmentada, e não o áudio.
       */}
-      {(sondando || sonda || sondaResultado) && (
+      {(sonda || sondaResultado) && (
+        <button className="rec-sonda-abrir" onClick={() => setVerDetalhes(!verDetalhes)}>
+          {verDetalhes ? '▾' : '▸'} Detalhes da transcrição
+        </button>
+      )}
+
+      {verDetalhes && (sonda || sondaResultado) && (
         <div className="rec-sonda-saida">
           <div className="rec-sonda-titulo">
-            Teste de transcrição <span>— isto ainda não é um recurso, é uma medição</span>
+            O que o aparelho relatou <span>— serve pra descobrir o que falhou</span>
           </div>
 
           {sonda && (
@@ -396,8 +512,6 @@ export function AudioBar() {
             </ul>
           )}
 
-          {sondando && <div className="rec-sonda-andando">{sondando}</div>}
-
           {sondaResultado && (
             <div className={sondaResultado.ok ? 'rec-sonda-boa' : 'rec-sonda-ruim'}>
               {sondaResultado.ok ? (
@@ -405,7 +519,9 @@ export function AudioBar() {
                   <strong>Transcreveu.</strong>{' '}
                   {sondaResultado.segundos !== undefined &&
                     `${Math.round(sondaResultado.segundos)}s de áudio chegaram ao reconhecedor.`}
-                  <p>{sondaResultado.texto}</p>
+                  {/* O texto em si fica na ficha da gravação, acima — repetido
+                      aqui, ele faria a mesma reunião aparecer duas vezes na
+                      tela. */}
                 </>
               ) : (
                 <>
@@ -433,6 +549,13 @@ export function AudioBar() {
                     </li>
                   )}
                   {sondaResultado.codificacao && <li>Formato lido: {sondaResultado.codificacao}</li>}
+                  {sondaResultado.dicas !== undefined && (
+                    <li>
+                      Palavras do caderno entregues como dica: {sondaResultado.dicas}
+                      {sondaResultado.dicas === 0 &&
+                        ' — escreva na folha os nomes da reunião e transcreva de novo'}
+                    </li>
+                  )}
                   <li>
                     O reconhecedor respondeu:{' '}
                     {sondaResultado.trilha ? sondaResultado.trilha : 'nada'}
@@ -529,15 +652,20 @@ export function AudioBar() {
                 </button>
 
                 {/* Só aparece no aplicativo: no navegador não existe
-                    reconhecedor de fala do Android pra testar. */}
+                    reconhecedor de fala do Android. */}
                 {sondaPossivel() && (
                   <button
                     className="rec-sonda"
-                    onClick={() => void testarTranscricao(rec)}
+                    onClick={() => void transcrever(rec)}
                     disabled={sondando !== null}
-                    title="TESTE: ver se este tablet consegue transcrever o começo desta gravação"
+                    title={
+                      rec.transcricao
+                        ? 'Transcrever de novo esta gravação'
+                        : 'Ouvir esta gravação e escrever o que foi dito'
+                    }
                   >
-                    ⌁ Testar transcrição
+                    {transcrevendoId === rec.id ? '…' : '⌁'}{' '}
+                    {rec.transcricao ? 'Transcrever de novo' : 'Transcrever'}
                   </button>
                 )}
 
@@ -600,6 +728,123 @@ export function AudioBar() {
                         </button>
                       </span>
                     ))}
+                </div>
+              )}
+
+              {/*
+                O QUE FOI DITO.
+
+                Fica na própria ficha da gravação, e não numa tela separada,
+                porque é dela que o texto fala. Guardado no banco: fechar o app
+                e voltar amanhã acha o texto no lugar, como a posição da escuta
+                e as marcas.
+
+                O selo em cima não é enfeite. "Rascunho do reconhecedor" é a
+                informação mais importante da caixa: ele JÁ VIU o aparelho
+                trocar palavras, e um texto bonito sem aviso nenhum convida a
+                copiar errado pra dentro de uma ata.
+              */}
+              {(rec.transcricao || transcrevendoId === rec.id) && (
+                <div className="rec-texto">
+                  <div className="rec-texto-topo">
+                    <strong>O que foi dito</strong>
+                    {rec.transcricao?.corrigida ? (
+                      <span className="rec-texto-selo bom">✓ corrigido por você</span>
+                    ) : (
+                      <span className="rec-texto-selo">
+                        rascunho do reconhecedor — confira antes de usar
+                      </span>
+                    )}
+
+                    {rec.transcricao && corrigindo?.recId !== rec.id && (
+                      <>
+                        <button
+                          className="rec-texto-acao"
+                          onClick={() =>
+                            setCorrigindo({ recId: rec.id, texto: rec.transcricao?.texto ?? '' })
+                          }
+                          title="Corrigir o texto à mão"
+                        >
+                          ✎ Corrigir
+                        </button>
+                        <button
+                          className="rec-texto-acao"
+                          onClick={() => void salvarTranscricao(rec)}
+                          disabled={savingId === rec.id}
+                          title="Salvar o texto como arquivo no tablet"
+                        >
+                          {savingId === rec.id ? '…' : '⤓'} Salvar texto
+                        </button>
+                        <button
+                          className="rec-texto-acao"
+                          onClick={() => {
+                            /*
+                             * Pergunta sempre, e com aviso maior quando foi
+                             * corrigido: aqui o que se perde pode ser uma
+                             * reunião inteira revisada à mão.
+                             */
+                            const aviso = rec.transcricao?.corrigida
+                              ? 'Apagar o texto que VOCÊ corrigiu desta gravação? Isso não volta.'
+                              : 'Apagar esta transcrição? O áudio continua guardado.'
+                            if (window.confirm(aviso)) void tirarTranscricao(rec.id)
+                          }}
+                          title="Apagar a transcrição (o áudio continua)"
+                        >
+                          ✕
+                        </button>
+                      </>
+                    )}
+                  </div>
+
+                  {corrigindo?.recId === rec.id ? (
+                    <>
+                      <textarea
+                        className="rec-texto-campo"
+                        value={corrigindo.texto}
+                        onChange={(e) =>
+                          setCorrigindo({ recId: rec.id, texto: e.target.value })
+                        }
+                        rows={10}
+                        aria-label="Texto da transcrição"
+                      />
+                      <div className="rec-texto-botoes">
+                        <button
+                          className="rec-texto-acao"
+                          onClick={() => {
+                            void corrigirTranscricao(rec.id, corrigindo.texto)
+                            setCorrigindo(null)
+                          }}
+                        >
+                          ✓ Guardar correção
+                        </button>
+                        <button className="rec-texto-acao" onClick={() => setCorrigindo(null)}>
+                          Cancelar
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="rec-texto-corpo">
+                      {transcrevendoId === rec.id && aoVivo
+                        ? aoVivo
+                        : rec.transcricao?.texto || '—'}
+                    </p>
+                  )}
+
+                  {transcrevendoId === rec.id && (
+                    <div className="rec-texto-andando">
+                      {sondando ?? 'Ouvindo…'}
+                      {aoVivo ? ' · o texto vai aparecendo acima' : ''}
+                    </div>
+                  )}
+
+                  {rec.transcricao && corrigindo?.recId !== rec.id && (
+                    <div className="rec-texto-pé">
+                      {rec.transcricao.segundos !== undefined &&
+                        `${Math.round(rec.transcricao.segundos / 60)} min de áudio ouvidos`}
+                      {(rec.transcricao.dicas ?? 0) > 0 &&
+                        ` · ${rec.transcricao.dicas} palavra(s) do seu caderno usadas como dica`}
+                    </div>
+                  )}
                 </div>
               )}
 

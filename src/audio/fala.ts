@@ -1,24 +1,28 @@
 import { Capacitor, registerPlugin } from '@capacitor/core'
 
 /**
- * TESTE: este tablet transcreve uma gravação?
+ * TRANSCREVER A GRAVAÇÃO — a ponte com `SpeechPlugin.java`.
  *
- * A ponte com a sonda nativa (`SpeechPlugin.java`). Não é um recurso — é a
- * pergunta que precisa ser respondida ANTES de valer a pena construir
- * transcrição de reunião, porque o resultado depende do aparelho e não do
- * código.
+ * Isto nasceu como sonda: uma pergunta que precisava ser respondida ANTES de
+ * valer a pena construir, porque a resposta dependia do aparelho e não do
+ * código. A sonda rodou no tablet dele e respondeu **sim** — Android 16,
+ * reconhecedor de aparelho, sem internet, 60 segundos de reunião transcritos
+ * com texto legível. O caminho que funcionou foi o de SESSÃO SEGMENTADA: sem
+ * ele o reconhecedor encerra no primeiro silêncio, e reunião é feita de
+ * silêncios.
  *
- * O que a sonda tenta, em ordem, e onde cada coisa pode falhar:
+ * Com a resposta na mão, três coisas mudaram:
  *
- * 1. **existe reconhecedor?** — aparelho sem serviço de fala para aqui
- * 2. **existe reconhecedor OFFLINE?** — do Android 13 pra cima; sem ele, a
- *    transcrição precisaria de internet, o que muda a conversa inteira
- * 3. **o Android aceita um ARQUIVO no lugar do microfone?** — do Android 12
- *    pra cima, e mesmo assim o serviço do aparelho pode recusar
- * 4. **dá pra decodificar a gravação?** — ela é webm/opus, e o reconhecedor
- *    só come áudio cru
- * 5. **e o que ele entendeu?** — o primeiro minuto, que é o que responde a
- *    pergunta sem precisar do picote de uma reunião inteira
+ * 1. **a gravação inteira**, não o primeiro minuto — o corte era da sonda
+ * 2. **as palavras do caderno** vão junto como dica (ver `dicas.ts`): é o que
+ *    ataca o "ele trocou palavras", porque o que o reconhecedor erra é nome
+ *    próprio, e nome próprio já está escrito na folha
+ * 3. **o texto chega aos pedaços**, enquanto roda — uma reunião longa leva
+ *    minutos, e tela parada é indistinguível de tela travada
+ *
+ * O que ele devolve é um RASCUNHO. Reconhecedor de aparelho erra, e vai
+ * continuar errando; o texto serve pra achar o assunto e corrigir por cima,
+ * não pra virar ata sem ninguém ler.
  */
 
 export interface EstadoDaFala {
@@ -52,13 +56,32 @@ export interface ResultadoDaFala {
   codificacao?: string
   /** Que avisos o reconhecedor deu, na ordem. Vazio = ele nem acordou. */
   trilha?: string
+  /** Quantas palavras do caderno foram entregues como dica. */
+  dicas?: number
+}
+
+/** O que o plugin manda enquanto trabalha, a cada trecho reconhecido. */
+export interface AndamentoDaFala {
+  texto: string
+  trechos: number
 }
 
 interface SpeechPlugin {
   estado(): Promise<EstadoDaFala>
   abrir(): Promise<{ token: string }>
   escrever(options: { token: string; base64: string }): Promise<void>
-  transcrever(options: { token: string; idioma: string }): Promise<ResultadoDaFala>
+  transcrever(options: {
+    token: string
+    idioma: string
+    /** Até onde ler. Ausente ou zero = a gravação inteira. */
+    limiteSegundos?: number
+    /** As palavras do caderno, pra puxar o reconhecedor (Android 13+). */
+    palavras?: string[]
+  }): Promise<ResultadoDaFala>
+  addListener(
+    evento: 'andamento',
+    ouvinte: (dados: AndamentoDaFala) => void,
+  ): Promise<{ remove: () => Promise<void> }>
 }
 
 const Speech = registerPlugin<SpeechPlugin>('Speech')
@@ -84,17 +107,33 @@ export async function estadoDaFala(): Promise<EstadoDaFala> {
   }
 }
 
+export interface PedidoDeTranscricao {
+  /** Conta o que está acontecendo: envio, decodificação, reconhecimento. */
+  aviso: (mensagem: string) => void
+  /**
+   * Entrega o texto que já saiu, antes do fim.
+   *
+   * Sem isto, uma reunião de meia hora é meia hora de tela parada — e tela
+   * parada é a única coisa que ele já relatou como "travou".
+   */
+  aoVivo?: (parcial: AndamentoDaFala) => void
+  /** As palavras do caderno, de `palavrasDeDica`. */
+  palavras?: string[]
+  /** Até onde ler, em segundos. Ausente = a gravação inteira. */
+  limiteSegundos?: number
+  idioma?: string
+}
+
 /**
- * Manda a gravação e tenta transcrever o começo dela.
+ * Manda a gravação ao aparelho e transcreve.
  *
- * `aviso` conta o progresso do envio, porque mandar vinte megabytes em pedaços
- * leva tempo e uma tela parada sem explicação é a pior parte de qualquer
- * espera.
+ * O envio é em pedaços porque a ponte do Capacitor carrega texto: uma gravação
+ * de uma hora em base64 numa chamada só derruba a WebView por falta de
+ * memória.
  */
 export async function tentarTranscrever(
   blob: Blob,
-  aviso: (mensagem: string) => void,
-  idioma = 'pt-BR',
+  pedido: PedidoDeTranscricao,
 ): Promise<ResultadoDaFala> {
   if (!sondaPossivel()) {
     return {
@@ -103,15 +142,48 @@ export async function tentarTranscrever(
     }
   }
 
-  const { token } = await Speech.abrir()
-  const pedacos = Math.ceil(blob.size / PEDACO)
-  for (let i = 0; i < pedacos; i++) {
-    const parte = blob.slice(i * PEDACO, Math.min((i + 1) * PEDACO, blob.size))
-    await Speech.escrever({ token, base64: await paraBase64(parte) })
-    aviso(`Mandando a gravação… ${i + 1} de ${pedacos}`)
+  const { aviso, aoVivo, palavras, limiteSegundos, idioma = 'pt-BR' } = pedido
+
+  /*
+   * O ouvinte é registrado ANTES de `transcrever`, e tirado no `finally`.
+   *
+   * Registrado depois, os primeiros trechos passariam sem ninguém ouvindo —
+   * e são justamente os que provam que está andando. Não tirado, cada
+   * transcrição deixaria um ouvinte pra trás e a quinta escreveria na tela
+   * cinco vezes.
+   */
+  let ouvinte: { remove: () => Promise<void> } | null = null
+  if (aoVivo) {
+    try {
+      ouvinte = await Speech.addListener('andamento', aoVivo)
+    } catch {
+      // Contar o andamento é cortesia; sem ele a transcrição continua.
+    }
   }
-  aviso('Decodificando e ouvindo… isto pode levar um minuto.')
-  return await Speech.transcrever({ token, idioma })
+
+  try {
+    const { token } = await Speech.abrir()
+    const pedacos = Math.ceil(blob.size / PEDACO)
+    for (let i = 0; i < pedacos; i++) {
+      const parte = blob.slice(i * PEDACO, Math.min((i + 1) * PEDACO, blob.size))
+      await Speech.escrever({ token, base64: await paraBase64(parte) })
+      aviso(`Mandando a gravação… ${i + 1} de ${pedacos}`)
+    }
+    aviso(
+      palavras && palavras.length > 0
+        ? `Ouvindo, com ${palavras.length} palavra(s) do seu caderno como dica…`
+        : 'Ouvindo a gravação…',
+    )
+    return await Speech.transcrever({ token, idioma, limiteSegundos, palavras })
+  } finally {
+    if (ouvinte) {
+      try {
+        await ouvinte.remove()
+      } catch {
+        // Soltar é cortesia.
+      }
+    }
+  }
 }
 
 /** O mesmo caminho do salvar: o FileReader devolve `data:...;base64,XXXX`. */

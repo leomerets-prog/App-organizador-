@@ -1,5 +1,7 @@
 import { limpar } from '../src/audio/export'
 import { adicionar, marcaDe, relogio, remover, renomear } from '../src/audio/marcas'
+import { MAX_DICAS, palavrasDeDica } from '../src/audio/dicas'
+import { aceitaDoReconhecedor, comCorrecao, doReconhecedor } from '../src/audio/transcricao'
 import type { Marca } from '../src/domain/types'
 import {
   formatLength,
@@ -232,6 +234,163 @@ const casos: Caso[] = [
       // Trunca: a marca aponta pro ponto de voltar, e arredondar pra cima
       // faria voltar DEPOIS do que se quer ouvir.
       return relogio(59_900) === '0:59' ? null : `59,9s virou ${relogio(59_900)}`
+    },
+  },
+
+  /*
+   * ─── As dicas do caderno ───────────────────────────────────────────────────
+   *
+   * "Ele trocou palavras." Trocou nos nomes próprios, que é onde todo
+   * reconhecedor de aparelho troca — e esses nomes estão escritos na folha.
+   * Estes casos conferem a escolha: o que entra na lista, o que fica de fora,
+   * e em que ordem. Lista errada não dá erro nenhum; ela só deixa de ajudar,
+   * ou pior, faz o reconhecedor ver palavras que ninguém falou.
+   */
+  {
+    nome: 'palavra comum não ocupa vaga de dica',
+    rodar() {
+      const d = palavrasDeDica(['Enviar para o Marcelo quando der'])
+      if (d.some((p) => p.toLowerCase() === 'para')) return `"para" entrou: ${d.join(', ')}`
+      if (d.some((p) => p.toLowerCase() === 'quando')) return `"quando" entrou: ${d.join(', ')}`
+      return d.includes('Marcelo') ? null : `"Marcelo" ficou de fora: ${d.join(', ')}`
+    },
+  },
+  {
+    nome: 'nome próprio mantém acento e maiúscula',
+    rodar() {
+      const d = palavrasDeDica(['Falar com a Conceição'])
+      // Tirar o acento aqui seria pedir pro reconhecedor escrever "Conceicao".
+      return d.includes('Conceição') ? null : `veio ${d.join(', ')}`
+    },
+  },
+  {
+    nome: 'palavra com ç não é partida em duas',
+    rodar() {
+      const d = palavrasDeDica(['Revisar orçamento'])
+      if (d.includes('or') || d.includes('amento')) return `partiu: ${d.join(', ')}`
+      return d.includes('orçamento') ? null : `veio ${d.join(', ')}`
+    },
+  },
+  {
+    nome: 'sigla vem antes de palavra longa comum',
+    rodar() {
+      const d = palavrasDeDica(['processo administrativo do SUS'])
+      const sus = d.indexOf('SUS')
+      if (sus < 0) return `"SUS" ficou de fora: ${d.join(', ')}`
+      const proc = d.indexOf('processo')
+      return proc < 0 || sus < proc ? null : `"processo" veio antes de "SUS": ${d.join(', ')}`
+    },
+  },
+  {
+    nome: 'expressão curta entra inteira, e na frente',
+    rodar() {
+      const d = palavrasDeDica(['Unidade Básica de Saúde'])
+      // A sequência é o que o reconhecedor erra; as palavras soltas, menos.
+      return d[0] === 'Unidade Básica de Saúde' ? null : `a primeira foi ${d[0]}`
+    },
+  },
+  {
+    nome: 'frase comprida não vira dica inteira',
+    rodar() {
+      const linha = 'Combinamos de rever o cadastro dos pacientes na semana que vem'
+      const d = palavrasDeDica([linha])
+      return d.includes(linha) ? `a frase toda entrou: ${d.length} dicas` : null
+    },
+  },
+  {
+    nome: 'repetida com acento diferente conta uma vez',
+    rodar() {
+      const d = palavrasDeDica(['Saúde da família', 'saude', 'SAÚDE'])
+      const quantas = d.filter(
+        (p) => p.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') === 'saude',
+      ).length
+      if (quantas !== 1) return `apareceu ${quantas} vezes: ${d.join(', ')}`
+      // E a grafia que fica é a PRIMEIRA que ele escreveu.
+      return d.includes('Saúde') ? null : `a grafia guardada foi outra: ${d.join(', ')}`
+    },
+  },
+  {
+    nome: 'número solto não é dica',
+    rodar() {
+      const d = palavrasDeDica(['Prazo 15 dias 2026'])
+      const so = d.filter((p) => !/\p{L}/u.test(p))
+      return so.length === 0 ? null : `entrou número: ${so.join(', ')}`
+    },
+  },
+  {
+    nome: 'a lista tem teto',
+    rodar() {
+      const fontes = Array.from({ length: 200 }, (_, i) => `Palavra${i} Nome${i}`)
+      const d = palavrasDeDica(fontes)
+      if (d.length > MAX_DICAS) return `${d.length} dicas, teto é ${MAX_DICAS}`
+      return d.length === MAX_DICAS ? null : `encheu só ${d.length} de ${MAX_DICAS}`
+    },
+  },
+  {
+    nome: 'a mesma folha dá a mesma lista, na mesma ordem',
+    rodar() {
+      /*
+       * Ordem instável faria a transcrição mudar de resultado sem nada ter
+       * mudado — e aí não dá pra saber se uma melhoria melhorou.
+       */
+      const fontes = ['Cadastro de pacientes', 'UBS Centro', 'Marcela', 'relatório mensal']
+      const a = palavrasDeDica(fontes).join('|')
+      const b = palavrasDeDica(fontes).join('|')
+      return a === b ? null : `mudou de ordem:\n    ${a}\n    ${b}`
+    },
+  },
+  {
+    nome: 'folha vazia não gera dica nenhuma',
+    rodar() {
+      const d = palavrasDeDica(['', '   ', 'ok'])
+      return d.length === 0 ? null : `veio ${d.join(', ')}`
+    },
+  },
+
+  /*
+   * ─── A regra que protege a correção dele ───────────────────────────────────
+   *
+   * O reconhecedor erra, então corrigir à mão é inevitável. Meia hora de
+   * reunião revisada palavra por palavra é o trabalho mais caro deste app — e
+   * o mais fácil de destruir, porque um toque em "Transcrever de novo"
+   * escreveria o rascunho por cima.
+   */
+  {
+    nome: 'gravação sem transcrição aceita a do reconhecedor',
+    rodar() {
+      return aceitaDoReconhecedor(undefined) ? null : 'recusou sem ter o que proteger'
+    },
+  },
+  {
+    nome: 'rascunho pode ser trocado por outro rascunho',
+    rodar() {
+      const antes = doReconhecedor('primeira tentativa', {}, 1000)
+      return aceitaDoReconhecedor(antes) ? null : 'recusou trocar um rascunho por outro'
+    },
+  },
+  {
+    nome: 'texto corrigido à mão NÃO é sobrescrito',
+    rodar() {
+      const corrigido = comCorrecao(doReconhecedor('rascunho', {}, 1000), 'texto revisado', 2000)
+      return aceitaDoReconhecedor(corrigido) ? 'deixou passar por cima da correção' : null
+    },
+  },
+  {
+    nome: 'corrigir guarda a data da reunião, não a da revisão',
+    rodar() {
+      // A data que interessa é a do áudio; a revisão pode ser semanas depois.
+      const t = comCorrecao(doReconhecedor('rascunho', { segundos: 182 }, 1000), 'revisado', 999_000)
+      if (t.em !== 1000) return `a data virou ${t.em}`
+      // E o que descreve o áudio continua verdadeiro depois da correção.
+      return t.segundos === 182 ? null : `perdeu os segundos: ${t.segundos}`
+    },
+  },
+  {
+    nome: 'corrigir sem transcrição anterior ainda funciona',
+    rodar() {
+      const t = comCorrecao(undefined, 'escrito do zero', 5000)
+      if (t.texto !== 'escrito do zero') return `o texto veio ${t.texto}`
+      return t.corrigida === true && t.em === 5000 ? null : 'não ficou marcado como corrigido'
     },
   },
 ]

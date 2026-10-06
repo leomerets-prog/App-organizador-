@@ -56,6 +56,7 @@ import {
   remover as removerMarca,
   renomear as renomearMarca,
 } from '../audio/marcas'
+import { aceitaDoReconhecedor, comCorrecao, doReconhecedor } from '../audio/transcricao'
 import {
   SEM_HISTORIA,
   mudou as mudouChart,
@@ -293,6 +294,14 @@ export interface AppState {
   marcarMomento: (id: Id, ms: number) => Promise<void>
   renomearMarca: (id: Id, marcaId: Id, texto: string) => Promise<void>
   tirarMarca: (id: Id, marcaId: Id) => Promise<void>
+  /** Guarda o que o reconhecedor ouviu; não passa por cima de correção à mão. */
+  guardarTranscricao: (
+    id: Id,
+    texto: string,
+    extras?: { segundos?: number; dicas?: number },
+  ) => Promise<void>
+  corrigirTranscricao: (id: Id, texto: string) => Promise<void>
+  tirarTranscricao: (id: Id) => Promise<void>
 
   addImage: (file: File | Blob, visible: { x: number; y: number; w: number; h: number }) => Promise<void>
   updateImageRect: (id: Id, rect: PageImage['rect']) => Promise<void>
@@ -1695,6 +1704,48 @@ export const useStore = create<AppState>((set, get) => ({
     const rec = get().recordings.find((r) => r.id === id)
     if (!rec) return
     await gravarMarcas(get, set, rec, removerMarca(rec.marcas ?? [], marcaId))
+  },
+
+  /**
+   * Guarda a transcrição que o aparelho acabou de fazer.
+   *
+   * Recusa passar por cima de uma transcrição JÁ CORRIGIDA à mão: se ele
+   * revisou meia hora de reunião e manda transcrever de novo por engano, o
+   * trabalho não pode evaporar em silêncio. Pra refazer de propósito existe
+   * `tirarTranscricao` primeiro — duas ações, que é o preço justo de uma
+   * ação destrutiva.
+   */
+  async guardarTranscricao(id, texto, extras) {
+    const rec = get().recordings.find((r) => r.id === id)
+    if (!rec) return
+    if (!aceitaDoReconhecedor(rec.transcricao)) return
+    const atualizado: Recording = {
+      ...rec,
+      transcricao: doReconhecedor(texto, extras),
+    }
+    set({ recordings: get().recordings.map((r) => (r.id === id ? atualizado : r)) })
+    await repo.updateRecording(atualizado)
+  },
+
+  /** O texto mexido à mão. Daqui em diante ele é a verdade. */
+  async corrigirTranscricao(id, texto) {
+    const rec = get().recordings.find((r) => r.id === id)
+    if (!rec) return
+    const atualizado: Recording = {
+      ...rec,
+      transcricao: comCorrecao(rec.transcricao, texto),
+    }
+    set({ recordings: get().recordings.map((r) => (r.id === id ? atualizado : r)) })
+    await repo.updateRecording(atualizado)
+  },
+
+  async tirarTranscricao(id) {
+    const rec = get().recordings.find((r) => r.id === id)
+    if (!rec) return
+    const atualizado: Recording = { ...rec }
+    delete atualizado.transcricao
+    set({ recordings: get().recordings.map((r) => (r.id === id ? atualizado : r)) })
+    await repo.updateRecording(atualizado)
   },
 
   async setRecordingPosition(id, positionMs) {
