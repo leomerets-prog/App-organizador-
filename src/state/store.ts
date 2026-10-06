@@ -14,6 +14,7 @@ import type {
   FlowShape,
   Marca,
   Porta,
+  Porte,
   Recording,
   Section,
   Stroke,
@@ -234,6 +235,7 @@ export interface AppState {
       pos?: { x: number; y: number }
       cor?: FlowColor
       tamanho?: { w: number; h: number }
+      porte?: Porte
     },
   ) => Promise<void>
   updateFlowEdge: (
@@ -246,6 +248,7 @@ export interface AppState {
       saidaDesvio?: number
       entradaDesvio?: number
       dobra?: number
+      ponta?: 'seta' | 'nenhuma'
     },
   ) => Promise<void>
   /**
@@ -266,7 +269,7 @@ export interface AppState {
   flipFlowEdge: (chartId: Id, edgeId: Id) => Promise<void>
   resetFlowLayout: (chartId: Id) => Promise<void>
   /** O nome do fluxograma: aparece no desenho e vai junto na imagem salva. */
-  setFlowTitle: (chartId: Id, titulo: string) => Promise<void>
+  setFlowTitle: (chartId: Id, titulo: string, subtitulo?: string) => Promise<void>
   /**
    * Voltar e avançar DENTRO do painel.
    *
@@ -1762,6 +1765,7 @@ export const useStore = create<AppState>((set, get) => ({
       pageId,
       // O título é do fluxograma, não da leitura: remontar não pode apagá-lo.
       titulo: anterior?.titulo,
+      subtitulo: anterior?.subtitulo,
       nodes,
       edges,
       soltos: grafo.soltos.length,
@@ -1899,10 +1903,14 @@ export const useStore = create<AppState>((set, get) => ({
     })
   },
 
-  async setFlowTitle(chartId, titulo) {
+  async setFlowTitle(chartId, titulo, subtitulo) {
     const chart = get().flowcharts.find((f) => f.id === chartId)
     if (!chart) return
-    await salvarChart(get, set, { ...chart, titulo: titulo.trim() || undefined })
+    await salvarChart(get, set, {
+      ...chart,
+      titulo: titulo.trim() || undefined,
+      subtitulo: (subtitulo ?? chart.subtitulo ?? '').trim() || undefined,
+    })
   },
 
   /**

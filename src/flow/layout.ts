@@ -1,4 +1,4 @@
-import type { FlowShape, Id, Porta } from '../domain/types'
+import type { FlowShape, Id, Porta, Porte } from '../domain/types'
 
 /**
  * O arranjo: do rabisco pro fluxograma de verdade.
@@ -45,6 +45,8 @@ export interface GraphIn {
     tamanho?: { w: number; h: number }
     /** O nome, porque é ele que decide a altura mínima da caixa. */
     label?: string
+    /** O porte da letra, que decide quantas letras cabem por linha. */
+    porte?: Porte
   }[]
   edges: {
     id: Id
@@ -90,8 +92,24 @@ export interface Layout {
 /** Altura de uma linha de nome, e a margem de dentro da caixa. */
 export const LINHA = 18
 const RECUO = 14
-/** Largura média de uma letra a 15px em system-ui. Medida, não chutada. */
-const LETRA = 7.8
+
+/**
+ * Os três portes de letra.
+ *
+ * `letra` é a largura média de uma letra naquele tamanho, em system-ui:
+ * 7,8px a 15px foi MEDIDO, e os outros dois saem da mesma proporção. É esse
+ * número que decide quantas letras cabem na linha — e, por consequência,
+ * quantas linhas o nome ocupa e qual a altura mínima da caixa.
+ */
+export const FONTE: Record<Porte, { tamanho: number; linha: number; letra: number; peso: number }> = {
+  titulo: { tamanho: 30, linha: 36, letra: 15.6, peso: 700 },
+  subtitulo: { tamanho: 20, linha: 25, letra: 10.4, peso: 600 },
+  normal: { tamanho: 15, linha: LINHA, letra: 7.8, peso: 400 },
+}
+
+export function fonteDe(porte?: Porte): (typeof FONTE)['normal'] {
+  return FONTE[porte ?? 'normal']
+}
 /** Ninguém consegue tocar no que é menor que isto. */
 const MIN_W = 120
 const MIN_H = 54
@@ -106,11 +124,16 @@ const MIN_H_TEXTO = 30
  * que a forma quer dizer. As duas exceções têm motivo de desenho — o losango
  * estreita no meio, e o cilindro perde altura útil nas duas tampas.
  */
-function padrao(kind: FlowShape): { w: number; h: number } {
+function padrao(kind: FlowShape, porte?: Porte): { w: number; h: number } {
   if (kind === 'decisao') return { w: DECISION_W, h: DECISION_H }
   if (kind === 'banco') return { w: NODE_W, h: NODE_H + 22 }
-  // O texto solto nasce largo e raso: ele é uma frase, não um passo.
-  if (kind === 'texto') return { w: NODE_W + 90, h: 46 }
+  if (kind === 'texto') {
+    // Título nasce largo, porque título que quebra em três linhas não é
+    // título. O texto solto comum nasce largo e raso: é uma frase, não um
+    // passo.
+    const f = fonteDe(porte)
+    return { w: porte === 'titulo' ? NODE_W + 290 : NODE_W + 90, h: f.linha + 18 }
+  }
   return { w: NODE_W, h: NODE_H }
 }
 
@@ -120,9 +143,9 @@ function padrao(kind: FlowShape): { w: number; h: number } {
  * O losango usa pouco mais da metade: o texto mora na faixa do meio, que é a
  * única parte larga dele.
  */
-export function limiteDeLetras(largura: number, kind: FlowShape): number {
+export function limiteDeLetras(largura: number, kind: FlowShape, porte?: Porte): number {
   const util = (largura - RECUO * 2) * (kind === 'decisao' ? 0.62 : 1)
-  return Math.max(4, Math.floor(util / LETRA))
+  return Math.max(4, Math.floor(util / fonteDe(porte).letra))
 }
 
 /**
@@ -162,10 +185,11 @@ export function quebrarTexto(texto: string, limite: number): string[] {
 }
 
 /** A altura mínima pra caber estas linhas nesta forma. */
-export function alturaParaTexto(linhas: number, kind: FlowShape): number {
+export function alturaParaTexto(linhas: number, kind: FlowShape, porte?: Porte): number {
+  const linha = fonteDe(porte).linha
   // Sem borda, o texto solto não precisa da margem de dentro de uma caixa.
-  if (kind === 'texto') return linhas * LINHA + 12
-  const texto = linhas * LINHA + RECUO * 2
+  if (kind === 'texto') return linhas * linha + 12
+  const texto = linhas * linha + RECUO * 2
   // No losango o texto só cabe na faixa do meio: a caixa precisa do dobro.
   return kind === 'decisao' ? texto * 1.9 : texto
 }
@@ -181,14 +205,15 @@ export function sizeOf(
   kind: FlowShape,
   tamanho?: { w: number; h: number },
   label?: string,
+  porte?: Porte,
 ): { w: number; h: number } {
-  const base = padrao(kind)
+  const base = padrao(kind, porte)
   const w = Math.max(MIN_W, tamanho?.w ?? base.w)
-  const linhas = quebrarTexto(label ?? '', limiteDeLetras(w, kind)).length
+  const linhas = quebrarTexto(label ?? '', limiteDeLetras(w, kind, porte)).length
   const h = Math.max(
     kind === 'texto' ? MIN_H_TEXTO : MIN_H,
     tamanho?.h ?? base.h,
-    alturaParaTexto(linhas, kind),
+    alturaParaTexto(linhas, kind, porte),
   )
   return { w, h }
 }
@@ -294,7 +319,7 @@ export function layout(graph: GraphIn): Layout {
   for (const l of niveis) {
     const lista = porNivel.get(l) ?? []
     const soma =
-      lista.reduce((t, n) => t + sizeOf(n.kind, n.tamanho, n.label).w, 0) +
+      lista.reduce((t, n) => t + sizeOf(n.kind, n.tamanho, n.label, n.porte).w, 0) +
       GAP_X * Math.max(0, lista.length - 1)
     largura = Math.max(largura, soma)
   }
@@ -306,13 +331,15 @@ export function layout(graph: GraphIn): Layout {
   for (const l of niveis) {
     const lista = porNivel.get(l) ?? []
     const soma =
-      lista.reduce((t, n) => t + sizeOf(n.kind, n.tamanho, n.label).w, 0) +
+      lista.reduce((t, n) => t + sizeOf(n.kind, n.tamanho, n.label, n.porte).w, 0) +
       GAP_X * Math.max(0, lista.length - 1)
     let x = MARGIN + (largura - soma) / 2
-    const alturaDoNivel = Math.max(...lista.map((n) => sizeOf(n.kind, n.tamanho, n.label).h))
+    const alturaDoNivel = Math.max(
+      ...lista.map((n) => sizeOf(n.kind, n.tamanho, n.label, n.porte).h),
+    )
 
     for (const n of lista) {
-      const { w, h } = sizeOf(n.kind, n.tamanho, n.label)
+      const { w, h } = sizeOf(n.kind, n.tamanho, n.label, n.porte)
       const posto: PlacedNode = {
         id: n.id,
         kind: n.kind,

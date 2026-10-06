@@ -1,9 +1,16 @@
 import { useMemo, useRef, useState } from 'react'
 import { useStore } from '../state/store'
-import { DOBRA_MAX, DOBRA_MIN, LINHA, limiteDeLetras, layout, quebrarTexto } from '../flow/layout'
+import {
+  DOBRA_MAX,
+  DOBRA_MIN,
+  fonteDe,
+  limiteDeLetras,
+  layout,
+  quebrarTexto,
+} from '../flow/layout'
 import type { PlacedNode } from '../flow/layout'
 import { rotulo } from '../flow/undo'
-import type { Flowchart, FlowColor, FlowShape, Porta } from '../domain/types'
+import type { Flowchart, FlowColor, FlowShape, Porta, Porte } from '../domain/types'
 import { salvarImagem } from '../audio/export'
 
 /**
@@ -44,15 +51,8 @@ const FORMA_NOME: Record<FlowShape, string> = {
 }
 
 /** A ordem da lateral: as três que a leitura conhece primeiro. */
-const FORMAS: FlowShape[] = [
-  'acao',
-  'decisao',
-  'terminal',
-  'dados',
-  'documento',
-  'banco',
-  'texto',
-]
+/** A lateral das FORMAS. O texto solto tem seção própria, com os três portes. */
+const FORMAS: FlowShape[] = ['acao', 'decisao', 'terminal', 'dados', 'documento', 'banco']
 
 /** A cor que cada forma tem quando o usuário não escolheu nenhuma. */
 const COR_DA_FORMA: Record<FlowShape, FlowColor> = {
@@ -196,6 +196,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
   const [telaCongelada, setTelaCongelada] = useState<{ w: number; h: number } | null>(null)
   const [editando, setEditando] = useState<string | null>(null)
   const [rascunho, setRascunho] = useState('')
+  const [subtituloRascunho, setSubtituloRascunho] = useState('')
   const [salvo, setSalvo] = useState<string | null>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
@@ -248,7 +249,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
    * deslocamento — e a primeira que esquecesse jogaria a caixa pra longe do
    * dedo. Em y negativo, as coordenadas do desenho continuam sendo as mesmas.
    */
-  const faixaTitulo = chart.titulo ? 72 : 0
+  const faixaTitulo = (chart.titulo ? 56 : 0) + (chart.subtitulo ? 30 : 0) + (chart.titulo || chart.subtitulo ? 16 : 0)
 
   const paraVoltar = flowHistory.chartId === chart.id ? flowHistory.feitos.at(-1) : undefined
   const paraAvancar = flowHistory.chartId === chart.id ? flowHistory.desfeitos.at(-1) : undefined
@@ -256,6 +257,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
   const abrirEdicao = (id: string, atual: string) => {
     setEditando(id)
     setRascunho(atual)
+    if (id === 'titulo') setSubtituloRascunho(chart.subtitulo ?? '')
   }
 
   const fecharEdicao = () => {
@@ -263,7 +265,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
     const alvo = editando
     setEditando(null)
     if (alvo === 'titulo') {
-      void setFlowTitle(chart.id, rascunho)
+      void setFlowTitle(chart.id, rascunho, subtituloRascunho)
     } else if (alvo.startsWith('seta:')) {
       void updateFlowEdge(chart.id, alvo.slice(5), { label: rascunho.trim() })
     } else {
@@ -640,10 +642,14 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
   }
 
   /** Cria a caixa num canto livre, embaixo de tudo, e já a deixa escolhida. */
-  const novaCaixa = async (kind: FlowShape) => {
+  const novaCaixa = async (kind: FlowShape, porte?: Porte) => {
     const abaixo = Math.max(0, ...arranjo.nodes.map((n) => n.y + n.h)) + 40
     const id = await addFlowNode(chart.id, { x: 60, y: abaixo }, kind)
-    if (id) setEscolhida(id)
+    if (id) {
+      if (porte) await updateFlowNode(chart.id, id, { porte })
+      setEscolhida(id)
+      setSetaEscolhida(null)
+    }
   }
 
   /**
@@ -702,10 +708,17 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
   const mudarZoom = (passo: 1 | -1) => {
     const svg = svgRef.current
     const agora = svg ? svg.getBoundingClientRect().width / larguraTela : (escala ?? 1)
+    /*
+     * O degrau tem que SER um degrau.
+     *
+     * Com uma folga de 2%, um "Caber" que calhasse em 0,96 subia pra 1,00 — um
+     * toque que não muda nada visível é um botão quebrado. Exigindo 15%, todo
+     * toque mexe no desenho o bastante pra se ver.
+     */
     const proximo =
       passo > 0
-        ? ESCALAS.find((e) => e > agora * 1.02)
-        : [...ESCALAS].reverse().find((e) => e < agora * 0.98)
+        ? ESCALAS.find((e) => e > agora * 1.15)
+        : [...ESCALAS].reverse().find((e) => e < agora * 0.87)
     setEscala(proximo ?? (passo > 0 ? ESCALAS[ESCALAS.length - 1] : ESCALAS[0]))
   }
 
@@ -761,6 +774,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
               title="Dar um nome a este fluxograma"
             >
               <h2>{chart.titulo || 'Fluxograma'}</h2>
+              {chart.subtitulo && <span>{chart.subtitulo}</span>}
               <span aria-hidden="true">✎</span>
             </button>
             <p className="muted">
@@ -813,6 +827,23 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
               ENTENDIMENTO, nas posições onde o usuário desenhou. É a única
               vista em que dá pra ver qual seta grudou em qual caixa — e um
               print dela diz, de uma vez, onde a leitura se perdeu. */}
+          {/*
+            O título ganhou botão PRÓPRIO na barra.
+            
+            Ele já dava pra escrever tocando no cabeçalho, e o usuário não
+            achou: "não consigo adicionar título no fluxograma". Um cabeçalho
+            que vira botão não se anuncia — parece o título que sempre esteve
+            ali. Tudo que o painel faz mora nesta barra, e o título passou a
+            morar aqui também.
+          */}
+          <button
+            className={chart.titulo ? '' : 'flow-chamando'}
+            onClick={() => abrirEdicao('titulo', chart.titulo ?? '')}
+            title="Dar nome a este fluxograma; o nome aparece no desenho e na imagem salva"
+          >
+            ✎ Título
+          </button>
+
           <button
             className={comoLi ? 'flow-salvar' : ''}
             onClick={() => setComoLi((v) => !v)}
@@ -901,7 +932,46 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
       <div className="flow-corpo">
         {lateral && (
           <aside className="flow-lateral">
-            <h3>Formas</h3>
+            {/*
+              Texto fora das formas, com nome de gente.
+              
+              "Texto solto" sozinho não dizia a ele que servia pra título. Aqui
+              os três aparecem pelo nome que ele usou — título, subtítulo e
+              texto — e cada um já nasce no tamanho certo.
+            */}
+            <h3>Texto</h3>
+            <div className="flow-paleta">
+              {(
+                [
+                  ['titulo', 'Título'],
+                  ['subtitulo', 'Subtítulo'],
+                  ['normal', 'Texto'],
+                ] as [Porte, string][]
+              ).map(([porte, nome]) => (
+                <button
+                  key={porte}
+                  onClick={() => void novaCaixa('texto', porte)}
+                  title={`Põe ${nome.toLowerCase()} solto no desenho, fora das formas`}
+                >
+                  <svg viewBox="0 0 54 34" width="54" height="34" aria-hidden="true">
+                    <text
+                      x={27}
+                      y={porte === 'titulo' ? 26 : porte === 'subtitulo' ? 24 : 23}
+                      textAnchor="middle"
+                      fontSize={porte === 'titulo' ? 26 : porte === 'subtitulo' ? 19 : 14}
+                      fontWeight={porte === 'titulo' ? 700 : porte === 'subtitulo' ? 600 : 400}
+                      fill={CORES.cinza.borda}
+                      fontFamily="system-ui, sans-serif"
+                    >
+                      Aa
+                    </text>
+                  </svg>
+                  <span>{nome}</span>
+                </button>
+              ))}
+            </div>
+
+            <h3 style={{ marginTop: 16 }}>Formas</h3>
             <div className="flow-paleta">
               {FORMAS.map((f) => (
                 <button key={f} onClick={() => void novaCaixa(f)} title={`Nova: ${FORMA_NOME[f]}`}>
@@ -1025,13 +1095,25 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
               {chart.titulo && (
                 <text
                   x={28}
-                  y={-faixaTitulo + 46}
+                  y={-faixaTitulo + 42}
                   fontSize={30}
                   fontWeight="700"
                   fill={TEXTO}
                   fontFamily="system-ui, sans-serif"
                 >
                   {chart.titulo}
+                </text>
+              )}
+              {chart.subtitulo && (
+                <text
+                  x={28}
+                  y={-16}
+                  fontSize={18}
+                  fontWeight="500"
+                  fill={SETA}
+                  fontFamily="system-ui, sans-serif"
+                >
+                  {chart.subtitulo}
                 </text>
               )}
 
@@ -1075,7 +1157,13 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
                       stroke={viva ? ESCOLHIDA : SETA}
                       strokeWidth={viva ? 4 : 2}
                       strokeDasharray={e.retorno ? '7 5' : undefined}
-                      markerEnd={viva ? 'url(#pontaViva)' : 'url(#ponta)'}
+                      markerEnd={
+                        porSetaId.get(e.id)?.ponta === 'nenhuma'
+                          ? undefined
+                          : viva
+                            ? 'url(#pontaViva)'
+                            : 'url(#ponta)'
+                      }
                     />
                     {/*
                       A FAIXA DE TOQUE.
@@ -1147,6 +1235,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
                     posto={n}
                     label={dado.label}
                     cor={dado.cor}
+                    porte={dado.porte}
                     escolhida={escolhida === n.id || ligandoDe === n.id}
                     ligando={!!ligandoDe}
                     onPointerDown={(e) => pegarCaixa(e, n)}
@@ -1180,6 +1269,23 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
             />
           </label>
 
+          {/* O subtítulo entra junto do título, no mesmo campo aberto: são a
+              mesma decisão ("como este desenho se chama"), e separá-los em
+              dois lugares faria procurar duas vezes. */}
+          {editando === 'titulo' && (
+            <label>
+              <span>Subtítulo (data, autor, versão…)</span>
+              <input
+                value={subtituloRascunho}
+                onChange={(e) => setSubtituloRascunho(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') fecharEdicao()
+                  if (e.key === 'Escape') setEditando(null)
+                }}
+              />
+            </label>
+          )}
+
           <button className="flow-ok" onClick={fecharEdicao}>
             Pronto
           </button>
@@ -1211,6 +1317,20 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
             title="Troca o sentido: o que apontava pra lá passa a apontar pra cá"
           >
             ⇄ Inverter
+          </button>
+
+          {/* Linha reta, sem ponta: "estes dois andam juntos", em vez de
+              "este leva àquele". */}
+          <button
+            className={porSetaId.get(setaEscolhida)?.ponta === 'nenhuma' ? 'ativo' : ''}
+            onClick={() =>
+              void updateFlowEdge(chart.id, setaEscolhida, {
+                ponta: porSetaId.get(setaEscolhida)?.ponta === 'nenhuma' ? 'seta' : 'nenhuma',
+              })
+            }
+            title="Linha reta, sem ponta de seta"
+          >
+            {porSetaId.get(setaEscolhida)?.ponta === 'nenhuma' ? '— Sem ponta' : '→ Com ponta'}
           </button>
 
           <PortaEscolha
@@ -1279,6 +1399,27 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
             O tamanho é um MÍNIMO: a caixa cresce sozinha pra caber o nome, e
             por isso o "−" nunca consegue esconder texto.
           */}
+          {/*
+            O porte da letra: título, subtítulo, normal.
+            
+            Pedido assim: "adicione a opção de colocar texto fora das formas
+            como título e subtítulo". Vale pra qualquer forma — numa caixa
+            comum serve pra destacar o passo que manda no desenho.
+          */}
+          <div className="flow-medida">
+            <span className="muted">Letra</span>
+            {(['titulo', 'subtitulo', 'normal'] as Porte[]).map((p) => (
+              <button
+                key={p}
+                className={(porId.get(escolhida)?.porte ?? 'normal') === p ? 'ativo' : ''}
+                onClick={() => void updateFlowNode(chart.id, escolhida, { porte: p })}
+                title={PORTE_NOME[p]}
+              >
+                {PORTE_SIGLA[p]}
+              </button>
+            ))}
+          </div>
+
           <div className="flow-medida">
             <span className="muted">Largura</span>
             <button
@@ -1353,6 +1494,19 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
       )}
     </div>
   )
+}
+
+const PORTE_NOME: Record<Porte, string> = {
+  titulo: 'Tamanho de título',
+  subtitulo: 'Tamanho de subtítulo',
+  normal: 'Tamanho normal',
+}
+
+/** Uma letra de cada tamanho: o botão mostra o que ele faz. */
+const PORTE_SIGLA: Record<Porte, string> = {
+  titulo: 'A',
+  subtitulo: 'A',
+  normal: 'a',
 }
 
 const PORTA_NOME: Record<Porta, string> = {
@@ -1649,6 +1803,7 @@ function Caixa({
   posto,
   label,
   cor: corEscolhida,
+  porte,
   escolhida,
   ligando,
   onPointerDown,
@@ -1656,6 +1811,7 @@ function Caixa({
   posto: PlacedNode
   label: string
   cor?: FlowColor
+  porte?: Porte
   escolhida: boolean
   ligando: boolean
   onPointerDown: (e: React.PointerEvent) => void
@@ -1665,7 +1821,8 @@ function Caixa({
   const cy = posto.y + posto.h / 2 + (posto.kind === 'documento' ? -6 : 0)
   // A MESMA conta do arranjo, de propósito: é ela que deu à caixa a altura
   // que o texto precisa. Se fossem duas, o nome voltaria a ser cortado.
-  const linhas = quebrarTexto(label || '…', limiteDeLetras(posto.w, posto.kind))
+  const fonte = fonteDe(porte)
+  const linhas = quebrarTexto(label || '…', limiteDeLetras(posto.w, posto.kind, porte))
 
   return (
     <g
@@ -1709,9 +1866,10 @@ function Caixa({
         <text
           key={i}
           x={cx}
-          y={cy + (i - (linhas.length - 1) / 2) * LINHA + 5}
+          y={cy + (i - (linhas.length - 1) / 2) * fonte.linha + fonte.tamanho / 3}
           textAnchor="middle"
-          fontSize={15}
+          fontSize={fonte.tamanho}
+          fontWeight={fonte.peso}
           fill={label ? TEXTO : '#9ca3af'}
           fontFamily="system-ui, sans-serif"
         >

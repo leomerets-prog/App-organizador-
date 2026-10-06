@@ -16,8 +16,8 @@ import type { FlowGraph } from './graph'
  *    painel não têm tinta por trás; a leitura jamais as encontraria, e
  *    descartá-las seria apagar o trabalho dele
  * 2. **O que ele editou vence a leitura.** Nome corrigido, forma trocada,
- *    posição arrastada, tamanho ajustado, cor escolhida e o lado por onde cada
- *    seta sai e entra sobrevivem à remontagem
+ *    posição arrastada, tamanho ajustado, porte da letra, cor escolhida e o
+ *    lado por onde cada seta sai e entra sobrevivem à remontagem
  * 3. **O que ele NÃO tocou segue a tinta.** Caixa que sumiu do desenho sai do
  *    fluxograma; caixa nova no desenho entra
  *
@@ -71,6 +71,7 @@ export function mergeFlowchart(anterior: Flowchart | undefined, grafo: FlowGraph
         // tem opinião sobre elas, e remontar não pode esquecê-las.
         saida: velha?.saida,
         entrada: velha?.entrada,
+        ponta: velha?.ponta,
         saidaDesvio: velha?.saidaDesvio,
         entradaDesvio: velha?.entradaDesvio,
         dobra: velha?.dobra,

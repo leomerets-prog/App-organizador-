@@ -2898,6 +2898,32 @@ input {
   color: var(--text);
 }
 
+/* O botão que ainda não foi usado chama atenção sem gritar: traço do acento,
+   fundo suave. Some assim que tem conteúdo. */
+.flow-acoes .flow-chamando {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.flow-medida button.ativo {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 700;
+}
+
+.flow-barra-seta button.ativo {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.flow-titulo-btn > span:not([aria-hidden]) {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
 /* Escolher o lado por onde a seta sai e entra. Fica no editor da seta, junto
    do nome, porque é lá que se mexe numa seta específica. */
 .flow-portas {

@@ -320,7 +320,18 @@ export interface FlowChartNode {
    * "escrevi muito e está ficando oculto".
    */
   tamanho?: { w: number; h: number }
+  /**
+   * O porte da letra: título, subtítulo ou texto normal.
+   *
+   * Vale sobretudo pro texto solto, que é onde ele foi pedido — "colocar texto
+   * fora das formas como título e subtítulo". Numa caixa comum também
+   * funciona, e serve pra destacar o passo que manda no desenho.
+   */
+  porte?: Porte
 }
+
+/** Tamanho da letra. Três, e não um campo de números: escolher é mais rápido. */
+export type Porte = 'titulo' | 'subtitulo' | 'normal'
 
 /** Por onde uma seta sai de uma caixa, ou entra nela. */
 export type Porta = 'cima' | 'baixo' | 'esquerda' | 'direita'
@@ -354,6 +365,14 @@ export interface FlowChartEdge {
    * saem da mesma caixa pelo mesmo lado saem grudadas, e porque o trecho reto
    * que desce da caixa só anda pro lado se o pé dele andar.
    */
+  /**
+   * A ponta da seta, ou a falta dela.
+   *
+   * `nenhuma` é uma linha reta ligando as duas caixas, sem apontar pra lado
+   * nenhum — serve pra dizer "estes dois andam juntos" em vez de "este leva
+   * àquele". Ausente quer dizer seta, que é o caso normal num fluxograma.
+   */
+  ponta?: 'seta' | 'nenhuma'
   saidaDesvio?: number
   entradaDesvio?: number
   /**
@@ -378,6 +397,8 @@ export interface Flowchart {
   pageId: Id
   /** O nome do fluxograma. Aparece no desenho e vai junto na imagem salva. */
   titulo?: string
+  /** A linha de baixo do título: data, autor, versão — o que ele quiser. */
+  subtitulo?: string
   /**
    * A zona de onde veio, quando veio de uma.
    *

@@ -70,7 +70,8 @@ export function assinatura(chart: Flowchart): string {
         `${n.id}|${n.kind}|${n.label}|${n.cor ?? ''}|` +
         (n.pos ? `${Math.round(n.pos.x)},${Math.round(n.pos.y)}` : '-') +
         '|' +
-        (n.tamanho ? `${Math.round(n.tamanho.w)}x${Math.round(n.tamanho.h)}` : '-'),
+        (n.tamanho ? `${Math.round(n.tamanho.w)}x${Math.round(n.tamanho.h)}` : '-') +
+        `|${n.porte ?? '-'}`,
     )
     .join(';')
   const setas = [...chart.edges]
@@ -78,10 +79,10 @@ export function assinatura(chart: Flowchart): string {
     .map(
       (e) =>
         `${e.id}|${e.from}|${e.to}|${e.label}|${e.saida ?? '-'}|${e.entrada ?? '-'}` +
-        `|${num(e.saidaDesvio)}|${num(e.entradaDesvio)}|${num(e.dobra)}`,
+        `|${num(e.saidaDesvio)}|${num(e.entradaDesvio)}|${num(e.dobra)}|${e.ponta ?? '-'}`,
     )
     .join(';')
-  return `${chart.titulo ?? ''}#${caixas}#${setas}`
+  return `${chart.titulo ?? ''}|${chart.subtitulo ?? ''}#${caixas}#${setas}`
 }
 
 /** Mudou alguma coisa que o usuário veria? */
@@ -159,6 +160,7 @@ export function paraChart(history: FlowHistory, chartId: Id | null): FlowHistory
  */
 export function rotulo(antes: Flowchart, depois: Flowchart): string {
   if ((antes.titulo ?? '') !== (depois.titulo ?? '')) return 'título'
+  if ((antes.subtitulo ?? '') !== (depois.subtitulo ?? '')) return 'subtítulo'
   if (depois.nodes.length > antes.nodes.length) return 'caixa nova'
   if (depois.nodes.length < antes.nodes.length) return 'caixa tirada'
   if (depois.edges.length > antes.edges.length) return 'ligação nova'
@@ -175,6 +177,7 @@ export function rotulo(antes: Flowchart, depois: Flowchart): string {
     if (a.kind !== d.kind) return 'forma'
     if (a.cor !== d.cor) return 'cor'
     if (tam(a.tamanho) !== tam(d.tamanho)) return 'tamanho'
+    if (a.porte !== d.porte) return 'porte da letra'
     if (a.label !== d.label) return 'nome'
   }
   for (const d of depois.edges) {
@@ -182,6 +185,7 @@ export function rotulo(antes: Flowchart, depois: Flowchart): string {
     if (!a) return 'leitura'
     if (a.from === d.to && a.to === d.from) return 'seta invertida'
     if (a.saida !== d.saida || a.entrada !== d.entrada) return 'lado da seta'
+    if (a.ponta !== d.ponta) return 'ponta da seta'
     if (num(a.dobra) !== num(d.dobra)) return 'dobra da seta'
     if (num(a.saidaDesvio) !== num(d.saidaDesvio) || num(a.entradaDesvio) !== num(d.entradaDesvio)) {
       return 'onde a seta encosta'

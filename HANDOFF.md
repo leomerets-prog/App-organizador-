@@ -1055,6 +1055,9 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Tocar escolhe, arrastar move — o mesmo gesto | Separar em dois modos obrigaria a escolher o modo antes de saber o que se quer fazer. Quem solta sem andar escolheu; quem andou, moveu |
 | `touch-action: none` vai no `<svg>`, nunca no que está dentro dele | O navegador ignora a propriedade em elemento de dentro de um SVG. Estava no `<g>` da caixa, não fazia nada, e o gesto da caneta era roubado pra rolar a tela |
 | Um gesto de cada vez, e a caneta não cede ao dedo | A palma encosta antes da ponta. Dois gestos disputando a mesma tela levavam a caixa pro lado errado e depois travavam o painel |
+| Elemento que já existia não vira botão só porque ganhou onClick | O cabeçalho virou botão do título e ninguém achou: ele continua parecendo o cabeçalho que sempre foi |
+| Quando o bonito e o achável divergem, ganha o achável | Terceira vez: os ícones de tamanho, o texto solto sem nome, o título no cabeçalho |
+| Degrau que não se vê é botão quebrado | Com 2% de folga o zoom ia de 0,96 a 1,00 — respondia sem mudar nada. Agora exige 15% |
 | Antes de construir o caro e incerto, meça | Transcrever depende do aparelho, não do código. A sonda tenta de verdade e devolve TUDO que descobriu, inclusive em que etapa parou |
 | O app não entende a reunião; quem entende é quem está nela | As marcas de momento dão a linha do tempo sem exigir que o app compreenda nada — e não prometem o que não dá pra cumprir offline |
 | Marca nasce sem nome | Quem está na reunião não para pra escrever. Exigir o nome na hora é garantir que ninguém marque nada |

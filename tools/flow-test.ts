@@ -633,6 +633,41 @@ const casos: Caso[] = [
       return null
     },
   },
+  {
+    /*
+     * "Adicione a opção de colocar texto fora das formas como título e
+     * subtítulo." O porte muda a largura da letra, e é ela que decide quantas
+     * cabem na linha — logo, quantas linhas o texto ocupa, logo a altura.
+     * Se o porte não chegasse até a conta, o título sairia cortado.
+     */
+    nome: 'o porte da letra manda na quebra e na altura',
+    rodar() {
+      const texto = 'Fluxo de aprovação de pedido'
+      const comum = layout({
+        nodes: [{ ...caixa('a'), kind: 'texto', label: texto }],
+        edges: [],
+      }).nodes[0]
+      const grande = layout({
+        nodes: [{ ...caixa('a'), kind: 'texto', label: texto, porte: 'titulo' }],
+        edges: [],
+      }).nodes[0]
+
+      const linhasComum = quebrarTexto(texto, limiteDeLetras(comum.w, 'texto')).length
+      const linhasGrande = quebrarTexto(texto, limiteDeLetras(grande.w, 'texto', 'titulo')).length
+      if (grande.h < alturaParaTexto(linhasGrande, 'texto', 'titulo')) {
+        return `o título ficou com ${Math.round(grande.h)}px pra ${linhasGrande} linha(s)`
+      }
+      if (!(grande.h > comum.h)) return 'o título não ficou mais alto que o texto comum'
+      // E numa largura igual, a letra maior cabe em MENOS letras por linha.
+      const estreitoComum = limiteDeLetras(300, 'texto')
+      const estreitoTitulo = limiteDeLetras(300, 'texto', 'titulo')
+      if (!(estreitoTitulo < estreitoComum)) {
+        return `na mesma largura couberam ${estreitoTitulo} letras de título e ${estreitoComum} normais`
+      }
+      void linhasComum
+      return null
+    },
+  },
 ]
 
 /** Uma caixa qualquer, pros casos de arranjo. */
