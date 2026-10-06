@@ -1055,6 +1055,8 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Tocar escolhe, arrastar move — o mesmo gesto | Separar em dois modos obrigaria a escolher o modo antes de saber o que se quer fazer. Quem solta sem andar escolheu; quem andou, moveu |
 | `touch-action: none` vai no `<svg>`, nunca no que está dentro dele | O navegador ignora a propriedade em elemento de dentro de um SVG. Estava no `<g>` da caixa, não fazia nada, e o gesto da caneta era roubado pra rolar a tela |
 | Um gesto de cada vez, e a caneta não cede ao dedo | A palma encosta antes da ponta. Dois gestos disputando a mesma tela levavam a caixa pro lado errado e depois travavam o painel |
+| Quando o produto é um ARQUIVO, o caso abre o arquivo | Conferir a tela que gerou a imagem é conferir outra coisa: a imagem tem moldura própria, e moldura errada corta sem avisar |
+| O app diz o que foi salvo, não só onde | Quem não abre o arquivo pra conferir fica na dúvida — e foi essa dúvida que gerou um pedido de coisa que já existia |
 | Elemento que já existia não vira botão só porque ganhou onClick | O cabeçalho virou botão do título e ninguém achou: ele continua parecendo o cabeçalho que sempre foi |
 | Quando o bonito e o achável divergem, ganha o achável | Terceira vez: os ícones de tamanho, o texto solto sem nome, o título no cabeçalho |
 | Degrau que não se vê é botão quebrado | Com 2% de folga o zoom ia de 0,96 a 1,00 — respondia sem mudar nada. Agora exige 15% |

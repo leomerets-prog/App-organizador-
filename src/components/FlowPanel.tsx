@@ -926,7 +926,24 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
       )}
 
       {erro && <div className="flow-erro">{erro}</div>}
-      {salvo && <div className="flow-salvo">✓ Salvo — {salvo}</div>}
+      {/*
+        O que foi salvo, e não só onde.
+        
+        "O título que eu queria é ao salvar o fluxograma, dentro da imagem ter
+        título e subtítulo." A imagem SAI com os dois — mas o app nunca disse
+        isso, e quem não abre o arquivo pra conferir fica na dúvida. Agora a
+        confirmação nomeia o título que entrou, ou avisa que não havia nenhum.
+      */}
+      {salvo && (
+        <div className="flow-salvo">
+          ✓ Salvo — {salvo}
+          {chart.titulo ? (
+            <> · com o título “{chart.titulo}”{chart.subtitulo ? ` e o subtítulo “${chart.subtitulo}”` : ''}</>
+          ) : (
+            <> · sem título. Toque em “✎ Título” pra pôr um na imagem.</>
+          )}
+        </div>
+      )}
       {flowStatus.state === 'erro' && <div className="flow-erro">{flowStatus.message}</div>}
 
       <div className="flow-corpo">
