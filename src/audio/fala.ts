@@ -40,6 +40,18 @@ export interface ResultadoDaFala {
   segundos?: number
   codigo?: number
   erro?: string
+  /**
+   * O maior valor de onda que chegou ao reconhecedor, de 0 a 32767.
+   *
+   * É o número que separa "decodifiquei certo" de "decodifiquei lixo": áudio
+   * de fala tem picos aos milhares. Perto de zero quer dizer que o
+   * reconhecedor recebeu silêncio, por mais segundos que tenham passado.
+   */
+  pico?: number
+  /** Em que formato o decodificador devolveu o áudio. */
+  codificacao?: string
+  /** Que avisos o reconhecedor deu, na ordem. Vazio = ele nem acordou. */
+  trilha?: string
 }
 
 interface SpeechPlugin {

@@ -17,4 +17,10 @@ public class RecognizerIntent {
     public static final String EXTRA_AUDIO_SOURCE_CHANNEL_COUNT = "android.speech.extra.AUDIO_SOURCE_CHANNEL_COUNT";
     public static final String EXTRA_AUDIO_SOURCE_ENCODING = "android.speech.extra.AUDIO_SOURCE_ENCODING";
     public static final String EXTRA_AUDIO_SOURCE_SAMPLING_RATE = "android.speech.extra.AUDIO_SOURCE_SAMPLING_RATE";
+    /**
+     * REGRA DE EXECUÇÃO: o VALOR deste extra é o nome do outro extra que
+     * define quando a sessão acaba. Passando EXTRA_AUDIO_SOURCE, ela acaba
+     * quando o arquivo acaba — que é o que serve pra transcrever gravação.
+     */
+    public static final String EXTRA_SEGMENTED_SESSION = "android.speech.extra.SEGMENTED_SESSION";
 }

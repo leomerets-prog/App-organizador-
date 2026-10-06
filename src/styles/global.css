@@ -995,6 +995,15 @@ input {
   color: var(--text);
 }
 
+.rec-sonda-medida {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 2px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
 .rec-sonda-boa p {
   margin: 6px 0 0;
 }

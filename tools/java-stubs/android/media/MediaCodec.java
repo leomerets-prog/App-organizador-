@@ -30,5 +30,6 @@ public class MediaCodec {
     public void queueInputBuffer(int index, int offset, int size, long presentationTimeUs, int flags) { }
     public int dequeueOutputBuffer(BufferInfo info, long timeoutUs) { return -1; }
     public ByteBuffer getOutputBuffer(int index) { return null; }
+    public MediaFormat getOutputFormat() { return null; }
     public void releaseOutputBuffer(int index, boolean render) { }
 }

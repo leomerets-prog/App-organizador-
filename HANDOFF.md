@@ -1055,6 +1055,10 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Tocar escolhe, arrastar move — o mesmo gesto | Separar em dois modos obrigaria a escolher o modo antes de saber o que se quer fazer. Quem solta sem andar escolheu; quem andou, moveu |
 | `touch-action: none` vai no `<svg>`, nunca no que está dentro dele | O navegador ignora a propriedade em elemento de dentro de um SVG. Estava no `<g>` da caixa, não fazia nada, e o gesto da caneta era roubado pra rolar a tela |
 | Um gesto de cada vez, e a caneta não cede ao dedo | A palma encosta antes da ponta. Dois gestos disputando a mesma tela levavam a caixa pro lado errado e depois travavam o painel |
+| Sonda que cala não decide nada | "Não transcreveu" sem número nenhum não diz se a culpa é do áudio ou do serviço de fala. Segundos, pico da onda, formato e trilha dos avisos |
+| Conferência de VERSÃO não é conferência de capacidade | "Aceita ler um arquivo: sim" era só `SDK_INT >= 31`; o serviço do aparelho pode ignorar mesmo no Android 16 |
+| A emenda entre folhas é pintura, nunca espaço | Abrir um vão de verdade mexeria em todas as coordenadas já gravadas — o jeito mais fácil de perder o caderno de alguém |
+| Medir a coisa errada é pior que não medir | O primeiro caso da emenda passava SEM a emenda: sempre há algo escuro na folha. Apague o conserto e veja o caso falhar |
 | Quando o produto é um ARQUIVO, o caso abre o arquivo | Conferir a tela que gerou a imagem é conferir outra coisa: a imagem tem moldura própria, e moldura errada corta sem avisar |
 | O app diz o que foi salvo, não só onde | Quem não abre o arquivo pra conferir fica na dúvida — e foi essa dúvida que gerou um pedido de coisa que já existia |
 | Elemento que já existia não vira botão só porque ganhou onClick | O cabeçalho virou botão do título e ninguém achou: ele continua parecendo o cabeçalho que sempre foi |

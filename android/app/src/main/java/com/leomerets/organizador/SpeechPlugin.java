@@ -96,7 +96,13 @@ public class SpeechPlugin extends Plugin {
                 offline = SpeechRecognizer.isOnDeviceRecognitionAvailable(getContext());
             }
             r.put("temOffline", offline);
-            // Entregar um arquivo no lugar do microfone é do Android 12 pra cá.
+            /*
+             * CUIDADO com o que este campo quer dizer: ele é uma conferência
+             * de VERSÃO, não de capacidade. O Android 12 passou a permitir
+             * entregar um arquivo, mas o serviço de reconhecimento instalado
+             * pode ignorar — e foi exatamente assim que a sonda deu "sim" num
+             * aparelho onde não funcionou. O nome na tela diz isso.
+             */
             r.put("aceitaArquivo", Build.VERSION.SDK_INT >= 31);
             r.put("ok", true);
         } catch (Throwable error) {
@@ -159,10 +165,10 @@ public class SpeechPlugin extends Plugin {
         final String idioma = call.getString("idioma", "pt-BR");
 
         File cru;
-        final long amostras;
+        final Decodificado medida;
         try {
             cru = File.createTempFile("sonda-", ".pcm", getContext().getCacheDir());
-            amostras = decodificarParaPcm(origem, cru);
+            medida = decodificarParaPcm(origem, cru);
         } catch (Throwable error) {
             Log.e(TAG, "organizador: sonda não decodificou o áudio", error);
             JSObject r = new JSObject();
@@ -173,7 +179,7 @@ public class SpeechPlugin extends Plugin {
             return;
         }
 
-        if (amostras <= 0) {
+        if (medida.amostras <= 0) {
             JSObject r = new JSObject();
             r.put("ok", false);
             r.put("etapa", "decodificar");
@@ -190,7 +196,7 @@ public class SpeechPlugin extends Plugin {
          */
         getActivity().runOnUiThread(() -> {
             try {
-                ouvirArquivo(call, pcm, idioma, amostras);
+                ouvirArquivo(call, pcm, idioma, medida);
             } catch (Throwable error) {
                 Log.e(TAG, "organizador: sonda não pôs o reconhecedor de pé", error);
                 JSObject r = new JSObject();
@@ -202,7 +208,7 @@ public class SpeechPlugin extends Plugin {
         });
     }
 
-    private void ouvirArquivo(PluginCall call, File pcm, String idioma, long amostras) throws Exception {
+    private void ouvirArquivo(PluginCall call, File pcm, String idioma, Decodificado medida) throws Exception {
         if (Build.VERSION.SDK_INT < 31) {
             JSObject r = new JSObject();
             r.put("ok", false);
@@ -229,9 +235,21 @@ public class SpeechPlugin extends Plugin {
         pedido.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1);
         pedido.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, AudioFormat.ENCODING_PCM_16BIT);
         pedido.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE, TAXA);
+        if (Build.VERSION.SDK_INT >= 33) {
+            // "A sessão acaba quando o arquivo acabar" — é isso que o valor diz.
+            pedido.putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, RecognizerIntent.EXTRA_AUDIO_SOURCE);
+        }
 
         final List<String> pedacos = new ArrayList<>();
         final boolean[] respondeu = { false };
+        /*
+         * A TRILHA: que avisos o reconhecedor deu, na ordem.
+         *
+         * É o que separa "ele nem acordou" de "ele ouviu e não entendeu" — e
+         * sem essa distinção não dá pra saber se o problema é o arquivo, o
+         * áudio ou o serviço de fala do aparelho.
+         */
+        final StringBuilder trilha = new StringBuilder();
 
         final Runnable responder = () -> {
             if (respondeu[0]) {
@@ -259,16 +277,34 @@ public class SpeechPlugin extends Plugin {
             r.put("ok", tudo.length() > 0);
             r.put("etapa", "reconhecer");
             r.put("texto", tudo.toString());
-            r.put("segundos", amostras / (double) TAXA);
+            medida.contar(r);
+            r.put("trilha", trilha.toString());
+            if (tudo.length() == 0) {
+                /*
+                 * O caso que o usuário encontrou: nem resultado, nem erro.
+                 * Antes isto resolvia com `erro` vazio e a tela dizia só "não
+                 * transcreveu", que não serve pra decidir nada. Agora a sonda
+                 * diz o que ela própria viu acontecer.
+                 */
+                r.put(
+                        "erro",
+                        trilha.length() == 0
+                                ? "O reconhecedor não deu sinal nenhum em " + (PRAZO_MS / 1000)
+                                        + "s — nem resultado, nem erro. O serviço de fala deste"
+                                        + " aparelho provavelmente ignora o arquivo e fica"
+                                        + " esperando o microfone."
+                                : "O reconhecedor respondeu (" + trilha + ") mas não devolveu"
+                                        + " texto nenhum.");
+            }
             call.resolve(r);
         };
 
         reconhecedor.setRecognitionListener(new RecognitionListener() {
-            @Override public void onReadyForSpeech(Bundle params) { }
-            @Override public void onBeginningOfSpeech() { }
+            @Override public void onReadyForSpeech(Bundle params) { trilha.append("pronto;"); }
+            @Override public void onBeginningOfSpeech() { trilha.append("começou;"); }
             @Override public void onRmsChanged(float rms) { }
             @Override public void onBufferReceived(byte[] buffer) { }
-            @Override public void onEndOfSpeech() { }
+            @Override public void onEndOfSpeech() { trilha.append("fim da fala;"); }
 
             @Override
             public void onError(int code) {
@@ -291,12 +327,14 @@ public class SpeechPlugin extends Plugin {
                 r.put("etapa", "reconhecer");
                 r.put("codigo", code);
                 r.put("erro", explicar(code));
-                r.put("segundos", amostras / (double) TAXA);
+                r.put("trilha", trilha + "erro;");
+                medida.contar(r);
                 call.resolve(r);
             }
 
             @Override
             public void onResults(Bundle results) {
+                trilha.append("resultado;");
                 ArrayList<String> lista = results == null
                         ? null
                         : results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
@@ -307,7 +345,34 @@ public class SpeechPlugin extends Plugin {
             }
 
             @Override
-            public void onPartialResults(Bundle partial) { }
+            public void onPartialResults(Bundle partial) {
+                if (trilha.indexOf("parcial;") < 0) {
+                    trilha.append("parcial;");
+                }
+            }
+
+            /*
+             * Modo segmentado (Android 13+): é o caminho DOCUMENTADO pra ler um
+             * arquivo, porque ele não encerra no primeiro silêncio — e reunião
+             * é feita de silêncios. Os resultados chegam aos pedaços, e o fim
+             * vem quando o arquivo acaba.
+             */
+            @Override
+            public void onSegmentResults(Bundle segment) {
+                trilha.append("segmento;");
+                ArrayList<String> lista = segment == null
+                        ? null
+                        : segment.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                if (lista != null && !lista.isEmpty()) {
+                    pedacos.add(lista.get(0));
+                }
+            }
+
+            @Override
+            public void onEndOfSegmentedSession() {
+                trilha.append("fim da sessão;");
+                responder.run();
+            }
 
             @Override public void onEvent(int type, Bundle params) { }
         });
@@ -347,10 +412,31 @@ public class SpeechPlugin extends Plugin {
      * Devolve quantas amostras saíram — zero quer dizer que o decodificador
      * não deu conta do formato, que é uma resposta tão útil quanto a outra.
      */
-    private static long decodificarParaPcm(File origem, File destino) throws Exception {
+    /**
+     * O que saiu da decodificação — e não só quanto.
+     *
+     * O `pico` é o que distingue "decodifiquei certo" de "decodifiquei lixo":
+     * áudio de verdade tem picos perto do máximo, e um pico quase zero quer
+     * dizer que o reconhecedor recebeu silêncio, por mais segundos que
+     * tenham passado. Sem esse número, "não transcreveu" não diz se a culpa é
+     * do decodificador ou do serviço de fala.
+     */
+    private static final class Decodificado {
+        long amostras;
+        int pico;
+        String codificacao = "?";
+
+        void contar(JSObject r) {
+            r.put("segundos", amostras / (double) TAXA);
+            r.put("pico", pico);
+            r.put("codificacao", codificacao);
+        }
+    }
+
+    private static Decodificado decodificarParaPcm(File origem, File destino) throws Exception {
         MediaExtractor extrator = new MediaExtractor();
         MediaCodec decodificador = null;
-        long escritas = 0;
+        final Decodificado saiu = new Decodificado();
         try (OutputStream saida = new FileOutputStream(destino)) {
             extrator.setDataSource(origem.getAbsolutePath());
 
@@ -379,6 +465,7 @@ public class SpeechPlugin extends Plugin {
             MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
             boolean acabouEntrada = false;
             boolean acabouSaida = false;
+            int bits = 0;
             // Resto da divisão guardado entre blocos: sem ele, cada bloco
             // recomeçaria a contagem e a reamostragem andaria aos trancos.
             int sobra = 0;
@@ -408,8 +495,20 @@ public class SpeechPlugin extends Plugin {
                         byte[] bloco = new byte[info.size];
                         buffer.position(info.offset);
                         buffer.get(bloco, 0, info.size);
-                        sobra = escreverReamostrado(saida, bloco, canais, taxaOrigem, sobra);
-                        escritas += info.size / (2L * canais);
+                        /*
+                         * O FORMATO DA SAÍDA, a cada bloco.
+                         *
+                         * Um decodificador de opus pode devolver 16 bits ou
+                         * FLOAT de 32. Lendo float como se fosse 16 bits, o que
+                         * chega ao reconhecedor é ruído — e ele devolve
+                         * silêncio sem reclamar de nada, que foi exatamente o
+                         * que aconteceu no tablet.
+                         */
+                        if (bits == 0) {
+                            bits = bitsDaSaida(decodificador);
+                            saiu.codificacao = bits == 32 ? "float 32" : bits + " bits";
+                        }
+                        sobra = escreverReamostrado(saida, bloco, canais, taxaOrigem, sobra, bits, saiu);
                     }
                     decodificador.releaseOutputBuffer(saidaIdx, false);
                     if ((info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
@@ -432,7 +531,27 @@ public class SpeechPlugin extends Plugin {
                 // Idem.
             }
         }
-        return escritas;
+        return saiu;
+    }
+
+    /**
+     * Quantos bits por amostra o decodificador está devolvendo.
+     *
+     * `KEY_PCM_ENCODING` só aparece no formato de SAÍDA, e só quando não é o
+     * padrão de 16 bits — ausente quer dizer 16.
+     */
+    private static int bitsDaSaida(MediaCodec decodificador) {
+        try {
+            MediaFormat saida = decodificador.getOutputFormat();
+            if (saida != null && saida.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
+                int enc = saida.getInteger(MediaFormat.KEY_PCM_ENCODING);
+                if (enc == AudioFormat.ENCODING_PCM_FLOAT) return 32;
+                if (enc == AudioFormat.ENCODING_PCM_8BIT) return 8;
+            }
+        } catch (Throwable ignored) {
+            // Formato que não se deixa perguntar: segue no padrão.
+        }
+        return 16;
     }
 
     /**
@@ -442,8 +561,18 @@ public class SpeechPlugin extends Plugin {
      * impede a reamostragem de recomeçar a cada bloco.
      */
     private static int escreverReamostrado(
-            OutputStream saida, byte[] bloco, int canais, int taxaOrigem, int sobra) throws Exception {
-        int porAmostra = 2 * canais;
+            OutputStream saida,
+            byte[] bloco,
+            int canais,
+            int taxaOrigem,
+            int sobra,
+            int bits,
+            Decodificado saiu) throws Exception {
+        int bytesPorValor = bits / 8;
+        int porAmostra = bytesPorValor * canais;
+        if (porAmostra <= 0) {
+            return sobra;
+        }
         int total = bloco.length / porAmostra;
         byte[] fora = new byte[total * 2];
         int escritos = 0;
@@ -456,13 +585,34 @@ public class SpeechPlugin extends Plugin {
             conta -= taxaOrigem;
             // Mono: fica o primeiro canal. Misturar os dois é mais bonito e
             // não muda a resposta da sonda.
-            int base = i * porAmostra;
-            fora[escritos++] = bloco[base];
-            fora[escritos++] = bloco[base + 1];
+            int valor = amostraDe(bloco, i * porAmostra, bits);
+            if (Math.abs(valor) > saiu.pico) {
+                saiu.pico = Math.abs(valor);
+            }
+            fora[escritos++] = (byte) (valor & 0xff);
+            fora[escritos++] = (byte) ((valor >> 8) & 0xff);
+            saiu.amostras++;
         }
         if (escritos > 0) {
             saida.write(fora, 0, escritos);
         }
         return conta;
+    }
+
+    /** Uma amostra, qualquer que seja o formato do decodificador, em 16 bits. */
+    private static int amostraDe(byte[] bloco, int base, int bits) {
+        if (bits == 32) {
+            int cru = (bloco[base] & 0xff)
+                    | ((bloco[base + 1] & 0xff) << 8)
+                    | ((bloco[base + 2] & 0xff) << 16)
+                    | ((bloco[base + 3] & 0xff) << 24);
+            float f = Float.intBitsToFloat(cru);
+            return (int) Math.max(-32768, Math.min(32767, f * 32767f));
+        }
+        if (bits == 8) {
+            // PCM de 8 bits é SEM SINAL, com o silêncio em 128.
+            return ((bloco[base] & 0xff) - 128) << 8;
+        }
+        return (short) ((bloco[base] & 0xff) | (bloco[base + 1] << 8));
     }
 }

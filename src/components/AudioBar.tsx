@@ -385,8 +385,12 @@ export function AudioBar() {
               <li>
                 Funciona sem internet: {sonda.temOffline ? 'sim' : 'não (ou Android abaixo do 13)'}
               </li>
+              {/* Este é o campo que mais engana: ele confere a VERSÃO do
+                  Android, não se o serviço de fala do aparelho realmente
+                  aceita. O nome na tela precisa dizer isso. */}
               <li>
-                Aceita ler um arquivo: {sonda.aceitaArquivo ? 'sim' : 'NÃO (Android abaixo do 12)'}
+                Android 12+ (necessário pra ler arquivo):{' '}
+                {sonda.aceitaArquivo ? 'sim' : 'NÃO'}
               </li>
               {sonda.erro && <li>Erro: {sonda.erro}</li>}
             </ul>
@@ -409,6 +413,31 @@ export function AudioBar() {
                   {sondaResultado.etapa && ` (parou em: ${sondaResultado.etapa})`}.{' '}
                   {sondaResultado.erro}
                 </>
+              )}
+              {/*
+                O que a sonda MEDIU, sempre — inclusive quando falha.
+                
+                Foi aqui que ela calou da primeira vez: deu o quadro vermelho
+                sem número nenhum, e com isso não dava pra saber se o problema
+                era o áudio ou o serviço de fala. Estes três respondem isso.
+              */}
+              {(sondaResultado.segundos !== undefined || sondaResultado.trilha !== undefined) && (
+                <ul className="rec-sonda-medida">
+                  {sondaResultado.segundos !== undefined && (
+                    <li>Áudio entregue: {sondaResultado.segundos.toFixed(1)}s</li>
+                  )}
+                  {sondaResultado.pico !== undefined && (
+                    <li>
+                      Força do som: {sondaResultado.pico} de 32767
+                      {sondaResultado.pico < 500 && ' — quase silêncio; o áudio não chegou bom'}
+                    </li>
+                  )}
+                  {sondaResultado.codificacao && <li>Formato lido: {sondaResultado.codificacao}</li>}
+                  <li>
+                    O reconhecedor respondeu:{' '}
+                    {sondaResultado.trilha ? sondaResultado.trilha : 'nada'}
+                  </li>
+                </ul>
               )}
             </div>
           )}

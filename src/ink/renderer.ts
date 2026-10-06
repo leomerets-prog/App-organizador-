@@ -67,6 +67,15 @@ export interface Theme {
   rule: string
   zoneLabel: string
   ink: string
+  /**
+   * A emenda entre duas folhas.
+   *
+   * Cor própria, e não o pautado com transparência: o pautado é feito pra
+   * sumir atrás da escrita, e a emenda precisa do contrário — ser vista de
+   * relance com a folha reduzida. Com o tom do pautado ela ficava invisível,
+   * que é o defeito que ela veio consertar.
+   */
+  emenda: string
 }
 
 export const DARK_THEME: Theme = {
@@ -74,6 +83,7 @@ export const DARK_THEME: Theme = {
   rule: '#232329',
   zoneLabel: '#71717a',
   ink: '#f4f4f5',
+  emenda: '#2b2b33',
 }
 
 export const LIGHT_THEME: Theme = {
@@ -81,6 +91,7 @@ export const LIGHT_THEME: Theme = {
   rule: '#e8e4da',
   zoneLabel: '#a1a1aa',
   ink: '#1c1c20',
+  emenda: '#d9d3c6',
 }
 
 export const THEMES = { dark: DARK_THEME, light: LIGHT_THEME }
@@ -103,6 +114,14 @@ export function resolveInk(color: string, theme: Theme): string {
 }
 
 const RULE_SPACING = 38
+
+/**
+ * A altura da emenda entre duas folhas, em píxeis de página.
+ *
+ * Larga o bastante pra ser vista de relance com a folha reduzida, e estreita o
+ * bastante pra não engolir uma linha de escrita: o pautado anda de 38 em 38.
+ */
+const FAIXA_EMENDA = 20
 
 /**
  * Teto de pautas desenhadas numa passada, pelo mesmo motivo do teto de folhas
@@ -130,6 +149,7 @@ export function render(ctx: CanvasRenderingContext2D, input: RenderInput): void 
   const bottom = vp.scrollY + vp.viewHeight / vp.scale
 
   drawRules(ctx, vp, theme, top, bottom)
+  drawSheetBreaks(ctx, vp, theme, top, bottom, input.sheetHeight)
   if (input.showZones || input.zoneEditing) {
     drawZones(ctx, input.zones, vp, top, bottom, input.zoneEditing, input.sheetHeight)
     drawBoundaryHandles(ctx, input.zones, vp, top, bottom, input.sheetHeight)
@@ -246,6 +266,69 @@ function drawRules(
     ctx.lineTo(vp.pageWidth, y + 0.5)
   }
   ctx.stroke()
+}
+
+/**
+ * Onde uma folha acaba e a outra começa.
+ *
+ * A divisão em zonas se REPETE a cada folha, e até aqui nada marcava a emenda:
+ * "Pendências" terminava e "Pauta" recomeçava logo abaixo, sem nada no meio. O
+ * relato foi *"o espaçamento das páginas está sem acabamento"* — e estava
+ * mesmo: a folha virava uma tira infinita onde os nomes das zonas reapareciam
+ * sem explicação.
+ *
+ * ## O que esta faixa é, e o que ela NÃO é
+ *
+ * Ela é só pintura. O espaço de desenho continua CONTÍNUO — tinta escrita em
+ * cima da emenda continua valendo, e a classificação por zona (`zones/hit.ts`,
+ * que usa o resto da divisão pela folha) não muda em nada. Abrir um vão de
+ * verdade mexeria em todas as coordenadas já gravadas, o que é o jeito mais
+ * fácil de perder o caderno de alguém.
+ *
+ * Fica desenhada ANTES da tinta, de propósito: é papel, e papel não cobre o
+ * que foi escrito.
+ */
+function drawSheetBreaks(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  theme: Theme,
+  top: number,
+  bottom: number,
+  alto: number,
+): void {
+  if (!Number.isFinite(alto) || alto <= 0) return
+  const { first, last } = visibleSheets(top, bottom, alto)
+
+  ctx.save()
+  for (let sheet = Math.max(1, first); sheet <= last + 1; sheet++) {
+    const y = sheet * alto
+    if (y < top - FAIXA_EMENDA || y > bottom + FAIXA_EMENDA) continue
+
+    // A faixa: é a sombra entre duas folhas, e tem que se ver de relance.
+    ctx.globalAlpha = 1
+    ctx.fillStyle = theme.emenda
+    ctx.fillRect(0, y - FAIXA_EMENDA / 2, vp.pageWidth, FAIXA_EMENDA)
+
+    // E um traço firme nas duas bordas, pra emenda ter começo e fim.
+    ctx.strokeStyle = theme.emenda
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(0, y - FAIXA_EMENDA / 2 + 0.5)
+    ctx.lineTo(vp.pageWidth, y - FAIXA_EMENDA / 2 + 0.5)
+    ctx.moveTo(0, y + FAIXA_EMENDA / 2 - 0.5)
+    ctx.lineTo(vp.pageWidth, y + FAIXA_EMENDA / 2 - 0.5)
+    ctx.stroke()
+
+    // O número da folha, pra saber em qual se está sem contar as emendas.
+    ctx.globalAlpha = 1
+    ctx.fillStyle = theme.zoneLabel
+    ctx.font = '600 13px ui-sans-serif, system-ui, sans-serif'
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(`FOLHA ${sheet + 1}`, vp.pageWidth - 14, y)
+    ctx.textAlign = 'left'
+  }
+  ctx.restore()
 }
 
 /**
