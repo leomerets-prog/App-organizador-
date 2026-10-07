@@ -278,6 +278,18 @@ input {
 
 /* ── Topo: seções e páginas ───────────────────────────────────────────────── */
 
+/*
+ * A BARRA DE CIMA TEM TETO.
+ *
+ * Ela é irmã da área de trabalho num flex em coluna: não existe altura que ela
+ * tome que a folha não perca. Sem teto, a transcrição aberta levou a folha de
+ * 677px pra 202px — uma tira no rodapé, com a primeira zona colada na borda.
+ * Palavras dele: *"assim eu não consigo usar nada"*.
+ *
+ * Com teto, o pior caso vira "rolar a barra de cima", que é um incômodo; sem
+ * teto, o pior caso é "não dá pra escrever", que é o app não servir. Vale pra
+ * qualquer coisa que entre aqui depois, não só pra transcrição.
+ */
 .topbar {
   display: flex;
   align-items: flex-start;
@@ -285,6 +297,8 @@ input {
   padding: 8px 10px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
+  max-height: 46vh;
+  overflow-y: auto;
 }
 
 .nav-toggle {
@@ -979,14 +993,50 @@ input {
   background: var(--surface-2);
 }
 
+/* Fechada, a caixa é uma linha só: nada de margem embaixo nem de corpo. */
+.rec-texto.fechada {
+  padding: 4px 6px;
+}
+
+/*
+ * O CABEÇALHO É O BOTÃO.
+ *
+ * Largura inteira, seta na frente e fundo que reage ao toque — tem que PARECER
+ * que abre. Já custou uma volta pôr um onClick num elemento que já existia e
+ * esperar que alguém adivinhasse.
+ */
 .rec-texto-topo {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
   font-size: 13px;
   color: var(--text);
+  text-align: left;
+}
+
+button.rec-texto-topo {
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+}
+
+button.rec-texto-topo:hover,
+button.rec-texto-topo:active {
+  background: var(--surface);
+}
+
+.rec-texto-seta {
+  flex-shrink: 0;
+  width: 14px;
+  color: var(--text-faint);
+}
+
+/* A fileira dos botões, que só existe com a caixa aberta. */
+.rec-texto-topo.linha {
+  margin: 6px 0 8px;
 }
 
 /* O aviso de rascunho. Ele JÁ VIU o reconhecedor trocar palavras — um texto
@@ -1019,7 +1069,9 @@ input {
 
 .rec-texto-corpo {
   margin: 0;
-  max-height: 260px;
+  /* Teto que acompanha a tela: 260px fixos num tablet deitado já são a folha
+     inteira. O `vh` é o que impede a caixa de crescer junto com o texto. */
+  max-height: min(260px, 26vh);
   overflow-y: auto;
   /* Preserva a quebra de linha da correção dele, e quebra sozinho o resto. */
   white-space: pre-wrap;

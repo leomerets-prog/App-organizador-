@@ -44,7 +44,23 @@ export interface ViewMetrics {
   maxScrollY: number
 }
 
-export const INITIAL_VIEW: ViewState = { zoom: ZOOM_FIT, scrollX: 0, scrollY: 0 }
+/**
+ * MARGEM ACIMA DO COMEÇO DA FOLHA, em px de página.
+ *
+ * Sem ela a primeira zona nasce colada em y=0: o tracejado de cima fica
+ * partido ao meio pela borda da tela e o rótulo aparece sem nada acima, como
+ * se a folha começasse no meio. Palavras dele: *"a delimitação das folhas ali
+ * tá cortando por cima"*.
+ *
+ * É SÓ VISTA. Nenhuma coordenada guardada muda — a folha continua começando em
+ * y=0, a tinta continua onde está e `zones/hit.ts` continua classificando pelo
+ * resto da divisão. O que muda é até onde a janela pode subir, que é a mesma
+ * decisão que fez a emenda entre folhas ser pintura e nunca espaço: abrir um
+ * vão de verdade é o jeito mais fácil de perder o caderno de alguém.
+ */
+export const MARGEM_TOPO = 24
+
+export const INITIAL_VIEW: ViewState = { zoom: ZOOM_FIT, scrollX: 0, scrollY: -MARGEM_TOPO }
 
 /** Piso da escala. Nunca zero: zero produz matriz degenerada no canvas. */
 const MIN_SCALE = 1e-4
@@ -86,7 +102,7 @@ export function computeMetrics(view: ViewState, layout: Layout): ViewMetrics {
   return {
     scale,
     scrollX: clamp(view.scrollX, 0, maxScrollX),
-    scrollY: clamp(view.scrollY, 0, maxScrollY),
+    scrollY: clamp(view.scrollY, -MARGEM_TOPO, maxScrollY),
     offsetX,
     maxScrollX,
     maxScrollY,

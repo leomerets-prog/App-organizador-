@@ -1060,6 +1060,9 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Tocar escolhe, arrastar move — o mesmo gesto | Separar em dois modos obrigaria a escolher o modo antes de saber o que se quer fazer. Quem solta sem andar escolheu; quem andou, moveu |
 | `touch-action: none` vai no `<svg>`, nunca no que está dentro dele | O navegador ignora a propriedade em elemento de dentro de um SVG. Estava no `<g>` da caixa, não fazia nada, e o gesto da caneta era roubado pra rolar a tela |
 | Um gesto de cada vez, e a caneta não cede ao dedo | A palma encosta antes da ponta. Dois gestos disputando a mesma tela levavam a caixa pro lado errado e depois travavam o painel |
+| Nada na barra de cima pode crescer sem teto | Ela é irmã da folha num flex em coluna: cada píxel que toma é um píxel que a folha perde. A transcrição aberta levou a folha de 677px pra 202px — "assim eu não consigo usar nada" |
+| Caixa de texto nasce FECHADA | Ele abre o caderno pra escrever, não pra reler a transcrição de ontem. Aberta por padrão, ela é um estorvo; fechada, é uma linha que ele abre quando quer |
+| A folha precisa mostrar onde COMEÇA | A primeira zona nascia colada em y=0, com o tracejado partido pela borda — parecia folha cortada. A margem é vista, não espaço: nenhuma coordenada guardada mudou |
 | O que o reconhecedor erra já está escrito na folha | Ele troca nome próprio, sigla, nome de setor — e o usuário escreveu isso à mão durante a reunião. `EXTRA_BIASING_STRINGS` entrega essas palavras e puxa o resultado pra elas |
 | Jogar amostra fora sem filtrar é piorar o áudio | Reamostrar pegando uma a cada três dobra o agudo pra dentro da voz: medido, um tom de 15 kHz chega com pico 30000, tão alto quanto a fala. Tirando a média, 2346 |
 | Transcrição é rascunho, e a tela precisa dizer isso | Texto bonito sem aviso nenhum convida a copiar errado pra dentro de uma ata. O selo "rascunho do reconhecedor" é a informação mais importante da caixa |

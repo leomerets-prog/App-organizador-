@@ -77,6 +77,15 @@ export function AudioBar() {
   const [transcrevendoId, setTranscrevendoId] = useState<string | null>(null)
   /** Qual transcrição está aberta pra corrigir, e o texto em edição. */
   const [corrigindo, setCorrigindo] = useState<{ recId: string; texto: string } | null>(null)
+  /*
+   * QUAL TRANSCRIÇÃO ESTÁ ABERTA — e `null` é o normal.
+   *
+   * A caixa do texto mora na barra de cima, que é IRMÃ da folha: cada píxel
+   * que ela cresce é um píxel que a folha perde. Aberta, ela levava a folha de
+   * 677px pra 202px — uma tira no rodapé. Por isso o estado de partida é
+   * fechada, e abrir é escolha dele.
+   */
+  const [textoAberto, setTextoAberto] = useState<string | null>(null)
   /** Os detalhes técnicos ficam fechados: já serviram, agora atrapalham. */
   const [verDetalhes, setVerDetalhes] = useState(false)
 
@@ -116,6 +125,9 @@ export function AudioBar() {
     setAoVivo('')
     aoVivoRef.current = ''
     setTranscrevendoId(rec.id)
+    // Transcrevendo, a caixa abre sozinha: é agora que ele quer ver o texto
+    // chegando. Terminada, ele fecha quando quiser a folha de volta.
+    setTextoAberto(rec.id)
     setSondando('Perguntando ao aparelho o que ele sabe fazer…')
     try {
       const estado = await estadoDaFala()
@@ -745,17 +757,42 @@ export function AudioBar() {
                 copiar errado pra dentro de uma ata.
               */}
               {(rec.transcricao || transcrevendoId === rec.id) && (
-                <div className="rec-texto">
-                  <div className="rec-texto-topo">
+                <div className={`rec-texto ${textoAberto === rec.id ? '' : 'fechada'}`}>
+                  {/*
+                    O CABEÇALHO É O BOTÃO DE ABRIR E FECHAR.
+                    
+                    Fechada, esta caixa é uma linha só — e a folha fica inteira.
+                    Esse é o estado NORMAL: ao abrir o app, a transcrição está
+                    guardada, não escancarada. Palavras dele quando ela abria
+                    sozinha: *"assim eu não consigo usar nada"*.
+                    
+                    É um <button> de verdade, com seta e fundo próprio. Já
+                    custou uma volta transformar um elemento que já existia em
+                    botão só pondo um onClick: ele continua parecendo o que
+                    sempre foi, e ninguém acha.
+                  */}
+                  <button
+                    className="rec-texto-topo"
+                    onClick={() => setTextoAberto(textoAberto === rec.id ? null : rec.id)}
+                    aria-expanded={textoAberto === rec.id}
+                    title={textoAberto === rec.id ? 'Fechar o texto' : 'Abrir o texto'}
+                  >
+                    <span className="rec-texto-seta">{textoAberto === rec.id ? '▾' : '▸'}</span>
                     <strong>O que foi dito</strong>
                     {rec.transcricao?.corrigida ? (
                       <span className="rec-texto-selo bom">✓ corrigido por você</span>
                     ) : (
                       <span className="rec-texto-selo">
-                        rascunho do reconhecedor — confira antes de usar
+                        {textoAberto === rec.id
+                          ? 'rascunho do reconhecedor — confira antes de usar'
+                          : 'rascunho'}
                       </span>
                     )}
+                  </button>
 
+                  {textoAberto === rec.id && (
+                   <>
+                  <div className="rec-texto-topo linha">
                     {rec.transcricao && corrigindo?.recId !== rec.id && (
                       <>
                         <button
@@ -844,6 +881,8 @@ export function AudioBar() {
                       {(rec.transcricao.dicas ?? 0) > 0 &&
                         ` · ${rec.transcricao.dicas} palavra(s) do seu caderno usadas como dica`}
                     </div>
+                  )}
+                   </>
                   )}
                 </div>
               )}

@@ -8,6 +8,7 @@ import { PAGE_WIDTH } from '../domain/constants'
 import type { Pt } from '../lib/geometry'
 import {
   INITIAL_VIEW,
+  MARGEM_TOPO,
   ZOOM_STEP,
   clampView,
   clampZoom,
@@ -1185,9 +1186,15 @@ export function PageCanvas() {
     return () => canvas.removeEventListener('wheel', onWheel)
   }, [applyView])
 
-  // Volta ao topo ao trocar de página, mantendo o zoom escolhido.
+  /*
+   * Volta ao topo ao trocar de página, mantendo o zoom escolhido.
+   *
+   * "Topo" é `-MARGEM_TOPO`, e não zero: zero é a primeira linha de papel, e
+   * parar exatamente nela deixa o tracejado da primeira zona partido pela
+   * borda da tela. A margem mostra onde a folha começa.
+   */
   useEffect(() => {
-    applyView({ ...viewRef.current, scrollX: 0, scrollY: 0 })
+    applyView({ ...viewRef.current, scrollX: 0, scrollY: -MARGEM_TOPO })
   }, [activePageId, applyView])
 
   const editingItem = editingItemId ? (items.find((i) => i.id === editingItemId) ?? null) : null

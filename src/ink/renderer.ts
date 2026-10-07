@@ -300,6 +300,39 @@ function drawSheetBreaks(
   const { first, last } = visibleSheets(top, bottom, alto)
 
   ctx.save()
+
+  /*
+   * O COMEÇO DA PRIMEIRA FOLHA.
+   *
+   * As emendas abaixo marcam onde uma folha acaba e a outra começa. Faltava
+   * marcar onde o caderno COMEÇA: a primeira zona nascia colada em y=0, com o
+   * tracejado partido pela borda da tela e o rótulo sem nada acima — parecia
+   * folha cortada, e era.
+   *
+   * A faixa fica inteira ACIMA de y=0, em cima da margem que a janela agora
+   * deixa aparecer (`MARGEM_TOPO`). Nenhum píxel dela cobre papel que se
+   * escreve.
+   */
+  if (top < 0) {
+    ctx.globalAlpha = 1
+    ctx.fillStyle = theme.emenda
+    ctx.fillRect(0, -FAIXA_EMENDA, vp.pageWidth, FAIXA_EMENDA)
+    ctx.strokeStyle = theme.emenda
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(0, -FAIXA_EMENDA + 0.5)
+    ctx.lineTo(vp.pageWidth, -FAIXA_EMENDA + 0.5)
+    ctx.moveTo(0, -0.5)
+    ctx.lineTo(vp.pageWidth, -0.5)
+    ctx.stroke()
+    ctx.fillStyle = theme.zoneLabel
+    ctx.font = '600 13px ui-sans-serif, system-ui, sans-serif'
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('FOLHA 1', vp.pageWidth - 14, -FAIXA_EMENDA / 2)
+    ctx.textAlign = 'left'
+  }
+
   for (let sheet = Math.max(1, first); sheet <= last + 1; sheet++) {
     const y = sheet * alto
     if (y < top - FAIXA_EMENDA || y > bottom + FAIXA_EMENDA) continue
