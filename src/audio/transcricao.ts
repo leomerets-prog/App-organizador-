@@ -1,4 +1,4 @@
-import type { Transcricao } from '../domain/types'
+import type { Transcricao, TrechoFalado } from '../domain/types'
 
 /**
  * AS REGRAS DA TRANSCRIÇÃO — e uma delas é a que protege o trabalho dele.
@@ -32,10 +32,18 @@ export function aceitaDoReconhecedor(atual: Transcricao | undefined): boolean {
 /** Uma transcrição recém-saída do reconhecedor. Nasce como rascunho. */
 export function doReconhecedor(
   texto: string,
-  extras: { segundos?: number; dicas?: number } = {},
+  extras: { segundos?: number; dicas?: number; trechos?: TrechoFalado[] } = {},
   agora = Date.now(),
 ): Transcricao {
   return { texto, em: agora, ...extras }
+}
+
+/** Os trechos costurados num texto só — a mesma costura do plugin. */
+export function juntarTrechos(trechos: readonly TrechoFalado[]): string {
+  return trechos
+    .map((t) => t.texto.trim())
+    .filter((t) => t.length > 0)
+    .join(' ')
 }
 
 /**
@@ -44,6 +52,11 @@ export function doReconhecedor(
  * Guarda o `em` original: a data que interessa é a da reunião, não a da
  * revisão. E mantém `segundos` e `dicas`, que descrevem o áudio e continuam
  * verdadeiros depois da correção.
+ *
+ * NÃO mantém os `trechos`, de propósito: reescrito o texto inteiro de uma vez,
+ * não há mais como saber que frase é de qual tópico, e trechos velhos ao lado
+ * de um texto novo fariam a ata mostrar a versão errada. Quem tem trechos
+ * corrige por `comTrechosCorrigidos`, que é o que a tela usa nesse caso.
  */
 export function comCorrecao(atual: Transcricao | undefined, texto: string, agora = Date.now()): Transcricao {
   return {
@@ -51,6 +64,37 @@ export function comCorrecao(atual: Transcricao | undefined, texto: string, agora
     em: atual?.em ?? agora,
     segundos: atual?.segundos,
     dicas: atual?.dicas,
+    corrigida: true,
+  }
+}
+
+/**
+ * A correção feita TÓPICO A TÓPICO — o jeito de corrigir quando a fala está
+ * partida nas marcas.
+ *
+ * `textos` vem na ordem dos trechos, um por trecho. O corte de cada um (início,
+ * fim, de qual marca) não muda: corrigir a fala não muda quando ela foi dita.
+ * O texto corrido é refeito da junção, pra que salvar o .txt e o resto que lê
+ * o texto inteiro vejam a mesma correção que a ata.
+ *
+ * Quantidade diferente da dos trechos é recusada (devolve a transcrição como
+ * estava): casar correção com trecho errado poria a fala revisada de um
+ * tópico debaixo do outro.
+ */
+export function comTrechosCorrigidos(
+  atual: Transcricao | undefined,
+  textos: readonly string[],
+  agora = Date.now(),
+): Transcricao | undefined {
+  const trechos = atual?.trechos
+  if (!atual || !trechos || trechos.length !== textos.length) return atual
+  const novos = trechos.map((t, i) => ({ ...t, texto: textos[i] }))
+  return {
+    texto: juntarTrechos(novos),
+    em: atual.em ?? agora,
+    segundos: atual.segundos,
+    dicas: atual.dicas,
+    trechos: novos,
     corrigida: true,
   }
 }

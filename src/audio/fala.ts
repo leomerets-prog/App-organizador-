@@ -58,12 +58,23 @@ export interface ResultadoDaFala {
   trilha?: string
   /** Quantas palavras do caderno foram entregues como dica. */
   dicas?: number
+  /**
+   * A fala partida nos cortes pedidos — sempre `cortes + 1` pedaços, na ordem.
+   *
+   * É a contagem fixa que deixa casar cada pedaço com a marca que o abriu
+   * (`ata/trechos.ts`). Os tempos já vêm no ponto de silêncio onde o plugin
+   * cortou, que pode estar até 1,5 s longe da marca.
+   */
+  trechos?: { inicioMs: number; fimMs: number; texto: string }[]
 }
 
-/** O que o plugin manda enquanto trabalha, a cada trecho reconhecido. */
+/** O que o plugin manda enquanto trabalha, a cada pedaço reconhecido. */
 export interface AndamentoDaFala {
+  /** Tudo que já foi entendido, de todos os tópicos até aqui. */
   texto: string
-  trechos: number
+  /** Em que tópico está (1, 2, …) e quantos são. */
+  topico?: number
+  topicos?: number
 }
 
 interface SpeechPlugin {
@@ -77,6 +88,8 @@ interface SpeechPlugin {
     limiteSegundos?: number
     /** As palavras do caderno, pra puxar o reconhecedor (Android 13+). */
     palavras?: string[]
+    /** Onde partir o áudio (ms), um corte por marca — ver `ata/trechos.ts`. */
+    cortes?: number[]
   }): Promise<ResultadoDaFala>
   addListener(
     evento: 'andamento',
@@ -121,6 +134,13 @@ export interface PedidoDeTranscricao {
   palavras?: string[]
   /** Até onde ler, em segundos. Ausente = a gravação inteira. */
   limiteSegundos?: number
+  /**
+   * Onde partir o áudio, em ms, em ordem crescente — um corte por marca.
+   *
+   * Cada pedaço é ouvido numa sessão própria, e é isso que dá a cada tópico
+   * da ata a sua fala. Sem cortes, a gravação é ouvida inteira de uma vez.
+   */
+  cortes?: number[]
   idioma?: string
 }
 
@@ -142,7 +162,7 @@ export async function tentarTranscrever(
     }
   }
 
-  const { aviso, aoVivo, palavras, limiteSegundos, idioma = 'pt-BR' } = pedido
+  const { aviso, aoVivo, palavras, limiteSegundos, cortes, idioma = 'pt-BR' } = pedido
 
   /*
    * O ouvinte é registrado ANTES de `transcrever`, e tirado no `finally`.
@@ -169,12 +189,13 @@ export async function tentarTranscrever(
       await Speech.escrever({ token, base64: await paraBase64(parte) })
       aviso(`Mandando a gravação… ${i + 1} de ${pedacos}`)
     }
+    const porTopico = cortes && cortes.length > 0 ? `, tópico por tópico (${cortes.length + 1} pedaços)` : ''
     aviso(
       palavras && palavras.length > 0
-        ? `Ouvindo, com ${palavras.length} palavra(s) do seu caderno como dica…`
-        : 'Ouvindo a gravação…',
+        ? `Ouvindo${porTopico}, com ${palavras.length} palavra(s) do seu caderno como dica…`
+        : `Ouvindo a gravação${porTopico}…`,
     )
-    return await Speech.transcrever({ token, idioma, limiteSegundos, palavras })
+    return await Speech.transcrever({ token, idioma, limiteSegundos, palavras, cortes })
   } finally {
     if (ouvinte) {
       try {

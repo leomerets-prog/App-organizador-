@@ -50,7 +50,14 @@ const ITEM_LABEL: Record<ItemKind, string> = {
   nota: 'Anotação',
 }
 
-export function Toolbar({ onOpenFlow }: { onOpenFlow: (id: string) => void }) {
+export function Toolbar({
+  onOpenFlow,
+  onOpenAta,
+}: {
+  onOpenFlow: (id: string) => void
+  onOpenAta: () => void
+}) {
+  const activePageId = useStore((s) => s.activePageId)
   const tool = useStore((s) => s.tool)
   const setTool = useStore((s) => s.setTool)
   const penColor = useStore((s) => s.penColor)
@@ -203,6 +210,19 @@ export function Toolbar({ onOpenFlow }: { onOpenFlow: (id: string) => void }) {
 
       <TranscriptionButton />
       <FlowchartButton onOpen={onOpenFlow} />
+
+      {/* A ata: a folha escrita como ata, com os tópicos das marcas da
+          gravação e as seções das zonas. Ao lado do fluxograma porque é o
+          mesmo gesto — ver a folha de outro jeito, sem mexer nela. */}
+      <button
+        className="tool-btn"
+        onClick={onOpenAta}
+        disabled={!activePageId}
+        title="Monta a ata desta folha: pauta, tópicos marcados na gravação, encaminhamentos, pendências"
+      >
+        <span className="tool-glyph">▤</span>
+        <span className="tool-label">Ata</span>
+      </button>
 
       <button className="tool-btn" onClick={toggleTheme}>
         <span className="tool-glyph">{theme === 'dark' ? '☀' : '☾'}</span>

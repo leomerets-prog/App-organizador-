@@ -3,6 +3,7 @@ import type {
   Id,
   InkPoint,
   Item,
+  TrechoFalado,
   ItemKind,
   Notebook,
   Page,
@@ -56,7 +57,7 @@ import {
   remover as removerMarca,
   renomear as renomearMarca,
 } from '../audio/marcas'
-import { aceitaDoReconhecedor, comCorrecao, doReconhecedor } from '../audio/transcricao'
+import { aceitaDoReconhecedor, comCorrecao, comTrechosCorrigidos, doReconhecedor } from '../audio/transcricao'
 import {
   SEM_HISTORIA,
   mudou as mudouChart,
@@ -145,6 +146,8 @@ export interface AppState {
   createSection: (name: string, color: string) => Promise<void>
   createPage: (title: string, templateId: string) => Promise<void>
   renamePage: (id: Id, title: string) => Promise<void>
+  /** Quem estava na reunião, pro cabeçalho da ata. */
+  setParticipantes: (pageId: Id, texto: string) => Promise<void>
   renameSection: (id: Id, name: string) => Promise<void>
   renameNotebook: (id: Id, name: string) => Promise<void>
   removePage: (id: Id) => Promise<void>
@@ -298,9 +301,11 @@ export interface AppState {
   guardarTranscricao: (
     id: Id,
     texto: string,
-    extras?: { segundos?: number; dicas?: number },
+    extras?: { segundos?: number; dicas?: number; trechos?: TrechoFalado[] },
   ) => Promise<void>
   corrigirTranscricao: (id: Id, texto: string) => Promise<void>
+  /** Corrige a fala tópico a tópico, um texto por trecho, na ordem deles. */
+  corrigirTrechos: (id: Id, textos: string[]) => Promise<void>
   tirarTranscricao: (id: Id) => Promise<void>
 
   addImage: (file: File | Blob, visible: { x: number; y: number; w: number; h: number }) => Promise<void>
@@ -924,6 +929,14 @@ export const useStore = create<AppState>((set, get) => ({
     const updated = { ...page, title, updatedAt: Date.now() }
     await repo.putPage(updated)
     set({ pages: get().pages.map((p) => (p.id === id ? updated : p)) })
+  },
+
+  async setParticipantes(pageId, texto) {
+    const page = get().pages.find((p) => p.id === pageId)
+    if (!page || (page.participantes ?? '') === texto) return
+    const updated = { ...page, participantes: texto, updatedAt: Date.now() }
+    set({ pages: get().pages.map((p) => (p.id === pageId ? updated : p)) })
+    await repo.putPage(updated)
   },
 
   async renameSection(id, name) {
@@ -1735,6 +1748,16 @@ export const useStore = create<AppState>((set, get) => ({
       ...rec,
       transcricao: comCorrecao(rec.transcricao, texto),
     }
+    set({ recordings: get().recordings.map((r) => (r.id === id ? atualizado : r)) })
+    await repo.updateRecording(atualizado)
+  },
+
+  async corrigirTrechos(id, textos) {
+    const rec = get().recordings.find((r) => r.id === id)
+    if (!rec) return
+    const transcricao = comTrechosCorrigidos(rec.transcricao, textos)
+    if (!transcricao || transcricao === rec.transcricao) return
+    const atualizado: Recording = { ...rec, transcricao }
     set({ recordings: get().recordings.map((r) => (r.id === id ? atualizado : r)) })
     await repo.updateRecording(atualizado)
   },

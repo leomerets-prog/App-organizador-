@@ -32,6 +32,8 @@ javac \
   -sourcepath "$raiz/tools/java-stubs:$raiz/android/app/src/main/java" \
   "$raiz"/android/app/src/main/java/com/leomerets/organizador/*.java
 
-cp "$raiz/tools/ReamostraTest.java" "$saida/"
-javac -nowarn -proc:none -encoding UTF-8 -cp "$saida" -d "$saida" "$saida/ReamostraTest.java"
+cp "$raiz/tools/ReamostraTest.java" "$raiz/tools/CorteTest.java" "$saida/"
+javac -nowarn -proc:none -encoding UTF-8 -cp "$saida" -d "$saida" "$saida/ReamostraTest.java" "$saida/CorteTest.java"
 java -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -cp "$saida" ReamostraTest
+# O corte em tópicos: onde a gravação é partida pra ata.
+java -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -cp "$saida" CorteTest

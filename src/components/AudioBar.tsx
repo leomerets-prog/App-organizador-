@@ -16,11 +16,12 @@ import { relogio } from '../audio/marcas'
 import { estadoDaFala, sondaPossivel, tentarTranscrever } from '../audio/fala'
 import type { EstadoDaFala, ResultadoDaFala } from '../audio/fala'
 import { palavrasDeDica } from '../audio/dicas'
+import { casarTrechos, cortesDasMarcas } from '../ata/trechos'
 import { salvarTexto } from '../audio/export'
 import { formatRate } from '../state/prefs'
 import { getRecordingBlob } from '../db/repo'
 import { newId } from '../lib/id'
-import type { Recording } from '../domain/types'
+import type { Recording, TrechoFalado } from '../domain/types'
 
 /**
  * Barra de áudio da página.
@@ -76,7 +77,12 @@ export function AudioBar() {
   /** Qual gravação está sendo transcrita agora. */
   const [transcrevendoId, setTranscrevendoId] = useState<string | null>(null)
   /** Qual transcrição está aberta pra corrigir, e o texto em edição. */
-  const [corrigindo, setCorrigindo] = useState<{ recId: string; texto: string } | null>(null)
+  const [corrigindo, setCorrigindo] = useState<{
+    recId: string
+    texto: string
+    /** Com a fala partida em tópicos, corrige-se um tópico de cada vez. */
+    trechos?: string[]
+  } | null>(null)
   /*
    * QUAL TRANSCRIÇÃO ESTÁ ABERTA — e `null` é o normal.
    *
@@ -94,6 +100,7 @@ export function AudioBar() {
   const pages = useStore((s) => s.pages)
   const guardarTranscricao = useStore((s) => s.guardarTranscricao)
   const corrigirTranscricao = useStore((s) => s.corrigirTranscricao)
+  const corrigirTrechos = useStore((s) => s.corrigirTrechos)
   const tirarTranscricao = useStore((s) => s.tirarTranscricao)
 
   /**
@@ -139,13 +146,23 @@ export function AudioBar() {
       const blob = await getRecordingBlob(rec.id)
       if (!blob) throw new Error('Não achei o arquivo desta gravação.')
       const palavras = palavrasDaFolha()
+      /*
+       * OS TÓPICOS, das marcas. Cada marca vira um corte, e o plugin ouve
+       * cada pedaço numa sessão própria — é o que dá a cada tópico da ata a
+       * sua fala. Sem marca, um pedaço só: o caminho que já funcionava.
+       */
+      const divisao = cortesDasMarcas(rec.marcas ?? [], rec.durationMs)
       const resultado = await tentarTranscrever(blob, {
         aviso: (m) => setSondando(m),
         aoVivo: (parcial) => {
           aoVivoRef.current = parcial.texto
           setAoVivo(parcial.texto)
+          if (parcial.topicos && parcial.topicos > 1) {
+            setSondando(`Ouvindo o tópico ${parcial.topico ?? 1} de ${parcial.topicos}…`)
+          }
         },
         palavras,
+        cortes: divisao.cortes,
       })
       setSondaResultado(resultado)
       if (!resultado.ok) setVerDetalhes(true)
@@ -159,6 +176,7 @@ export function AudioBar() {
         await guardarTranscricao(rec.id, texto, {
           segundos: resultado.segundos,
           dicas: resultado.dicas ?? palavras.length,
+          trechos: casarTrechos(divisao, resultado.trechos),
         })
       }
     } catch (err) {
@@ -798,7 +816,13 @@ export function AudioBar() {
                         <button
                           className="rec-texto-acao"
                           onClick={() =>
-                            setCorrigindo({ recId: rec.id, texto: rec.transcricao?.texto ?? '' })
+                            setCorrigindo({
+                              recId: rec.id,
+                              texto: rec.transcricao?.texto ?? '',
+                              trechos: temTopicos(rec)
+                                ? rec.transcricao?.trechos?.map((t) => t.texto)
+                                : undefined,
+                            })
                           }
                           title="Corrigir o texto à mão"
                         >
@@ -835,20 +859,51 @@ export function AudioBar() {
 
                   {corrigindo?.recId === rec.id ? (
                     <>
-                      <textarea
-                        className="rec-texto-campo"
-                        value={corrigindo.texto}
-                        onChange={(e) =>
-                          setCorrigindo({ recId: rec.id, texto: e.target.value })
-                        }
-                        rows={10}
-                        aria-label="Texto da transcrição"
-                      />
+                      {/*
+                        Com tópicos, um campo por tópico. Um campo só com a
+                        reunião inteira obrigaria a desfazer a separação pra
+                        corrigir uma palavra — e a ata perderia os tópicos
+                        justamente depois de ele ter revisado tudo.
+                      */}
+                      {corrigindo.trechos ? (
+                        corrigindo.trechos.map((texto, i) => {
+                          const t = rec.transcricao?.trechos?.[i]
+                          return (
+                            <label key={i} className="rec-topico-campo">
+                              <span className="rec-topico-nome">
+                                {t ? rotuloDoTrecho(rec, t) : `Tópico ${i + 1}`}
+                              </span>
+                              <textarea
+                                className="rec-texto-campo"
+                                value={texto}
+                                onChange={(e) => {
+                                  const novos = [...(corrigindo.trechos ?? [])]
+                                  novos[i] = e.target.value
+                                  setCorrigindo({ ...corrigindo, trechos: novos })
+                                }}
+                                rows={Math.min(8, Math.max(2, Math.ceil(texto.length / 60)))}
+                              />
+                            </label>
+                          )
+                        })
+                      ) : (
+                        <textarea
+                          className="rec-texto-campo"
+                          value={corrigindo.texto}
+                          onChange={(e) => setCorrigindo({ recId: rec.id, texto: e.target.value })}
+                          rows={10}
+                          aria-label="Texto da transcrição"
+                        />
+                      )}
                       <div className="rec-texto-botoes">
                         <button
                           className="rec-texto-acao"
                           onClick={() => {
-                            void corrigirTranscricao(rec.id, corrigindo.texto)
+                            if (corrigindo.trechos) {
+                              void corrigirTrechos(rec.id, corrigindo.trechos)
+                            } else {
+                              void corrigirTranscricao(rec.id, corrigindo.texto)
+                            }
                             setCorrigindo(null)
                           }}
                         >
@@ -859,6 +914,19 @@ export function AudioBar() {
                         </button>
                       </div>
                     </>
+                  ) : transcrevendoId !== rec.id && temTopicos(rec) ? (
+                    /* A fala JÁ separada: cada tópico com o seu pedaço, como
+                       vai sair na ata. */
+                    <div className="rec-texto-corpo">
+                      {(rec.transcricao?.trechos ?? []).map((t, i) =>
+                        !t.marcaId && !t.texto ? null : (
+                          <div key={i} className="rec-topico">
+                            <strong className="rec-topico-nome">{rotuloDoTrecho(rec, t)}</strong>
+                            <p>{t.texto || '(nada foi entendido neste trecho)'}</p>
+                          </div>
+                        ),
+                      )}
+                    </div>
                   ) : (
                     <p className="rec-texto-corpo">
                       {transcrevendoId === rec.id && aoVivo
@@ -947,4 +1015,22 @@ function destravarDuracao(audio: HTMLAudioElement): Promise<void> {
       encerrar(false)
     }
   })
+}
+
+/** A fala desta gravação está separada em tópicos? */
+function temTopicos(rec: Recording): boolean {
+  return (rec.transcricao?.trechos ?? []).some((t) => Boolean(t.marcaId))
+}
+
+/**
+ * O nome de um pedaço da fala: a hora na gravação e o nome da marca.
+ *
+ * Lido da marca AGORA, e não guardado no trecho: o nome vem depois da reunião
+ * ("marca nasce sem nome"), e renomear tem que mudar aqui também.
+ */
+function rotuloDoTrecho(rec: Recording, t: TrechoFalado): string {
+  if (!t.marcaId) return `${relogio(t.inicioMs)} · Abertura`
+  const m = rec.marcas?.find((x) => x.id === t.marcaId)
+  if (!m) return `${relogio(t.inicioMs)} · Marca apagada`
+  return `${relogio(m.ms)} · ${m.texto.trim() || 'Tópico sem nome'}`
 }

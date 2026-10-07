@@ -998,6 +998,9 @@ src/
   flow/        leitura do fluxograma: formas (shapes), grafo (graph), arranjo
                (layout), a junção com o que foi editado (merge) e o voltar/
                avançar do painel (undo)
+  ata/         a ata da reunião: onde partir a gravação nas marcas e casar
+               cada pedaço com a sua marca (trechos), e a ata montada da
+               folha — seções pelas zonas, tópicos pelas marcas (ata)
   ocr/         transcrição da letra (ponte com o plugin Android)
   zones/       em que zona um ponto caiu, e a edição das faixas
   db/          IndexedDB (versão 3: traços, zonas, itens, áudio, imagens,
@@ -1060,6 +1063,12 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Tocar escolhe, arrastar move — o mesmo gesto | Separar em dois modos obrigaria a escolher o modo antes de saber o que se quer fazer. Quem solta sem andar escolheu; quem andou, moveu |
 | `touch-action: none` vai no `<svg>`, nunca no que está dentro dele | O navegador ignora a propriedade em elemento de dentro de um SVG. Estava no `<g>` da caixa, não fazia nada, e o gesto da caneta era roubado pra rolar a tela |
 | Um gesto de cada vez, e a caneta não cede ao dedo | A palma encosta antes da ponta. Dois gestos disputando a mesma tela levavam a caixa pro lado errado e depois travavam o painel |
+| A ata não adivinha assunto | Tópico vem de marca ⚑ ou de linha escrita, nunca de palpite. Uma ata que inventa tópico parece certa — e é pior que nenhuma |
+| A fala é cortada ANTES de ser ouvida | O reconhecedor não diz em que segundo cada frase foi dita. Partindo o áudio nas marcas e ouvindo cada pedaço numa sessão, a fala de cada tópico é exata por construção |
+| O corte anda até o silêncio, e só até ele | A marca é tocada com alguém falando; cortar ali parte a palavra. ±1,5 s até a pausa mais perto — sem o desempate pelo mais perto, o corte ia parar a 1,5 s da marca |
+| Casar trecho com marca é por id, nunca por posição | A primeira versão do caso passava casando por posição: com todas as marcas tendo trecho, posição e id coincidem por acaso. Marca no começo ou feita depois da transcrição desalinha tudo |
+| Contagem que não bate não casa nada | O plugin devolve sempre cortes + 1 pedaços. Se vier outra coisa, melhor ata sem fala separada que ata com a fala do vizinho |
+| A ata é uma vista, não uma cópia | Montada na hora, do que está na folha. Corrigir a marca, a ficha ou a fala corrige a ata — não existe versão velha esperando reconciliação |
 | Nada na barra de cima pode crescer sem teto | Ela é irmã da folha num flex em coluna: cada píxel que toma é um píxel que a folha perde. A transcrição aberta levou a folha de 677px pra 202px — "assim eu não consigo usar nada" |
 | Caixa de texto nasce FECHADA | Ele abre o caderno pra escrever, não pra reler a transcrição de ontem. Aberta por padrão, ela é um estorvo; fechada, é uma linha que ele abre quando quer |
 | A folha precisa mostrar onde COMEÇA | A primeira zona nascia colada em y=0, com o tracejado partido pela borda — parecia folha cortada. A margem é vista, não espaço: nenhuma coordenada guardada mudou |
@@ -1209,6 +1218,13 @@ resultado na prática — `EXTRA_BIASING_STRINGS` é documentado, mas o serviço
 fala do aparelho pode ignorar sem reclamar, exatamente como ignorou o arquivo
 antes do modo segmentado. A tela relata quantas dicas foram entregues; quem
 responde se adiantou é comparar duas transcrições da mesma gravação.
+
+**A ata por tópicos ainda não foi vista no tablet.** O corte nas marcas foi
+medido com sinal sintético (`tools/CorteTest.java`, pelo método de verdade), e a
+montagem da ata está coberta em `tools/ata-test.ts`. O que só o aparelho
+responde: se o serviço de fala aceita várias sessões seguidas sem dar
+"ocupado" (há um respiro de 300 ms e uma nova tentativa), e se um tópico curto
+(dez, quinze segundos) é ouvido tão bem quanto a reunião inteira.
 
 **A identificação depende de o usuário escrever dentro das faixas.** Quem
 escreve uma tarefa no meio da zona de anotação vê ela chegar como `nota` — e aí

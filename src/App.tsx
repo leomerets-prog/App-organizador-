@@ -8,6 +8,7 @@ import { AudioBar } from './components/AudioBar'
 import { Central } from './components/Central'
 import { FlowPanel } from './components/FlowPanel'
 import { UpdatePanel } from './components/UpdatePanel'
+import { AtaPanel } from './components/AtaPanel'
 import { marcarPronto } from './crash'
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
   const init = useStore((s) => s.init)
   const [panelOpen, setPanelOpen] = useState(false)
   const [updateOpen, setUpdateOpen] = useState(false)
+  const [ataOpen, setAtaOpen] = useState(false)
   /** Fluxograma aberto no painel, se houver. */
   const [flowId, setFlowId] = useState<string | null>(null)
   const flowcharts = useStore((s) => s.flowcharts)
@@ -63,7 +65,7 @@ export default function App() {
 
         <div className="workspace">
           <PageCanvas />
-          <Toolbar onOpenFlow={setFlowId} />
+          <Toolbar onOpenFlow={setFlowId} onOpenAta={() => setAtaOpen(true)} />
         </div>
       </main>
 
@@ -74,6 +76,7 @@ export default function App() {
       {flowAberto && <FlowPanel chart={flowAberto} onClose={() => setFlowId(null)} />}
       {panelOpen && <Central onClose={() => setPanelOpen(false)} />}
       {updateOpen && <UpdatePanel onClose={() => setUpdateOpen(false)} />}
+      {ataOpen && <AtaPanel onClose={() => setAtaOpen(false)} />}
     </div>
   )
 }

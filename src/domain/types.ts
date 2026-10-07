@@ -53,6 +53,13 @@ export interface Page {
    * junto. Opcional — página antiga simplesmente usa o padrão.
    */
   sheetHeight?: number
+  /**
+   * Quem estava na reunião, do jeito que ele escreveu — pro cabeçalho da ata.
+   *
+   * Texto livre e não lista: ele digita "Maurício, Marcela, equipe da UBS" e
+   * a ata separa (`separarParticipantes`). Opcional: página antiga não tem.
+   */
+  participantes?: string
   createdAt: number
   updatedAt: number
   order: number
@@ -276,6 +283,27 @@ export interface Transcricao {
   dicas?: number
   /** Mexida à mão depois? Então nenhuma transcrição nova passa por cima. */
   corrigida?: boolean
+  /**
+   * A fala partida nos tópicos — um pedaço por marca, na ordem do áudio.
+   *
+   * Existe quando a gravação tinha marcas ao ser transcrita: o áudio é cortado
+   * nelas antes de ser ouvido, e cada pedaço sabe de qual marca é. É o que
+   * deixa a ata pôr debaixo de cada tópico o que foi dito nele. `texto`, acima,
+   * continua sendo a junção de todos, pra tudo que já lia o texto corrido.
+   *
+   * Opcional: transcrição sem marca, ou feita antes disto existir, não tem.
+   */
+  trechos?: TrechoFalado[]
+}
+
+/** O que foi dito entre uma marca e a próxima. */
+export interface TrechoFalado {
+  /** Em ms desde o começo da gravação, já no ponto de silêncio onde foi cortado. */
+  inicioMs: number
+  fimMs: number
+  texto: string
+  /** A marca que abriu este trecho. Vazio = antes da primeira marca. */
+  marcaId?: Id
 }
 
 /** Um momento marcado dentro de uma gravação. */

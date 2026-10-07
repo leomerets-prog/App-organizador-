@@ -179,13 +179,23 @@ public class SpeechPlugin extends Plugin {
          */
         final long limiteUs = segundosPedidos(call) * 1_000_000L;
         final ArrayList<String> palavras = palavrasDoPedido(call);
+        final long[] cortes = cortesDoPedido(call);
 
         File cru;
         final Decodificado medida;
         try {
             cru = File.createTempFile("sonda-", ".pcm", getContext().getCacheDir());
             medida = decodificarParaPcm(origem, cru, limiteUs);
+            /*
+             * A cópia do webm já serviu: o que se ouve daqui em diante é o
+             * áudio cru. Uma reunião de uma hora são dezenas de megabytes no
+             * cache — e duas cópias dela, o dobro.
+             */
+            //noinspection ResultOfMethodCallIgnored
+            origem.delete();
         } catch (Throwable error) {
+            //noinspection ResultOfMethodCallIgnored
+            origem.delete();
             Log.e(TAG, "organizador: sonda não decodificou o áudio", error);
             JSObject r = new JSObject();
             r.put("ok", false);
@@ -212,7 +222,7 @@ public class SpeechPlugin extends Plugin {
          */
         getActivity().runOnUiThread(() -> {
             try {
-                ouvirArquivo(call, pcm, idioma, medida, palavras);
+                ouvirArquivo(call, pcm, idioma, medida, palavras, cortes);
             } catch (Throwable error) {
                 Log.e(TAG, "organizador: sonda não pôs o reconhecedor de pé", error);
                 JSObject r = new JSObject();
@@ -253,6 +263,31 @@ public class SpeechPlugin extends Plugin {
      * Do Android 13 pra cima há um campo oficial pra isso. Abaixo, vai ignorado
      * sem reclamar — a transcrição continua, só menos ajudada.
      */
+    /**
+     * ONDE PARTIR A GRAVAÇÃO — os instantes das marcas, em ms.
+     *
+     * Não ordena e não descarta nada, de propósito: o JavaScript casa cada
+     * trecho com uma marca PELA POSIÇÃO NA LISTA. Um corte descartado aqui
+     * deslocaria todos os seguintes, e cada tópico levaria a fala do vizinho.
+     * Valor inválido vira zero, que produz um trecho vazio no lugar certo.
+     */
+    private static long[] cortesDoPedido(PluginCall call) {
+        try {
+            JSArray lista = call.getArray("cortes");
+            if (lista == null) {
+                return new long[0];
+            }
+            long[] fora = new long[lista.length()];
+            for (int i = 0; i < fora.length; i++) {
+                double ms = lista.optDouble(i, 0);
+                fora[i] = Double.isNaN(ms) || Double.isInfinite(ms) || ms < 0 ? 0L : (long) ms;
+            }
+            return fora;
+        } catch (Throwable ignored) {
+            return new long[0];
+        }
+    }
+
     private static ArrayList<String> palavrasDoPedido(PluginCall call) {
         ArrayList<String> fora = new ArrayList<>();
         try {
@@ -273,12 +308,66 @@ public class SpeechPlugin extends Plugin {
         return fora;
     }
 
+    // ─── Ouvir, um tópico de cada vez ────────────────────────────────────────
+
+    /*
+     * POR QUE A GRAVAÇÃO É OUVIDA EM PEDAÇOS.
+     *
+     * Ele pediu a ata "separando os tópicos". O app não entende a conversa — e
+     * não vai fingir que entende. Quem separa os tópicos é ele, com o ⚑ Marcar
+     * durante a reunião. O que faltava era a FALA de cada tópico: o reconhecedor
+     * devolve um texto corrido, sem dizer em que segundo cada frase foi dita, e
+     * sem isso não há como cortar o texto nas marcas.
+     *
+     * Então o corte vem antes: o áudio é partido nas marcas e cada pedaço é
+     * ouvido numa sessão própria. O texto de cada tópico é, por construção, o
+     * que foi dito entre aquela marca e a próxima — sem adivinhação nenhuma.
+     *
+     * Sem marca nenhuma é UM pedaço só, o arquivo inteiro: exatamente o caminho
+     * que já funcionou no tablet dele.
+     */
+
+    /** Um pedaço da gravação entre dois cortes, e o que se ouviu nele. */
+    private static final class Trecho {
+        /** Em amostras, desde o começo do áudio. */
+        long inicio;
+        /** Em amostras, exclusivo. */
+        long fim;
+        String texto = "";
+        String trilha = "";
+        /** Código do reconhecedor quando foi erro DE VERDADE (silêncio não conta). */
+        int codigo = 0;
+        /** O reconhecedor não deu sinal nenhum até o prazo. */
+        boolean calado;
+    }
+
+    /** Avisado a cada pedaço de fala reconhecido no trecho em andamento. */
+    private interface Andamento {
+        void segmento(String textoDoTrecho);
+    }
+
+    /**
+     * Respiro entre uma sessão e a próxima.
+     *
+     * Destruir um reconhecedor e criar outro no mesmo instante pode encontrar o
+     * serviço de fala ainda ocupado com o anterior. Um terço de segundo por
+     * tópico não pesa numa reunião, e evita o ERROR_RECOGNIZER_BUSY.
+     */
+    private static final long PAUSA_ENTRE_TRECHOS_MS = 300L;
+
+    /** Se mesmo assim vier "ocupado", espera isto e tenta UMA vez mais. */
+    private static final long ESPERA_SE_OCUPADO_MS = 800L;
+
+    /** Trecho mais curto que isto não vale uma sessão: ninguém diz nada em meio segundo. */
+    private static final long TRECHO_MINIMO_AMOSTRAS = TAXA / 2;
+
     private void ouvirArquivo(
-            PluginCall call,
-            File pcm,
-            String idioma,
-            Decodificado medida,
-            ArrayList<String> palavras) throws Exception {
+            final PluginCall call,
+            final File pcm,
+            final String idioma,
+            final Decodificado medida,
+            final ArrayList<String> palavras,
+            final long[] cortesMs) throws Exception {
         if (Build.VERSION.SDK_INT < 31) {
             JSObject r = new JSObject();
             r.put("ok", false);
@@ -288,6 +377,101 @@ public class SpeechPlugin extends Plugin {
             return;
         }
 
+        final List<Trecho> trechos = dividir(pcm, medida.amostras, cortesMs);
+        final int[] atual = { 0 };
+        final File[] fatia = { null };
+        final Runnable[] proximo = new Runnable[1];
+
+        proximo[0] = () -> {
+            // A fatia do trecho anterior já serviu. O arquivo inteiro, não:
+            // ele é apagado só no fim.
+            if (fatia[0] != null && !fatia[0].equals(pcm)) {
+                //noinspection ResultOfMethodCallIgnored
+                fatia[0].delete();
+            }
+            fatia[0] = null;
+
+            final int i = atual[0];
+            /*
+             * Reconhecedor calado num trecho vai ficar calado em todos: é o
+             * serviço de fala que não está respondendo, não o pedaço de áudio.
+             * Esperar o prazo inteiro mais N vezes seria deixar a tela parada
+             * por minutos pra chegar na mesma resposta.
+             */
+            boolean desistir = i > 0 && trechos.get(i - 1).calado;
+            if (i >= trechos.size() || desistir) {
+                responderTrechos(call, trechos, medida, palavras, pcm);
+                return;
+            }
+
+            final Trecho t = trechos.get(i);
+            avisar(trechos, i, "");
+            if (t.fim - t.inicio < TRECHO_MINIMO_AMOSTRAS) {
+                atual[0]++;
+                proximo[0].run();
+                return;
+            }
+
+            // Recortar é leitura e escrita de disco: fora da linha principal,
+            // pra tela não engasgar num tópico de dez minutos.
+            new Thread(() -> {
+                File arquivo;
+                try {
+                    arquivo = trechos.size() == 1 ? pcm : fatiar(pcm, t, getContext().getCacheDir());
+                } catch (Throwable error) {
+                    Log.e(TAG, "organizador: não recortou o trecho " + (i + 1), error);
+                    t.trilha = t.trilha + "não deu pra recortar;";
+                    arquivo = null;
+                }
+                final File pronto = arquivo;
+                getActivity().runOnUiThread(() -> {
+                    if (pronto == null) {
+                        atual[0]++;
+                        proximo[0].run();
+                        return;
+                    }
+                    fatia[0] = pronto;
+                    try {
+                        ouvirTrecho(
+                                pronto,
+                                idioma,
+                                palavras,
+                                t,
+                                prazoPara((t.fim - t.inicio) / (double) TAXA),
+                                parcial -> avisar(trechos, i, parcial),
+                                () -> {
+                                    atual[0]++;
+                                    getBridge().getWebView().postDelayed(proximo[0], PAUSA_ENTRE_TRECHOS_MS);
+                                },
+                                0);
+                    } catch (Throwable error) {
+                        Log.e(TAG, "organizador: reconhecedor não ficou de pé no trecho " + (i + 1), error);
+                        t.trilha = t.trilha + "não ficou de pé;";
+                        atual[0]++;
+                        proximo[0].run();
+                    }
+                });
+            }).start();
+        };
+
+        proximo[0].run();
+    }
+
+    /**
+     * Uma sessão do reconhecedor sobre um arquivo — o caminho que funcionou no
+     * tablet dele, sem mudar nada no pedido: mesmo áudio, mesmo modo
+     * segmentado, mesmas dicas. O que mudou é pra onde vai o resultado: pro
+     * trecho, e não direto pra tela.
+     */
+    private void ouvirTrecho(
+            final File pcm,
+            final String idioma,
+            final ArrayList<String> palavras,
+            final Trecho t,
+            final long prazo,
+            final Andamento andamento,
+            final Runnable fim,
+            final int tentativa) throws Exception {
         final SpeechRecognizer reconhecedor;
         if (Build.VERSION.SDK_INT >= 33 && SpeechRecognizer.isOnDeviceRecognitionAvailable(getContext())) {
             reconhecedor = SpeechRecognizer.createOnDeviceSpeechRecognizer(getContext());
@@ -322,7 +506,7 @@ public class SpeechPlugin extends Plugin {
         }
 
         final List<String> pedacos = new ArrayList<>();
-        final boolean[] respondeu = { false };
+        final boolean[] acabou = { false };
         /*
          * A TRILHA: que avisos o reconhecedor deu, na ordem.
          *
@@ -331,13 +515,8 @@ public class SpeechPlugin extends Plugin {
          * áudio ou o serviço de fala do aparelho.
          */
         final StringBuilder trilha = new StringBuilder();
-        final long prazo = prazoPara(medida.amostras / (double) TAXA);
 
-        final Runnable responder = () -> {
-            if (respondeu[0]) {
-                return;
-            }
-            respondeu[0] = true;
+        final Runnable soltar = () -> {
             try {
                 reconhecedor.destroy();
             } catch (Throwable ignored) {
@@ -348,32 +527,20 @@ public class SpeechPlugin extends Plugin {
             } catch (Throwable ignored) {
                 // Idem.
             }
-            String tudo = juntar(pedacos);
-            JSObject r = new JSObject();
-            r.put("ok", tudo.length() > 0);
-            r.put("etapa", "reconhecer");
-            r.put("texto", tudo);
-            medida.contar(r);
-            r.put("trilha", trilha.toString());
-            r.put("dicas", palavras.size());
-            if (tudo.length() == 0) {
-                /*
-                 * O caso que o usuário encontrou: nem resultado, nem erro.
-                 * Antes isto resolvia com `erro` vazio e a tela dizia só "não
-                 * transcreveu", que não serve pra decidir nada. Agora a sonda
-                 * diz o que ela própria viu acontecer.
-                 */
-                r.put(
-                        "erro",
-                        trilha.length() == 0
-                                ? "O reconhecedor não deu sinal nenhum em " + (prazo / 1000)
-                                        + "s — nem resultado, nem erro. O serviço de fala deste"
-                                        + " aparelho provavelmente ignora o arquivo e fica"
-                                        + " esperando o microfone."
-                                : "O reconhecedor respondeu (" + trilha + ") mas não devolveu"
-                                        + " texto nenhum.");
+        };
+
+        final Runnable encerrar = () -> {
+            if (acabou[0]) {
+                return;
             }
-            call.resolve(r);
+            acabou[0] = true;
+            soltar.run();
+            t.texto = juntar(pedacos);
+            t.trilha = t.trilha + trilha;
+            if (trilha.length() == 0) {
+                t.calado = true;
+            }
+            fim.run();
         };
 
         reconhecedor.setRecognitionListener(new RecognitionListener() {
@@ -385,28 +552,35 @@ public class SpeechPlugin extends Plugin {
 
             @Override
             public void onError(int code) {
-                if (respondeu[0]) {
+                if (acabou[0]) {
                     return;
                 }
-                respondeu[0] = true;
-                try {
-                    reconhecedor.destroy();
-                } catch (Throwable ignored) {
-                    // Já acabou de qualquer jeito.
+                acabou[0] = true;
+                soltar.run();
+                if (code == SpeechRecognizer.ERROR_RECOGNIZER_BUSY && tentativa == 0) {
+                    t.trilha = t.trilha + trilha + "ocupado, tentando de novo;";
+                    getBridge().getWebView().postDelayed(() -> {
+                        try {
+                            ouvirTrecho(pcm, idioma, palavras, t, prazo, andamento, fim, tentativa + 1);
+                        } catch (Throwable error) {
+                            t.codigo = code;
+                            fim.run();
+                        }
+                    }, ESPERA_SE_OCUPADO_MS);
+                    return;
                 }
-                try {
-                    fd.close();
-                } catch (Throwable ignored) {
-                    // Idem.
+                /*
+                 * Tópico em que ninguém disse nada não é erro: é silêncio. O
+                 * reconhecedor responde isso com NO_MATCH ou SPEECH_TIMEOUT, e
+                 * tratar como falha faria UM tópico calado derrubar a ata.
+                 */
+                if (code != SpeechRecognizer.ERROR_NO_MATCH && code != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                    t.codigo = code;
                 }
-                JSObject r = new JSObject();
-                r.put("ok", false);
-                r.put("etapa", "reconhecer");
-                r.put("codigo", code);
-                r.put("erro", explicar(code));
-                r.put("trilha", trilha + "erro;");
-                medida.contar(r);
-                call.resolve(r);
+                // O que veio antes do erro continua valendo.
+                t.texto = juntar(pedacos);
+                t.trilha = t.trilha + trilha + "erro " + code + ";";
+                fim.run();
             }
 
             @Override
@@ -418,7 +592,7 @@ public class SpeechPlugin extends Plugin {
                 if (lista != null && !lista.isEmpty()) {
                     pedacos.add(lista.get(0));
                 }
-                responder.run();
+                encerrar.run();
             }
 
             @Override
@@ -442,30 +616,14 @@ public class SpeechPlugin extends Plugin {
                         : segment.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                 if (lista != null && !lista.isEmpty()) {
                     pedacos.add(lista.get(0));
-                    /*
-                     * Conta o andamento ANTES do fim.
-                     *
-                     * Uma reunião de meia hora leva minutos pra transcrever, e
-                     * o `resolve` só vem no fim. Sem isto, a tela fica parada o
-                     * tempo todo — e tela parada é indistinguível de tela
-                     * travada, que é justamente o que ele já relatou três vezes
-                     * no fluxograma.
-                     */
-                    try {
-                        JSObject passo = new JSObject();
-                        passo.put("texto", juntar(pedacos));
-                        passo.put("trechos", pedacos.size());
-                        notifyListeners("andamento", passo);
-                    } catch (Throwable ignored) {
-                        // Contar o andamento nunca pode atrapalhar o resultado.
-                    }
+                    andamento.segmento(juntar(pedacos));
                 }
             }
 
             @Override
             public void onEndOfSegmentedSession() {
                 trilha.append("fim da sessão;");
-                responder.run();
+                encerrar.run();
             }
 
             @Override public void onEvent(int type, Bundle params) { }
@@ -475,7 +633,266 @@ public class SpeechPlugin extends Plugin {
 
         // Rede de segurança: reconhecedor que não volta não pode deixar a tela
         // esperando pra sempre.
-        getBridge().getWebView().postDelayed(responder, prazo);
+        getBridge().getWebView().postDelayed(encerrar, prazo);
+    }
+
+    /**
+     * Conta o andamento ANTES do fim.
+     *
+     * Uma reunião de meia hora leva minutos pra transcrever, e o `resolve` só
+     * vem no fim. Sem isto a tela fica parada o tempo todo — e tela parada é
+     * indistinguível de tela travada, que é justamente o que ele já relatou
+     * três vezes no fluxograma. Agora também diz EM QUE TÓPICO está.
+     */
+    private void avisar(List<Trecho> trechos, int atual, String parcialDoAtual) {
+        try {
+            List<String> ate = new ArrayList<>();
+            for (int k = 0; k < atual && k < trechos.size(); k++) {
+                ate.add(trechos.get(k).texto);
+            }
+            ate.add(parcialDoAtual);
+            JSObject passo = new JSObject();
+            passo.put("texto", juntar(ate));
+            passo.put("topico", atual + 1);
+            passo.put("topicos", trechos.size());
+            notifyListeners("andamento", passo);
+        } catch (Throwable ignored) {
+            // Contar o andamento nunca pode atrapalhar o resultado.
+        }
+    }
+
+    /** Junta o que cada trecho ouviu e devolve pra tela, trecho por trecho. */
+    private void responderTrechos(
+            PluginCall call,
+            List<Trecho> trechos,
+            Decodificado medida,
+            ArrayList<String> palavras,
+            File pcm) {
+        //noinspection ResultOfMethodCallIgnored
+        pcm.delete();
+
+        List<String> textos = new ArrayList<>();
+        StringBuilder trilhas = new StringBuilder();
+        int primeiroErro = 0;
+        boolean calado = false;
+        JSArray lista = new JSArray();
+        for (int i = 0; i < trechos.size(); i++) {
+            Trecho t = trechos.get(i);
+            textos.add(t.texto);
+            if (trechos.size() > 1) {
+                if (trilhas.length() > 0) {
+                    trilhas.append(" | ");
+                }
+                trilhas.append(i + 1).append(": ");
+            }
+            trilhas.append(t.trilha);
+            if (primeiroErro == 0 && t.codigo != 0) {
+                primeiroErro = t.codigo;
+            }
+            calado = calado || t.calado;
+            try {
+                JSObject o = new JSObject();
+                o.put("inicioMs", t.inicio * 1000L / TAXA);
+                o.put("fimMs", t.fim * 1000L / TAXA);
+                o.put("texto", t.texto);
+                lista.put(o);
+            } catch (Throwable ignored) {
+                // Um trecho que não se deixa descrever não pode derrubar os outros.
+            }
+        }
+
+        String tudo = juntar(textos);
+        JSObject r = new JSObject();
+        r.put("ok", tudo.length() > 0);
+        r.put("etapa", "reconhecer");
+        r.put("texto", tudo);
+        r.put("trechos", lista);
+        medida.contar(r);
+        r.put("trilha", trilhas.toString());
+        r.put("dicas", palavras.size());
+        if (tudo.length() == 0) {
+            if (primeiroErro != 0) {
+                r.put("codigo", primeiroErro);
+                r.put("erro", explicar(primeiroErro));
+            } else if (calado) {
+                r.put("erro", "O reconhecedor não deu sinal nenhum — nem resultado, nem erro. O serviço"
+                        + " de fala deste aparelho provavelmente ignora o arquivo e fica esperando o"
+                        + " microfone.");
+            } else {
+                r.put("erro", "O reconhecedor respondeu (" + trilhas + ") mas não devolveu texto nenhum.");
+            }
+        }
+        call.resolve(r);
+    }
+
+    // ─── Onde cortar ─────────────────────────────────────────────────────────
+
+    /**
+     * Quanto o corte pode andar pra achar silêncio, pra cada lado.
+     *
+     * A marca é tocada COM a reunião acontecendo — quase sempre no meio de uma
+     * frase. Cortar exatamente ali parte uma palavra em duas, e o reconhecedor
+     * erra as duas metades. Andando até a pausa mais próxima, a palavra fica
+     * inteira de um lado só. Um segundo e meio cobre a pausa entre duas frases
+     * sem deslocar o tópico de lugar.
+     */
+    static final int RAIO_AJUSTE_MS = 1500;
+
+    /** Tamanho do pedaço em que a energia é medida. 40 ms é menos que uma sílaba. */
+    static final int QUADRO_MS = 40;
+
+    /**
+     * Parte a gravação nos cortes pedidos.
+     *
+     * Devolve SEMPRE `cortes + 1` trechos, na ordem pedida, mesmo que algum
+     * fique vazio. É essa contagem fixa que deixa o JavaScript casar cada
+     * trecho com a marca que o abriu — se um corte inválido sumisse daqui,
+     * todos os tópicos depois dele levariam a fala do vizinho.
+     */
+    static List<Trecho> dividir(File pcm, long total, long[] cortesMs) {
+        List<Long> limites = new ArrayList<>();
+        limites.add(0L);
+        for (long ms : cortesMs) {
+            long alvo = Math.max(0L, ms) * TAXA / 1000L;
+            long ajustado = alvo;
+            try {
+                if (alvo > 0 && alvo < total) {
+                    ajustado = ajustarAoSilencio(pcm, alvo, total);
+                }
+            } catch (Throwable ignored) {
+                // Sem conseguir ler a vizinhança, corta onde ele marcou.
+            }
+            // Nunca antes do corte anterior, nunca depois do fim: a ordem dos
+            // tópicos é a ordem das marcas, e é ela que casa trecho com marca.
+            long anterior = limites.get(limites.size() - 1);
+            limites.add(Math.max(anterior, Math.min(total, ajustado)));
+        }
+        limites.add(Math.max(limites.get(limites.size() - 1), total));
+
+        List<Trecho> fora = new ArrayList<>();
+        for (int i = 0; i + 1 < limites.size(); i++) {
+            Trecho t = new Trecho();
+            t.inicio = limites.get(i);
+            t.fim = limites.get(i + 1);
+            fora.add(t);
+        }
+        return fora;
+    }
+
+    /** O ponto mais quieto perto do alvo, em amostras desde o começo. */
+    static long ajustarAoSilencio(File pcm, long alvo, long total) throws java.io.IOException {
+        long raio = (long) TAXA * RAIO_AJUSTE_MS / 1000L;
+        long ini = Math.max(0L, alvo - raio);
+        long fim = Math.min(total, alvo + raio);
+        if (fim - ini < 2) {
+            return Math.max(0L, Math.min(total, alvo));
+        }
+        short[] janela = lerAmostras(pcm, ini, fim);
+        return ini + quietoMaisPerto(janela, (int) (alvo - ini), TAXA * QUADRO_MS / 1000);
+    }
+
+    /**
+     * O índice do trecho mais quieto da janela — e, entre os igualmente
+     * quietos, o mais perto do alvo.
+     *
+     * O desempate importa: em silêncio de verdade todos os quadros empatam, e
+     * sem ele o corte iria parar na borda da janela, um segundo e meio longe
+     * de onde ele marcou, sem motivo nenhum.
+     */
+    static int quietoMaisPerto(short[] janela, int alvo, int quadro) {
+        int n = janela.length;
+        if (n == 0) {
+            return 0;
+        }
+        int alvoPreso = Math.max(0, Math.min(n - 1, alvo));
+        if (quadro <= 0 || n < quadro) {
+            return alvoPreso;
+        }
+        int passo = Math.max(1, quadro / 2);
+        int quadros = (n - quadro) / passo + 1;
+        double[] energia = new double[quadros];
+        double menor = Double.MAX_VALUE;
+        for (int k = 0; k < quadros; k++) {
+            int base = k * passo;
+            double soma = 0;
+            for (int j = 0; j < quadro; j++) {
+                double v = janela[base + j];
+                soma += v * v;
+            }
+            energia[k] = soma / quadro;
+            menor = Math.min(menor, energia[k]);
+        }
+        /*
+         * "Tão quieto quanto o mais quieto": até uma vez e meia a energia dele,
+         * mais um piso de ruído desprezível (um valor de 10 numa régua de
+         * 32767). Ruído de sala varia bem mais que 5% de um quadro pro outro,
+         * e com folga apertada o corte correria até a pausa mais LONGE só
+         * porque lá o ar-condicionado estava um pouco mais baixo. Fala, por
+         * outro lado, tem dez a cem vezes a energia do ruído: não entra no
+         * empate. Sem o piso, silêncio digital puro (energia zero) não
+         * deixaria empate nenhum.
+         */
+        double limite = menor * 1.5 + 100.0;
+        int melhor = alvoPreso;
+        int melhorDistancia = Integer.MAX_VALUE;
+        for (int k = 0; k < quadros; k++) {
+            if (energia[k] > limite) {
+                continue;
+            }
+            int centro = k * passo + quadro / 2;
+            int distancia = Math.abs(centro - alvoPreso);
+            if (distancia < melhorDistancia) {
+                melhorDistancia = distancia;
+                melhor = centro;
+            }
+        }
+        return Math.max(0, Math.min(n - 1, melhor));
+    }
+
+    /** Amostras [ini, fim) do arquivo cru. Arquivo mais curto devolve o que tiver. */
+    static short[] lerAmostras(File pcm, long ini, long fim) throws java.io.IOException {
+        int quantas = (int) Math.max(0L, fim - ini);
+        byte[] bytes = new byte[quantas * 2];
+        int lidos = 0;
+        try (java.io.RandomAccessFile in = new java.io.RandomAccessFile(pcm, "r")) {
+            in.seek(ini * 2L);
+            while (lidos < bytes.length) {
+                int n = in.read(bytes, lidos, bytes.length - lidos);
+                if (n < 0) {
+                    break;
+                }
+                lidos += n;
+            }
+        }
+        short[] fora = new short[lidos / 2];
+        for (int i = 0; i < fora.length; i++) {
+            fora[i] = (short) ((bytes[i * 2] & 0xff) | (bytes[i * 2 + 1] << 8));
+        }
+        return fora;
+    }
+
+    /** Copia o trecho pra um arquivo próprio, que é o que o reconhecedor lê. */
+    static File fatiar(File pcm, Trecho t, File pasta) throws java.io.IOException {
+        File destino = File.createTempFile("trecho-", ".pcm", pasta);
+        copiarAmostras(pcm, destino, t.inicio, t.fim);
+        return destino;
+    }
+
+    static void copiarAmostras(File origem, File destino, long inicio, long fim) throws java.io.IOException {
+        try (java.io.RandomAccessFile in = new java.io.RandomAccessFile(origem, "r");
+             OutputStream out = new FileOutputStream(destino)) {
+            in.seek(inicio * 2L);
+            long faltam = Math.max(0L, fim - inicio) * 2L;
+            byte[] buffer = new byte[64 * 1024];
+            while (faltam > 0) {
+                int n = in.read(buffer, 0, (int) Math.min(buffer.length, faltam));
+                if (n < 0) {
+                    break;
+                }
+                out.write(buffer, 0, n);
+                faltam -= n;
+            }
+        }
     }
 
     /** Os trechos do reconhecedor costurados num texto só. */
