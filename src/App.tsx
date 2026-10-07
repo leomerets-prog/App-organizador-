@@ -51,6 +51,7 @@ export default function App() {
       <Sidebar onOpenPanel={() => setPanelOpen(true)} onOpenUpdate={() => setUpdateOpen(true)} />
 
       <main className="main">
+        <AvisoDeGravacao />
         <div className="topbar">
           <button
             className="nav-toggle"
@@ -77,6 +78,38 @@ export default function App() {
       {panelOpen && <Central onClose={() => setPanelOpen(false)} />}
       {updateOpen && <UpdatePanel onClose={() => setUpdateOpen(false)} />}
       {ataOpen && <AtaPanel onClose={() => setAtaOpen(false)} />}
+    </div>
+  )
+}
+
+/**
+ * A FAIXA VERMELHA de quando o banco recusou uma gravação.
+ *
+ * Fica até dar certo — não some sozinha em cinco segundos. Enquanto ela
+ * estiver na tela, o que aparece na folha pode não estar guardado, e ele
+ * precisa saber disso ANTES de fechar o app, não depois.
+ */
+function AvisoDeGravacao() {
+  const falha = useStore((s) => s.falhaDeGravacao)
+  const regravarFolha = useStore((s) => s.regravarFolha)
+  const [tentando, setTentando] = useState(false)
+  if (!falha) return null
+  return (
+    <div className="aviso-gravacao" role="alert">
+      <span>
+        ⚠ {falha} O que está nesta folha pode não estar guardado — não feche o app. Libere espaço
+        (apague gravações antigas que já salvou como arquivo) e toque em Guardar de novo.
+      </span>
+      <button
+        disabled={tentando}
+        onClick={async () => {
+          setTentando(true)
+          await regravarFolha()
+          setTentando(false)
+        }}
+      >
+        {tentando ? 'Guardando…' : 'Guardar de novo'}
+      </button>
     </div>
   )
 }

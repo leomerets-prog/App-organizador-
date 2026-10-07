@@ -3530,3 +3530,49 @@ button.rec-texto-topo:active {
   font-size: 12px;
   color: var(--text-faint);
 }
+
+/* A gravação remontada na abertura: verde, porque é notícia boa — a reunião
+   que parecia perdida está aqui. */
+.rec-recuperada {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.rec-recuperada button {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+/* O banco recusou uma gravação. Vermelho, fixo no topo da área de trabalho e
+   sem fechar sozinho: é o único aviso que pode evitar ele fechar o app
+   achando que está tudo guardado. */
+.aviso-gravacao {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  background: #b91c1c;
+  color: #fff;
+  font-size: 14px;
+}
+
+.aviso-gravacao button {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: none;
+  background: #fff;
+  color: #b91c1c;
+  font-weight: 700;
+}

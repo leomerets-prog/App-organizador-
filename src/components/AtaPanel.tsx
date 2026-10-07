@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useStore } from '../state/store'
 import { ataEmTexto, montarAta } from '../ata/ata'
 import type { Ata, LinhaDaAta, TopicoDaAta } from '../ata/ata'
+import type { TrechoFalado } from '../domain/types'
 import { salvarTexto } from '../audio/export'
 
 /**
@@ -49,7 +50,13 @@ export function AtaPanel({ onClose }: { onClose: () => void }) {
   const [feito, setFeito] = useState<string | null>(null)
   const [erro, setErro] = useState<string | null>(null)
   /** O tópico cuja fala está sendo corrigida aqui, e o texto em edição. */
-  const [editando, setEditando] = useState<{ chave: string; texto: string } | null>(null)
+  const [editando, setEditando] = useState<{
+    chave: string
+    texto: string
+    /** A fala da gravação quando o editor abriu — pra não gravar em cima do que mudou depois. */
+    base: TrechoFalado[]
+    aviso?: string
+  } | null>(null)
 
   if (!pagina || !ata) {
     return (
@@ -90,15 +97,20 @@ export function AtaPanel({ onClose }: { onClose: () => void }) {
     }
   }
 
-  /** Grava a fala corrigida de UM tópico, sem mexer na dos outros. */
-  const guardarFala = (t: TopicoDaAta, novo: string) => {
-    const rec = recordings.find((r) => r.id === t.gravacaoId)
-    const trechos = rec?.transcricao?.trechos
-    if (!rec || !trechos || t.indiceDoTrecho === undefined) return
-    const textos = trechos.map((x) => x.texto)
+  /**
+   * Grava a fala corrigida de UM tópico, sem mexer na dos outros — e só se a
+   * fala ainda for a de quando o editor abriu. Devolve se gravou.
+   */
+  const guardarFala = async (t: TopicoDaAta, base: TrechoFalado[], novo: string): Promise<boolean> => {
+    if (t.indiceDoTrecho === undefined) return false
+    const textos = base.map((x) => x.texto)
     textos[t.indiceDoTrecho] = novo
-    void corrigirTrechos(rec.id, textos)
+    return (await corrigirTrechos(t.gravacaoId, base, textos)) === 'gravou'
   }
+
+  /** A fala da gravação deste tópico, como está agora. */
+  const falaAgora = (t: TopicoDaAta): TrechoFalado[] =>
+    (recordings.find((r) => r.id === t.gravacaoId)?.transcricao?.trechos ?? []).map((x) => ({ ...x }))
 
   const vazia =
     ata.pauta.length +
@@ -194,7 +206,7 @@ export function AtaPanel({ onClose }: { onClose: () => void }) {
                         {t.indiceDoTrecho !== undefined && !aberto && (
                           <button
                             className="ata-corrigir"
-                            onClick={() => setEditando({ chave, texto: t.fala ?? '' })}
+                            onClick={() => setEditando({ chave, texto: t.fala ?? '', base: falaAgora(t) })}
                             title="Corrigir a fala deste tópico"
                           >
                             ✎ Corrigir
@@ -206,16 +218,24 @@ export function AtaPanel({ onClose }: { onClose: () => void }) {
                         <div className="ata-editor">
                           <textarea
                             value={editando.texto}
-                            onChange={(e) => setEditando({ chave, texto: e.target.value })}
+                            onChange={(e) => setEditando({ ...editando, texto: e.target.value })}
                             rows={Math.min(10, Math.max(3, Math.ceil(editando.texto.length / 70)))}
                             aria-label={`Fala do tópico ${t.titulo}`}
                           />
                           <div className="ata-editor-botoes">
                             <button
                               className="ata-botao"
-                              onClick={() => {
-                                guardarFala(t, editando.texto)
-                                setEditando(null)
+                              onClick={async () => {
+                                if (await guardarFala(t, editando.base, editando.texto)) {
+                                  setEditando(null)
+                                  return
+                                }
+                                // Fica aberto com o texto dele: a fala mudou por baixo.
+                                setEditando({
+                                  ...editando,
+                                  aviso:
+                                    'A fala mudou enquanto você corrigia (outra correção ou uma nova transcrição). Nada foi gravado — copie o seu texto, cancele e corrija de novo.',
+                                })
                               }}
                             >
                               ✓ Guardar
@@ -224,6 +244,7 @@ export function AtaPanel({ onClose }: { onClose: () => void }) {
                               Cancelar
                             </button>
                           </div>
+                          {editando.aviso && <div className="ata-aviso ruim">{editando.aviso}</div>}
                         </div>
                       ) : t.fala === undefined ? null : (
                         <p className={t.fala ? 'ata-fala' : 'ata-fala vazia'}>

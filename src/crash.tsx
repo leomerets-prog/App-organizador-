@@ -1,3 +1,4 @@
+import { avisarFalhaDeGravacao, ehFalhaDoBanco } from './db/falhas'
 import { Component } from 'react'
 import type { ErrorInfo, ReactNode } from 'react'
 
@@ -70,6 +71,9 @@ export function installCrashScreen(): void {
       // App de pé: registra e segue. O marcador é outro de propósito — a
       // verificação da esteira reprova em "erro", não em "aviso".
       console.warn(`organizador: aviso (promessa sem tratamento) — ${descrever(event.reason)}`)
+      // Mas falha de GRAVAÇÃO não pode ficar só no registro: a tela mostra o
+      // que o banco recusou, e ele precisa saber (faixa vermelha no topo).
+      if (ehFalhaDoBanco(event.reason)) avisarFalhaDeGravacao(event.reason)
       return
     }
     showCrash(event.reason, 'promessa sem tratamento')

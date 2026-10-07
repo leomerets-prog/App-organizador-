@@ -41,7 +41,6 @@ import type { Recording, TrechoFalado } from '../domain/types'
 export function AudioBar() {
   const recordings = useStore((s) => s.recordings)
   const activePageId = useStore((s) => s.activePageId)
-  const addRecording = useStore((s) => s.addRecording)
   const removeRecording = useStore((s) => s.removeRecording)
   const setRecordingPosition = useStore((s) => s.setRecordingPosition)
   const marcarMomento = useStore((s) => s.marcarMomento)
@@ -82,7 +81,11 @@ export function AudioBar() {
     texto: string
     /** Com a fala partida em tópicos, corrige-se um tópico de cada vez. */
     trechos?: string[]
+    /** A fala de quando o editor abriu — pra não gravar em cima do que mudou depois. */
+    base?: TrechoFalado[]
   } | null>(null)
+  /** Recado do editor de correção (ex.: a fala mudou enquanto ele corrigia). */
+  const [avisoCorrecao, setAvisoCorrecao] = useState<string | null>(null)
   /*
    * QUAL TRANSCRIÇÃO ESTÁ ABERTA — e `null` é o normal.
    *
@@ -173,11 +176,19 @@ export function AudioBar() {
        */
       const texto = resultado.texto?.trim() || aoVivoRef.current.trim()
       if (texto) {
-        await guardarTranscricao(rec.id, texto, {
+        const gravou = await guardarTranscricao(rec.id, texto, {
           segundos: resultado.segundos,
           dicas: resultado.dicas ?? palavras.length,
           trechos: casarTrechos(divisao, resultado.trechos),
         })
+        // A tela dizia "Transcreveu." mesmo quando nada era gravado.
+        if (gravou === 'recusou') {
+          setError(
+            'Esta transcrição já foi corrigida por você, e a nova não foi gravada por cima. Pra refazer, apague o texto (✕) e transcreva de novo.',
+          )
+        } else if (gravou === 'sumiu') {
+          setError('A gravação não existe mais — a transcrição não foi guardada.')
+        }
       }
     } catch (err) {
       setSondaResultado({
@@ -199,6 +210,24 @@ export function AudioBar() {
   const cycleAudioRate = useStore((s) => s.cycleAudioRate)
 
   const [handle, setHandle] = useState<RecorderHandle | null>(null)
+  /*
+   * A GRAVAÇÃO EM CURSO, por ref.
+   *
+   * O "Parar" também pode vir de dentro — o microfone caiu e o gravador avisa
+   * por callback. Esse callback nasce no começo da gravação e enxergaria o
+   * `handle` daquela hora (nulo); a ref é o valor de agora.
+   */
+  const handleRef = useRef<RecorderHandle | null>(null)
+  const gravandoRef = useRef<Recording | null>(null)
+  const [marcasGravando, setMarcasGravando] = useState(0)
+  /** Áudio que não coube no banco no "Parar": ainda dá pra salvar como arquivo. */
+  const [audioPendente, setAudioPendente] = useState<{ rec: Recording; blob: Blob } | null>(null)
+  const iniciarGravacao = useStore((s) => s.iniciarGravacao)
+  const guardarPedaco = useStore((s) => s.guardarPedaco)
+  const marcarGravando = useStore((s) => s.marcarGravando)
+  const concluirGravacao = useStore((s) => s.concluirGravacao)
+  const gravacoesRecuperadas = useStore((s) => s.gravacoesRecuperadas)
+  const dispensarRecuperadas = useStore((s) => s.dispensarRecuperadas)
   const [elapsed, setElapsed] = useState(0)
   const [level, setLevel] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -272,6 +301,20 @@ export function AudioBar() {
     if (audioRef.current) audioRef.current.playbackRate = audioRate
   }, [audioRate])
 
+  /*
+   * Trocar de folha pausa a escuta. Os controles da gravação ficam na folha
+   * dela; na folha nova o áudio continuava tocando alto, no meio da reunião,
+   * sem botão pra parar.
+   */
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio || audio.paused) return
+    audio.pause()
+    const id = loadedIdRef.current
+    if (id) guardarPosicaoRef.current(id, audio.currentTime * 1000)
+    setPlayingId(null)
+  }, [activePageId])
+
   // Ao sair da página: solta o áudio e grava onde a escuta parou. Sem isto,
   // trocar de página perderia justamente a posição que o recurso existe pra ter.
   useEffect(() => {
@@ -286,42 +329,119 @@ export function AudioBar() {
 
   const begin = async () => {
     setError(null)
+    setAudioPendente(null)
+    // A folha é a de AGORA, no começo da reunião — não a que estiver aberta
+    // no "Parar". Antes, trocar de folha no meio da reunião guardava a
+    // gravação na folha errada, e a folha da reunião parecia ter perdido o áudio.
+    const pageId = activePageId
+    if (!pageId) return
+    const id = newId()
+    let h: RecorderHandle
     try {
-      setHandle(await startRecording())
+      h = await startRecording({
+        aoPedaco: (pedaco, ordem) => {
+          guardarPedaco(id, ordem, pedaco).catch(() =>
+            setError(
+              'Não estou conseguindo guardar a gravação no tablet. Não feche o app antes de tocar em Parar.',
+            ),
+          )
+        },
+        aoInterromper: (motivo) => {
+          setError(`${motivo} O que foi gravado até aqui foi guardado.`)
+          void finishRef.current()
+        },
+      })
     } catch (err) {
       setError(
         err instanceof Error && err.name === 'NotAllowedError'
           ? 'Permissão de microfone negada.'
           : 'Não consegui acessar o microfone.',
       )
+      return
     }
+
+    const rascunho: Recording = {
+      id,
+      pageId,
+      startedAt: h.startedAt,
+      durationMs: 0,
+      mimeType: h.mimeType,
+      anchor: { x: 40, y: 40 },
+      label: new Date(h.startedAt).toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      marcas: [],
+    }
+    try {
+      await iniciarGravacao(rascunho)
+    } catch {
+      setError('Não consegui abrir a gravação no tablet: até o Parar, ela fica só na memória.')
+    }
+    gravandoRef.current = rascunho
+    handleRef.current = h
+    setMarcasGravando(0)
+    setHandle(h)
   }
 
   const finish = async () => {
-    if (!handle || !activePageId) return
+    const h = handleRef.current
+    const rascunho = gravandoRef.current
+    if (!h || !rascunho) return
+    // Um "Parar" só: o toque e a interrupção podem chegar juntos.
+    handleRef.current = null
     try {
-      const result = await handle.stop()
-      const rec: Recording = {
-        id: newId(),
-        pageId: activePageId,
-        startedAt: handle.startedAt,
-        durationMs: result.durationMs,
-        mimeType: result.mimeType,
-        anchor: { x: 40, y: 40 },
-        label: new Date(handle.startedAt).toLocaleString('pt-BR', {
-          day: '2-digit',
-          month: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
+      const result = await h.stop()
+      const rec: Recording = { ...rascunho, durationMs: result.durationMs, mimeType: result.mimeType }
+      try {
+        await concluirGravacao(rec, result.blob)
+      } catch {
+        /*
+         * O áudio inteiro está na mão: não pode ir embora com a mensagem de
+         * erro. Os pedaços continuam no banco (a próxima abertura remonta), e
+         * enquanto isso dá pra salvar o arquivo pra fora do app.
+         */
+        setAudioPendente({ rec, blob: result.blob })
+        setError(
+          'Não consegui fechar a gravação no tablet. Ela está guardada em pedaços e volta quando o app abrir de novo — ou salve agora como arquivo.',
+        )
       }
-      await addRecording(rec, result.blob)
-    } catch {
-      setError('A gravação não pôde ser salva.')
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : 'A gravação não pôde ser salva.')
     } finally {
+      gravandoRef.current = null
       setHandle(null)
       setElapsed(0)
       setLevel(0)
+    }
+  }
+  const finishRef = useRef(finish)
+  finishRef.current = finish
+
+  /** ⚑ durante a reunião: o instante é o do relógio da gravação em curso. */
+  const marcarAgora = async () => {
+    const h = handleRef.current
+    const rascunho = gravandoRef.current
+    if (!h || !rascunho) return
+    try {
+      const marcas = await marcarGravando(rascunho.id, Date.now() - h.startedAt)
+      setMarcasGravando(marcas.length)
+    } catch {
+      setError('Não consegui guardar a marca.')
+    }
+  }
+
+  const salvarPendente = async () => {
+    if (!audioPendente) return
+    try {
+      const { onde } = await salvarAudio(audioPendente.rec, audioPendente.blob)
+      setError(null)
+      setAudioPendente(null)
+      setSaved({ id: audioPendente.rec.id, onde })
+    } catch (err) {
+      setError(err instanceof Error && err.message ? `Não deu pra salvar: ${err.message}` : 'Não deu pra salvar o áudio.')
     }
   }
 
@@ -476,6 +596,20 @@ export function AudioBar() {
   }
 
   const apagar = (rec: Recording) => {
+    /*
+     * Um ✕ pequeno, na mesma fileira do Transcrever e do Salvar, numa tela de
+     * caneta: um toque de raspão apagava a reunião de 90 minutos, o áudio e a
+     * transcrição corrigida — sem pergunta e sem volta. Apagar só o texto já
+     * perguntava; apagar a gravação inteira, que contém o texto, não.
+     */
+    const minutos = Math.max(1, Math.round((rec.durationMs || 0) / 60000))
+    const extra = rec.transcricao?.corrigida
+      ? '\n\nA transcrição que VOCÊ corrigiu vai junto.'
+      : rec.transcricao
+        ? '\n\nA transcrição vai junto.'
+        : ''
+    const pergunta = `Apagar a gravação ${rec.label} (${minutos} min)? O áudio sai do aplicativo e não volta.${extra}`
+    if (!window.confirm(pergunta)) return
     if (playingId === rec.id) {
       audioRef.current?.pause()
       setPlayingId(null)
@@ -490,10 +624,22 @@ export function AudioBar() {
   return (
     <div className="audiobar">
       {handle ? (
-        <button className="rec-btn recording" onClick={() => void finish()}>
-          <span className="rec-dot" style={{ transform: `scale(${1 + level * 0.6})` }} />
-          Parar · {formatDuration(elapsed)}
-        </button>
+        <>
+          <button className="rec-btn recording" onClick={() => void finish()}>
+            <span className="rec-dot" style={{ transform: `scale(${1 + level * 0.6})` }} />
+            Parar · {formatDuration(elapsed)}
+          </button>
+          {/* O ⚑ da reunião EM CURSO. É aqui, ao lado do Parar, que ele
+              procura durante a reunião — e é esta gravação que ele quer
+              marcar, não a anterior. */}
+          <button
+            className="rec-marcar"
+            onClick={() => void marcarAgora()}
+            title="Marcar este instante da reunião que está sendo gravada"
+          >
+            ⚑ Marcar{marcasGravando > 0 ? ` (${marcasGravando})` : ''}
+          </button>
+        </>
       ) : (
         <button className="rec-btn" onClick={() => void begin()} disabled={!activePageId}>
           <span className="rec-dot idle" />
@@ -502,6 +648,23 @@ export function AudioBar() {
       )}
 
       {error && <span className="audio-error">{error}</span>}
+
+      {audioPendente && (
+        <button className="rec-save" onClick={() => void salvarPendente()}>
+          ⤓ Salvar o áudio como arquivo
+        </button>
+      )}
+
+      {/* A gravação que o app remontou na abertura. Dizer é o que transforma
+          "perdi a reunião" em "a reunião está aqui". */}
+      {gravacoesRecuperadas.length > 0 && (
+        <div className="rec-recuperada">
+          ✓ Recuperei {gravacoesRecuperadas.length === 1 ? 'a gravação' : `${gravacoesRecuperadas.length} gravações`} que
+          o app fechou antes do Parar ({gravacoesRecuperadas.map((r) => r.label).join(', ')}). Está na folha
+          onde a reunião começou.
+          <button onClick={dispensarRecuperadas}>Ok</button>
+        </div>
+      )}
 
       {/*
         OS DETALHES TÉCNICOS, agora fechados.
@@ -667,7 +830,12 @@ export function AudioBar() {
                 <button
                   className="rec-marcar"
                   onClick={() => void marcarMomento(rec.id, posicao)}
-                  title="Marcar este instante da gravação"
+                  disabled={handle !== null}
+                  title={
+                    handle
+                      ? 'Gravando: use o ⚑ Marcar ao lado do Parar'
+                      : 'Marcar este instante da gravação'
+                  }
                 >
                   ⚑ Marcar
                 </button>
@@ -686,7 +854,15 @@ export function AudioBar() {
                 {sondaPossivel() && (
                   <button
                     className="rec-sonda"
-                    onClick={() => void transcrever(rec)}
+                    onClick={() => {
+                      if (rec.transcricao?.corrigida) {
+                        setError(
+                          'Você corrigiu esta transcrição à mão — transcrever de novo apagaria a correção. Se é isso mesmo, apague o texto (✕ dentro de "O que foi dito") e toque aqui de novo.',
+                        )
+                        return
+                      }
+                      void transcrever(rec)
+                    }}
                     disabled={sondando !== null}
                     title={
                       rec.transcricao
@@ -811,19 +987,21 @@ export function AudioBar() {
                   {textoAberto === rec.id && (
                    <>
                   <div className="rec-texto-topo linha">
-                    {rec.transcricao && corrigindo?.recId !== rec.id && (
+                    {rec.transcricao && corrigindo?.recId !== rec.id && transcrevendoId !== rec.id && (
                       <>
                         <button
                           className="rec-texto-acao"
-                          onClick={() =>
+                          onClick={() => {
+                            setAvisoCorrecao(null)
                             setCorrigindo({
                               recId: rec.id,
                               texto: rec.transcricao?.texto ?? '',
                               trechos: temTopicos(rec)
                                 ? rec.transcricao?.trechos?.map((t) => t.texto)
                                 : undefined,
+                              base: temTopicos(rec) ? rec.transcricao?.trechos?.map((t) => ({ ...t })) : undefined,
                             })
-                          }
+                          }}
                           title="Corrigir o texto à mão"
                         >
                           ✎ Corrigir
@@ -898,21 +1076,42 @@ export function AudioBar() {
                       <div className="rec-texto-botoes">
                         <button
                           className="rec-texto-acao"
-                          onClick={() => {
-                            if (corrigindo.trechos) {
-                              void corrigirTrechos(rec.id, corrigindo.trechos)
-                            } else {
-                              void corrigirTranscricao(rec.id, corrigindo.texto)
+                          onClick={async () => {
+                            const r =
+                              corrigindo.trechos && corrigindo.base
+                                ? await corrigirTrechos(rec.id, corrigindo.base, corrigindo.trechos)
+                                : await corrigirTranscricao(rec.id, corrigindo.texto)
+                            if (r === 'gravou') {
+                              setCorrigindo(null)
+                              setAvisoCorrecao(null)
+                              return
                             }
-                            setCorrigindo(null)
+                            /*
+                             * O editor FICA aberto com o que ele digitou: a
+                             * fala mudou por baixo (correção na ata, nova
+                             * transcrição) e gravar escolheria um dos dois em
+                             * silêncio.
+                             */
+                            setAvisoCorrecao(
+                              r === 'recusou'
+                                ? 'A fala mudou enquanto você corrigia (outra correção ou uma nova transcrição). Nada foi gravado — copie o seu texto, toque em Cancelar e abra a correção de novo.'
+                                : 'Esta gravação não existe mais.',
+                            )
                           }}
                         >
                           ✓ Guardar correção
                         </button>
-                        <button className="rec-texto-acao" onClick={() => setCorrigindo(null)}>
+                        <button
+                          className="rec-texto-acao"
+                          onClick={() => {
+                            setCorrigindo(null)
+                            setAvisoCorrecao(null)
+                          }}
+                        >
                           Cancelar
                         </button>
                       </div>
+                      {avisoCorrecao && <div className="audio-error">{avisoCorrecao}</div>}
                     </>
                   ) : transcrevendoId !== rec.id && temTopicos(rec) ? (
                     /* A fala JÁ separada: cada tópico com o seu pedaço, como

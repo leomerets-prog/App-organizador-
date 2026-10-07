@@ -99,7 +99,7 @@ export function Central({ onClose }: { onClose: () => void }) {
   const localItems = useStore((s) => s.items)
   const notebooks = useStore((s) => s.notebooks)
   const activePageId = useStore((s) => s.activePageId)
-  const selectPage = useStore((s) => s.selectPage)
+  const irParaPagina = useStore((s) => s.irParaPagina)
   const toggleItemStatus = useStore((s) => s.toggleItemStatus)
   const setItemStatus = useStore((s) => s.setItemStatus)
   const setItemKind = useStore((s) => s.setItemKind)
@@ -114,9 +114,12 @@ export function Central({ onClose }: { onClose: () => void }) {
 
   // Recarrega ao abrir e a cada mudança nos itens da página aberta: é por aqui
   // que o que acabou de ser escrito aparece na Central sem recarregar nada.
+  // `itensMexidos` cobre o item de OUTRA folha editado aqui: ele não está na
+  // lista da folha aberta, então só o contador avisa que a lista mudou.
+  const itensMexidos = useStore((s) => s.itensMexidos)
   useEffect(() => {
     void listAllItems().then(setAllItems)
-  }, [localItems])
+  }, [localItems, itensMexidos])
 
   useEffect(() => {
     void listAllPages().then(setPages)
@@ -170,7 +173,7 @@ export function Central({ onClose }: { onClose: () => void }) {
   }, [filter.view, arquivados])
 
   const abrir = (item: Item) => {
-    void selectPage(item.pageId)
+    void irParaPagina(item.pageId)
     onClose()
   }
 

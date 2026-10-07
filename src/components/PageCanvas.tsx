@@ -96,6 +96,8 @@ interface Gesture {
   fromView?: ViewState
   /** Distância inicial entre os dedos, na pinça. */
   fromDistance?: number
+  /** Com que ferramenta o traço começou (caneta ou marca-texto). */
+  ferramenta?: string
 }
 
 export function PageCanvas() {
@@ -170,6 +172,8 @@ export function PageCanvas() {
     viewHeight: 0,
   })
   const gestureRef = useRef<Gesture | null>(null)
+  /** Quem começou o gesto em curso: caneta, dedo ou mouse. */
+  const gestoTipoRef = useRef<string>('')
   const touchesRef = useRef(new Map<number, Pt>())
   const penTracker = useRef(new PenTracker())
   const pinchingRef = useRef(false)
@@ -694,8 +698,30 @@ export function PageCanvas() {
 
   // ─── Eventos de ponteiro ───────────────────────────────────────────────────
 
-  const onPointerDown = useCallback(
-    (event: React.PointerEvent<HTMLCanvasElement>) => {
+  // Sem useCallback de propósito: `aoTocar` é refeita a cada desenho, e uma
+  // cópia guardada enxergaria o estado de um desenho antigo.
+  const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const antes = gestureRef.current
+    try {
+      aoTocar(event)
+    } finally {
+      // Anota quem começou o gesto novo (se começou algum).
+      if (gestureRef.current && gestureRef.current !== antes) gestoTipoRef.current = event.pointerType
+    }
+  }
+
+  /*
+   * A CANETA NÃO CEDE À PALMA — a mesma regra que o painel do fluxograma já
+   * tinha e a folha não. Achados da revisão da casa, reproduzidos com toque
+   * de verdade:
+   * - duas palmas encostando no meio do traço viravam pinça, e o traço da
+   *   caneta nunca era gravado;
+   * - a palma que encostava ANTES da caneta virava rolagem, e enquanto ela
+   *   ficava apoiada a caneta não escrevia nada;
+   * - a caneta que sai da tela sem mandar "soltei" deixava o traço preso: ele
+   *   não ia pro banco, e o próximo traço era colado nele.
+   */
+  const aoTocar = (event: React.PointerEvent<HTMLCanvasElement>) => {
       if (!page) return
       const isPen = event.pointerType === 'pen'
       const isTouch = event.pointerType === 'touch'
@@ -703,15 +729,18 @@ export function PageCanvas() {
       if (isPen) penTracker.current.notePen()
 
       if (isTouch) {
+        // Toque recusado não entra nem na conta dos dedos: a palma que encosta
+        // enquanto a caneta escreve não pode completar uma "pinça".
+        const canetaTrabalhando = gestureRef.current !== null && gestoTipoRef.current !== 'touch'
+        if (canetaTrabalhando || penTracker.current.shouldRejectTouch()) return
+
         touchesRef.current.set(event.pointerId, toScreen(event))
 
-        // Dois dedos: pinça, mesmo que um arrasto já tivesse começado.
+        // Dois dedos: pinça, mesmo que um arrasto de dedo já tivesse começado.
         if (touchesRef.current.size === 2) {
           beginPinch()
           return
         }
-        // A mão apoiada não rola a folha enquanto a caneta está em uso.
-        if (penTracker.current.shouldRejectTouch()) return
         if (gestureRef.current) return
 
         pressRef.current = { at: Date.now(), screen: toScreen(event) }
@@ -746,7 +775,26 @@ export function PageCanvas() {
         return
       }
 
-      if (gestureRef.current) return
+      if (gestureRef.current) {
+        const emCurso = gestureRef.current
+        if (isPen && gestoTipoRef.current === 'touch' && (emCurso.kind === 'pan' || emCurso.kind === 'pinch')) {
+          // A caneta vence o dedo e a palma: a rolagem em curso acaba aqui.
+          cancelLongPress()
+          touchesRef.current.clear()
+          if (emCurso.kind === 'pinch') {
+            pinchingRef.current = false
+            commitZoom()
+          }
+          gestureRef.current = null
+          gestoTipoRef.current = ''
+        } else if (gestoTipoRef.current !== 'touch') {
+          // Gesto de caneta que nunca recebeu o "soltei": fecha (e grava) o
+          // traço antigo antes de começar o novo, em vez de recusar o novo.
+          void finishGesture(null)
+        } else {
+          return
+        }
+      }
 
       const pt = toPage(event)
       const st = stateRef.current
@@ -831,26 +879,10 @@ export function PageCanvas() {
       } else {
         const builder = new StrokeBuilder()
         builder.add(pt.x, pt.y, pressureFrom(event.nativeEvent))
-        gestureRef.current = { kind: 'draw', pointerId: event.pointerId, builder }
+        gestureRef.current = { kind: 'draw', pointerId: event.pointerId, builder, ferramenta: st.tool }
       }
       dirty.current = true
-    },
-    [
-      page,
-      toPage,
-      toScreen,
-      hitBoundary,
-      beginZoneGesture,
-      hitItemMarker,
-      toggleItemStatus,
-      beginPinch,
-      beginErase,
-      imageAt,
-      onResizeHandle,
-      onDeleteBadge,
-      selectImage,
-    ],
-  )
+  }
 
   const onPointerMove = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -877,6 +909,20 @@ export function PageCanvas() {
 
       const gesture = gestureRef.current
       if (!gesture || gesture.pointerId !== event.pointerId) return
+
+      /*
+       * Caneta (ou mouse) andando SEM ponta encostada, com traço em curso: o
+       * "soltei" se perdeu. O passeio no ar não pode virar tinta colada no
+       * traço — fecha e grava o traço aqui.
+       */
+      if (
+        event.pointerType !== 'touch' &&
+        event.buttons === 0 &&
+        (gesture.kind === 'draw' || gesture.kind === 'erase' || gesture.kind === 'lasso')
+      ) {
+        void finishGesture(toScreen(event))
+        return
+      }
 
       if (gesture.kind === 'pan') {
         // Com zoom, o arrasto passa a valer nos dois eixos.
@@ -1038,7 +1084,9 @@ export function PageCanvas() {
       // escolhe o que apagar é a mão, arrastando depois. Assim o gesto nunca
       // destrói o que estava embaixo dele, e reconhecer errado custa só um
       // toque pra voltar à caneta.
-      if (analyzeScribble(points).isScribble) {
+      // O marca-texto vai e volta pra pintar uma linha: isso não é rabisco de
+      // apagar, e a borracha não pode ligar no meio do grifo.
+      if (gesture.ferramenta !== 'highlighter' && analyzeScribble(points).isScribble) {
         setGestureNotice((n) => n + 1)
         setTool('eraser')
         dirty.current = true
@@ -1217,6 +1265,9 @@ export function PageCanvas() {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        // A captura perdida (caneta saiu da tela sem "soltei", o sistema
+        // tomou o toque) também encerra e grava o gesto.
+        onLostPointerCapture={onPointerUp}
         onContextMenu={(e) => e.preventDefault()}
       />
 

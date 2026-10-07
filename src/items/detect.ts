@@ -1,3 +1,4 @@
+import { temDadosDoUsuario } from './preservar'
 import type { Bounds, Id, Item, ItemKind, Stroke, Zone } from '../domain/types'
 import { unionBounds } from '../lib/geometry'
 import { ZONE_ITEM_KIND, ZONES_SEM_LINHA } from '../domain/templates'
@@ -281,6 +282,8 @@ export interface FieldSyncPlan {
   update: { item: Item; field: DetectedField }[]
   /** Itens automáticos cuja tinta sumiu. */
   remove: Id[]
+  /** Itens que já descrevem exatamente o seu campo — não precisam de nada. */
+  iguais: Item[]
 }
 
 /**
@@ -295,6 +298,11 @@ export interface FieldSyncPlan {
 export function planFieldSync(
   fields: readonly DetectedField[],
   autoItems: readonly Item[],
+  /**
+   * A tinta que existe na folha agora. Com ela, item que o usuário trabalhou
+   * só sai quando a tinta dele sumiu de verdade (ver o fim da função).
+   */
+  tinta?: ReadonlySet<Id>,
 ): FieldSyncPlan {
   const pairs: { fieldIndex: number; item: Item; shared: number }[] = []
 
@@ -327,7 +335,7 @@ export function planFieldSync(
 
   const takenFields = new Set<number>()
   const takenItems = new Set<Id>()
-  const plan: FieldSyncPlan = { create: [], update: [], remove: [] }
+  const plan: FieldSyncPlan = { create: [], update: [], remove: [], iguais: [] }
 
   for (const pair of pairs) {
     if (takenFields.has(pair.fieldIndex) || takenItems.has(pair.item.id)) continue
@@ -335,6 +343,7 @@ export function planFieldSync(
     takenItems.add(pair.item.id)
     const field = fields[pair.fieldIndex]
     if (!sameField(pair.item, field)) plan.update.push({ item: pair.item, field })
+    else plan.iguais.push(pair.item)
   }
 
   fields.forEach((field, index) => {
@@ -342,7 +351,22 @@ export function planFieldSync(
   })
 
   for (const item of autoItems) {
-    if (!takenItems.has(item.id)) plan.remove.push(item.id)
+    if (takenItems.has(item.id)) continue
+    /*
+     * NÃO APAGAR O QUE O USUÁRIO TRABALHOU SÓ PORQUE A ZONA MUDOU.
+     *
+     * Item sem campo correspondente saía sempre. Mas o campo some também
+     * quando a TINTA continua lá: a zona foi apagada, virou fluxograma, ou foi
+     * arrastada e a linha ficou de fora. Aí saíam junto o concluído, a ficha e
+     * o texto corrigido — e trocar a zona de volta criava um item em branco.
+     * Achado da revisão da casa, reproduzido.
+     *
+     * Item com dado do usuário e tinta ainda na folha fica. Quando a zona
+     * volta, o campo dele reaparece e reencontra o item pela tinta em comum.
+     */
+    const tintaNaFolha = tinta ? item.strokeIds.some((id) => tinta.has(id)) : false
+    if (tintaNaFolha && temDadosDoUsuario(item)) continue
+    plan.remove.push(item.id)
   }
 
   return plan

@@ -383,7 +383,9 @@ export function pageToFrac(p: Pt, sheet = SHEET): Pt {
   const alto = sheet > 0 && Number.isFinite(sheet) ? sheet : SHEET
   return {
     x: p.x / PAGE_WIDTH,
-    y: (((p.y % alto) + alto) % alto) / alto,
+    // Na margem acima da folha (y < 0) o ponto fica no topo da primeira
+    // folha — não no fim dela, que é onde o resto da divisão o jogava.
+    y: p.y < 0 ? 0 : (p.y % alto) / alto,
   }
 }
 

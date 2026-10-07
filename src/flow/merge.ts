@@ -55,10 +55,34 @@ export function mergeFlowchart(anterior: Flowchart | undefined, grafo: FlowGraph
 
   const vivos = new Set(nodes.map((n) => n.id))
 
+  /*
+   * A SETA CUJO ID MUDOU.
+   *
+   * O id da seta é o id do traço dela. A borracha parcial aparando a ponta
+   * cria um traço NOVO (outro id) — e a seta remontada não reencontrava a
+   * antiga: o rótulo "sim", a porta escolhida e a curva sumiam no "Ler de
+   * novo". Achado da revisão da casa, reproduzido. Sem par pelo id, vale a
+   * seta antiga que ligava as MESMAS duas caixas e ainda não foi usada.
+   */
+  const usadas = new Set(grafo.edges.map((e) => e.id).filter((id) => antesEdge.has(id)))
+  const parPelasPontas = (e: { from: string; to: string }): FlowChartEdge | undefined => {
+    for (const velha of anterior?.edges ?? []) {
+      if (velha.criadaAMao || usadas.has(velha.id)) continue
+      const mesmas =
+        (velha.from === e.from && velha.to === e.to) ||
+        (velha.direcao === 'mao' && velha.from === e.to && velha.to === e.from)
+      if (mesmas) {
+        usadas.add(velha.id)
+        return velha
+      }
+    }
+    return undefined
+  }
+
   const edges: FlowChartEdge[] = grafo.edges
     .filter((e) => vivos.has(e.from) && vivos.has(e.to))
     .map((e) => {
-      const velha = antesEdge.get(e.id)
+      const velha = antesEdge.get(e.id) ?? parPelasPontas(e)
       return {
         id: e.id,
         // Direção invertida à mão vence a leitura: quem olhou o desenho e

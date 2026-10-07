@@ -87,6 +87,7 @@ export async function deletePage(id: Id): Promise<void> {
   }
   const recordings = await db.getAllFromIndex('recordings', 'byPage', id)
   await Promise.all(recordings.map((r) => db.delete('recordingBlobs', r.id)))
+  await Promise.all(recordings.map((r) => db.delete('recordingBlobs', faixaDosPedacos(r.id))))
   const images = await db.getAllFromIndex('images', 'byPage', id)
   await Promise.all(images.map((i) => db.delete('imageBlobs', i.id)))
   await Promise.all([
@@ -123,7 +124,16 @@ export async function loadPageContent(pageId: Id): Promise<PageContent> {
   ])
   strokes.sort((a, b) => a.startedAt - b.startedAt)
   images.sort((a, b) => a.createdAt - b.createdAt)
-  return { strokes, zones, items: items.map(normalizeItem), recordings, images, flowcharts }
+  return {
+    strokes,
+    zones,
+    items: items.map(normalizeItem),
+    // A gravação em andamento só aparece depois do "Parar" (ou recuperada na
+    // próxima abertura): antes disso ela não tem arquivo pra tocar.
+    recordings: recordings.filter((r) => !r.emAndamento),
+    images,
+    flowcharts,
+  }
 }
 
 /**
@@ -166,6 +176,13 @@ export async function putItem(item: Item): Promise<void> {
   await db.put('items', item)
 }
 
+/** Um item qualquer, de qualquer folha — a Central edita itens de todas. */
+export async function getItem(id: Id): Promise<Item | undefined> {
+  const db = await getDb()
+  const item = await db.get('items', id)
+  return item ? normalizeItem(item) : undefined
+}
+
 export async function deleteItem(id: Id): Promise<void> {
   const db = await getDb()
   await db.delete('items', id)
@@ -196,10 +213,120 @@ export async function listAllPages(): Promise<Page[]> {
 
 // ─── Gravações ───────────────────────────────────────────────────────────────
 
+/**
+ * Gravação e áudio numa transação SÓ.
+ *
+ * Eram duas, metadados primeiro: com o armazenamento cheio, o registro
+ * entrava, o áudio não, e depois de reabrir aparecia uma gravação que não
+ * tocava — "Não achei o arquivo" — com o áudio já perdido. Numa transação, ou
+ * entram os dois, ou nenhum.
+ */
 export async function putRecording(rec: Recording, blob: Blob): Promise<void> {
   const db = await getDb()
-  await db.put('recordings', rec)
-  await db.put('recordingBlobs', { id: rec.id, blob })
+  const tx = db.transaction(['recordings', 'recordingBlobs'], 'readwrite')
+  await Promise.all([
+    tx.objectStore('recordingBlobs').put({ id: rec.id, blob }),
+    tx.objectStore('recordings').put(rec),
+    tx.done,
+  ])
+}
+
+// ─── Gravação em andamento ───────────────────────────────────────────────────
+
+/*
+ * UMA REUNIÃO NÃO PODE MORAR SÓ NA MEMÓRIA.
+ *
+ * O gravador entrega um pedaço por segundo, e todos ficavam num vetor na
+ * memória até o "Parar". Se o Android fechasse o app aos 60 minutos — e ele
+ * fecha app em segundo plano —, a reunião inteira sumia. Achado da revisão da
+ * casa, reproduzido: 6 s gravando, zero registros no banco.
+ *
+ * Agora cada pedaço vai pro banco assim que chega, como um registro à parte no
+ * mesmo depósito dos áudios, com a chave `<id>#<ordem>`. No "Parar" eles viram
+ * o arquivo de sempre. Se o "Parar" nunca vier, a próxima abertura do app
+ * remonta o arquivo com os pedaços (`recuperarGravacoes`). Nenhum depósito
+ * novo, nenhuma versão nova do banco: o pedaço é só mais um registro.
+ */
+
+/** A chave de um pedaço. A ordem com zeros à esquerda mantém a ordem certa. */
+export function chaveDoPedaco(recId: Id, ordem: number): string {
+  return `${recId}#${String(ordem).padStart(7, '0')}`
+}
+
+function faixaDosPedacos(recId: Id): IDBKeyRange {
+  return IDBKeyRange.bound(`${recId}#`, `${recId}#\uffff`)
+}
+
+/** O registro da gravação, criado no começo e marcado como em andamento. */
+export async function putRecordingDraft(rec: Recording): Promise<void> {
+  const db = await getDb()
+  await db.put('recordings', { ...rec, emAndamento: true })
+}
+
+export async function putRecordingChunk(recId: Id, ordem: number, blob: Blob): Promise<void> {
+  const db = await getDb()
+  await db.put('recordingBlobs', { id: chaveDoPedaco(recId, ordem), blob })
+}
+
+export async function getRecording(id: Id): Promise<Recording | undefined> {
+  const db = await getDb()
+  return db.get('recordings', id)
+}
+
+/**
+ * Fecha a gravação: o arquivo inteiro entra, os pedaços saem, e o registro
+ * deixa de estar em andamento — tudo numa transação. Se falhar, nada muda: o
+ * registro e os pedaços continuam lá, e a próxima abertura recupera.
+ */
+export async function finishRecording(rec: Recording, blob: Blob): Promise<void> {
+  const db = await getDb()
+  const pronto: Recording = { ...rec }
+  delete pronto.emAndamento
+  const tx = db.transaction(['recordings', 'recordingBlobs'], 'readwrite')
+  const blobs = tx.objectStore('recordingBlobs')
+  await Promise.all([
+    blobs.put({ id: rec.id, blob }),
+    blobs.delete(faixaDosPedacos(rec.id)),
+    tx.objectStore('recordings').put(pronto),
+    tx.done,
+  ])
+}
+
+/**
+ * Remonta as gravações que ficaram em andamento — o app fechou antes do
+ * "Parar". Roda na abertura, antes de qualquer folha carregar.
+ *
+ * Gravação sem pedaço nenhum (fechou no primeiro segundo) só tem o registro, e
+ * o registro sai: uma gravação que não toca nada não é recuperação.
+ */
+export async function recuperarGravacoes(): Promise<Recording[]> {
+  const db = await getDb()
+  const todas = await db.getAll('recordings')
+  const recuperadas: Recording[] = []
+  for (const rec of todas) {
+    if (!rec.emAndamento) continue
+    const pedacos = await db.getAll('recordingBlobs', faixaDosPedacos(rec.id))
+    if (pedacos.length === 0) {
+      await db.delete('recordings', rec.id)
+      continue
+    }
+    const blob = new Blob(
+      pedacos.map((p) => p.blob),
+      { type: rec.mimeType || 'audio/webm' },
+    )
+    /*
+     * A duração: um pedaço por segundo é o que o gravador entrega, e é a
+     * melhor medida que sobrou. O relógio do registro não serve — ele parou
+     * quando o app morreu, e "agora" pode ser no dia seguinte.
+     */
+    const durationMs = Math.max(rec.durationMs || 0, pedacos.length * 1000)
+    const pronto: Recording = { ...rec, durationMs, recuperada: true }
+    await finishRecording(pronto, blob)
+    const recuperada: Recording = { ...pronto }
+    delete recuperada.emAndamento
+    recuperadas.push(recuperada)
+  }
+  return recuperadas
 }
 
 export async function updateRecording(rec: Recording): Promise<void> {
@@ -229,6 +356,7 @@ export async function deleteRecording(id: Id): Promise<void> {
   const db = await getDb()
   await db.delete('recordings', id)
   await db.delete('recordingBlobs', id)
+  await db.delete('recordingBlobs', faixaDosPedacos(id))
 }
 
 // ─── Imagens ─────────────────────────────────────────────────────────────────

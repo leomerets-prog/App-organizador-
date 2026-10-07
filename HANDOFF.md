@@ -969,6 +969,59 @@ aprovacao", que se lê igual e atravessa qualquer sistema de arquivos.
 quem lê. Tudo que não for ASCII simples é risco de perder o nome todo — e perder
 o nome todo é pior que perder a cedilha.
 
+### 36p. A revisão por agentes: o que ela achou, e a raiz comum
+
+Pedido dele: *"faça os agentes revisarem tudo que fazemos e melhorar buracos que
+ficaram"*. Os revisores do everything-claude-code (code-reviewer,
+silent-failure-hunter, react/typescript/security-reviewer, pr-test-analyzer)
+rodaram por área — dados, áudio e ata, tinta, fluxograma — e cada achado só
+contou depois de reproduzido no navegador. Foram 35 confirmados. Quase todos
+eram o MESMO defeito com roupas diferentes: **código automático tratando como
+descartável algo que o usuário fez**.
+
+- **A ficha do item sumia** por quatro caminhos: o ↶ da borracha repunha a
+  lista inteira de itens como estava; a leitura da letra gravava por cima a
+  cópia de antes da espera; mudar a zona apagava itens com tinta na folha; e o
+  carimbo do laço criava um item novo sem o prazo nem o responsável do
+  automático. Tudo isso agora passa por `items/preservar.ts` — puro, com a
+  regra de cada caminho escrita uma vez.
+- **A Central editava a folha errada.** Mudar a ficha de um item de OUTRA folha
+  procurava o item só na memória (que tem só a folha aberta) e não gravava
+  nada, sem erro. `editarItem` procura na memória e, se não achar, no banco.
+- **A gravação vivia só na memória até o Parar.** Uma hora de reunião e o app
+  fechando sozinho = uma hora perdida. Agora cada segundo de áudio vai pro
+  banco enquanto grava (`recordingBlobs`, chave `id#0000001`), com um rascunho
+  `emAndamento`; ao abrir, `recuperarGravacoes()` remonta o que ficou e marca
+  `recuperada`. O Parar troca os pedaços pelo arquivo inteiro numa transação
+  só. O microfone que cai (ligação, outro app) também termina e guarda.
+- **Transcrição e marca chegavam com outra folha aberta** e gravavam na folha
+  errada, ou não gravavam. `editarGravacao` grava no banco pelo id, seja qual
+  for a folha aberta, e diz se gravou, se recusou ou se a gravação sumiu.
+- **Dois editores da mesma transcrição** (a barra e a Ata) guardavam a foto
+  inteira e o segundo apagava o primeiro. `comTrechosEditados` grava só os
+  tópicos que AQUELE editor mudou, e recusa se alguém mexeu no mesmo tópico.
+- **Falha de gravação no banco era silêncio.** Armazenamento cheio: a tela
+  mostrava a tinta, o banco não tinha nada, e ninguém avisava. `db/falhas.ts`
+  reconhece a falha e a faixa vermelha diz o que fazer, com o botão "Guardar de
+  novo" que regrava a folha aberta.
+- **Tinta**: a palma que encosta depois da caneta virava gesto; a caneta que não
+  manda `pointerup` deixava o traço sem gravar; traço acima do topo da folha
+  caía na última zona (`-19 % altura` em JS é negativo).
+- **Fluxograma**: sair do painel sem apertar Pronto perdia o nome digitado; um
+  arrasto da dobra da seta virava dezenas de passos de ↶; a releitura apagava o
+  nome digitado de caixa que tinha nome vazio de propósito.
+
+**A regra:** todo caminho automático (leitura, sincronização, voltar, remontar)
+mexe SÓ no que é dele. O resto do registro vem do estado de AGORA, nunca de uma
+cópia tirada antes da espera. `tools/buracos-test.ts` tem um caso por regra, e
+cada um foi conferido dos dois lados: com o conserto apagado, ele falha.
+
+**Sobre os agentes**: rodar oito de uma vez estoura o limite de uso da sessão
+no meio do trabalho — duas vezes. Em ondas de até três, termina. O modelo vai
+pela tarefa, como o `model-route` do ECC: o mais forte pra revisão funda e
+ambígua (dados, áudio), o médio pra área de regra clara (tinta, fluxograma), o
+leve pra tarefa mecânica.
+
 `ShapeKind` (`flow/shapes.ts`) são as três formas que a leitura sabe reconhecer
 num rabisco: retângulo, losango e cantos redondos se separam pela geometria do
 traço. `FlowShape` (`domain/types.ts`) é maior — tem também paralelogramo,
@@ -990,7 +1043,9 @@ src/
   ink/         captura da caneta, desenho, gesto do rabisco, zoom, borracha,
                pilha de voltar/avançar (history)
   items/       identificação dos campos (detect) e a lógica da Central —
-               filtro, busca, resumo, ordem e faixas de prazo (central)
+               filtro, busca, resumo, ordem e faixas de prazo (central); o que
+               é dado do usuário e como cada caminho automático o preserva
+               (preservar)
   audio/       gravação, contas do tocador (playback), salvar pra fora
                (export), marcas de momento (marcas), transcrição da reunião —
                ponte com o reconhecedor (fala), escolha das palavras-dica
@@ -1004,7 +1059,8 @@ src/
   ocr/         transcrição da letra (ponte com o plugin Android)
   zones/       em que zona um ponto caiu, e a edição das faixas
   db/          IndexedDB (versão 3: traços, zonas, itens, áudio, imagens,
-               fluxogramas)
+               fluxogramas); a gravação em pedaços e a recuperação dela
+               (repo); que falha é do banco e como avisar (falhas)
   state/       estado e todas as ações que mudam dados; preferências
   update/      verificação de versão
   components/  folha, navegação, barras, painel
@@ -1025,7 +1081,7 @@ grava depois. É isso que mantém a escrita fluida.
 **O que é puro e testável:** `ink/erase.ts`, `ink/scribble.ts`,
 `ink/viewport.ts`, `items/detect.ts`, `items/central.ts`, `audio/playback.ts`,
 `flow/shapes.ts`, `flow/graph.ts`, `flow/layout.ts`, `flow/merge.ts`,
-`ink/history.ts`,
+`ink/history.ts`, `items/preservar.ts`,
 `zones/edit.ts` e `lib/geometry.ts` não sabem nada de React nem de banco. Lógica nova de tinta, de
 identificação, de zona ou de filtro deve nascer ali.
 
@@ -1155,6 +1211,12 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | A verificação instala a versão publicada e a nova POR CIMA | Instalação limpa não reproduz o que quebra em quem atualiza: banco antigo e service worker já registrado |
 | Erro de JavaScript vira tela legível | Tela branca não dá ao usuário nem o que contar pra quem vai consertar |
 | Promessa rejeitada com o app já de pé é AVISO, não tela de erro | Cobrir um app que está funcionando por causa de uma falha de fundo transforma um problema pequeno num grande. Antes de montar, o mesmo erro é fatal na prática e vira tela |
+| Caminho automático mexe só no que é dele | Leitura, sincronização, voltar e remontar gravavam a cópia inteira do item e levavam junto o que o usuário fez no meio tempo. Quatro defeitos, uma raiz (armadilha 36p) |
+| Gravação vai pro banco ENQUANTO grava | Uma hora de reunião só na memória até o Parar é uma hora perdida se o app fechar. Um pedaço por segundo; o Parar troca os pedaços pelo arquivo numa transação só |
+| Ação que espera grava pelo ID, não pela folha aberta | Transcrição leva minutos; ele troca de folha no meio. Gravar "na folha aberta" gravava na errada ou em lugar nenhum |
+| Editor guarda só o que ELE mudou | Dois editores da mesma transcrição: guardar a foto inteira faz o segundo apagar o primeiro sem aviso |
+| Falha do banco aparece na tela, com o que fazer | Tinta na tela e nada no banco é o pior defeito possível: parece salvo. A faixa vermelha diz e oferece "Guardar de novo" |
+| Agentes em ondas de até três | Oito ao mesmo tempo estouraram o limite de uso da sessão no meio da revisão, duas vezes |
 
 ---
 
@@ -1239,6 +1301,20 @@ data do Android pode se comportar diferente do `input[type=date]` do navegador.
 
 **A edição de zonas vale só pra página onde foi feita.** Não há como salvar a
 folha ajustada como modelo — é a próxima etapa 2.
+
+**A tela de erro ainda cobre a gravação.** Se outro componente quebrar no meio
+de uma gravação, a tela de tropeço cobre o botão Parar. O áudio não se perde —
+os pedaços já estão no banco e "Tentar de novo" recupera a gravação — mas a
+gravação para ali.
+
+**Apagar o último bloco ou seção deixa a folha na memória** até trocar de tela.
+Nada se perde (o que sobra na tela é o que acabou de ser apagado), mas a tela
+mostra uma folha que não existe mais. Achado da revisão, ainda não consertado.
+
+**A gravação em pedaços não foi vista no tablet.** Gravar pedaço por pedaço,
+recuperar depois de recarregar e o microfone que cai foram medidos no Chromium.
+No aparelho, o `MediaRecorder` da WebView pode entregar o primeiro pedaço com
+atraso — e o que ainda não chegou ao banco não volta.
 
 **A busca da Central não acha o que ainda não tem texto.** Linha sem
 transcrição só é encontrada pelo recorte da letra, olhando. É mais um motivo

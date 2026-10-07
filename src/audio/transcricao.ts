@@ -98,3 +98,60 @@ export function comTrechosCorrigidos(
     corrigida: true,
   }
 }
+
+/**
+ * A correção de um EDITOR que abriu numa versão da fala — e que pode estar
+ * velha na hora de gravar.
+ *
+ * Havia dois editores de correção (a ficha da gravação e a ata) e uma
+ * transcrição que podia ser refeita no meio. O editor da ficha guardava a
+ * cópia de TODOS os tópicos de quando abriu e, ao gravar, escrevia todos: a
+ * correção feita na ata nesse meio tempo sumia. E com a transcrição refeita
+ * por baixo, a correção caía no tópico errado (casada pela posição) ou era
+ * recusada calada, levando o que ele digitou. Achados da revisão da casa,
+ * reproduzidos.
+ *
+ * Regras:
+ * - só o que ESTE editor mudou é gravado; tópico que ele não tocou fica como
+ *   está agora (inclusive com a correção que veio do outro editor);
+ * - se os tópicos não são mais os mesmos (outra transcrição: quantidade ou
+ *   marcas diferentes) → `'mudou'`, nada é gravado;
+ * - se ele mudou um tópico que TAMBÉM mudou por outro caminho desde que o
+ *   editor abriu → `'mudou'`: escolher um dos dois em silêncio perderia o outro.
+ *
+ * Com `'mudou'` quem chamou mantém o editor aberto com o texto dele — o que
+ * foi digitado não pode sumir junto com a recusa.
+ */
+export function comTrechosEditados(
+  atual: Transcricao | undefined,
+  base: readonly TrechoFalado[],
+  textos: readonly string[],
+  agora = Date.now(),
+): Transcricao | 'mudou' {
+  const trechos = atual?.trechos
+  if (!atual || !trechos) return 'mudou'
+  if (trechos.length !== base.length || textos.length !== base.length) return 'mudou'
+  for (let i = 0; i < base.length; i++) {
+    if (trechos[i].marcaId !== base[i].marcaId) return 'mudou'
+  }
+  let mexeu = false
+  const novos: TrechoFalado[] = []
+  for (let i = 0; i < base.length; i++) {
+    if (textos[i] === base[i].texto) {
+      novos.push(trechos[i])
+      continue
+    }
+    if (trechos[i].texto !== base[i].texto) return 'mudou'
+    mexeu = true
+    novos.push({ ...trechos[i], texto: textos[i] })
+  }
+  if (!mexeu) return atual
+  return {
+    texto: juntarTrechos(novos),
+    em: atual.em ?? agora,
+    segundos: atual.segundos,
+    dicas: atual.dicas,
+    trechos: novos,
+    corrigida: true,
+  }
+}

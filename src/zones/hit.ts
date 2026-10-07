@@ -37,8 +37,15 @@ export function zoneAtPoint(zones: Zone[], point: Pt, pageHeight = 1754): Zone |
   let best: Zone | null = null
   let bestArea = Infinity
 
+  /*
+   * Acima do começo da folha (a margem "FOLHA 1", y < 0) não há zona
+   * nenhuma. O resto da divisão de um y negativo cai no FIM da folha — e a
+   * tinta escrita na margem virava uma "Pendência" fantasma no painel.
+   */
+  if (point.y < 0) return null
+
   // A folha rola infinitamente, mas o desenho de zonas se repete a cada folha.
-  const localY = ((point.y % pageHeight) + pageHeight) % pageHeight
+  const localY = point.y % pageHeight
 
   for (const zone of zones) {
     const r = zoneRectInPage(zone, pageHeight)

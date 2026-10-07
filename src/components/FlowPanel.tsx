@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import {
   DOBRA_MAX,
@@ -156,6 +156,7 @@ const TOQUE_SETA = 26
 export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () => void }) {
   const updateFlowNode = useStore((s) => s.updateFlowNode)
   const updateFlowEdge = useStore((s) => s.updateFlowEdge)
+  const marcarPassoFlow = useStore((s) => s.marcarPassoFlow)
   const buildFlowchart = useStore((s) => s.buildFlowchart)
   const flowStatus = useStore((s) => s.flowStatus)
 
@@ -249,7 +250,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
    * deslocamento — e a primeira que esquecesse jogaria a caixa pra longe do
    * dedo. Em y negativo, as coordenadas do desenho continuam sendo as mesmas.
    */
-  const faixaTitulo = (chart.titulo ? 56 : 0) + (chart.subtitulo ? 30 : 0) + (chart.titulo || chart.subtitulo ? 16 : 0)
+  const faixaTitulo = faixaDoTitulo(chart)
 
   const paraVoltar = flowHistory.chartId === chart.id ? flowHistory.feitos.at(-1) : undefined
   const paraAvancar = flowHistory.chartId === chart.id ? flowHistory.desfeitos.at(-1) : undefined
@@ -260,17 +261,46 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
     if (id === 'titulo') setSubtituloRascunho(chart.subtitulo ?? '')
   }
 
-  const fecharEdicao = () => {
+  const fecharEdicao = async (): Promise<void> => {
     if (!editando) return
     const alvo = editando
     setEditando(null)
     if (alvo === 'titulo') {
-      void setFlowTitle(chart.id, rascunho, subtituloRascunho)
+      await setFlowTitle(chart.id, rascunho, subtituloRascunho)
     } else if (alvo.startsWith('seta:')) {
-      void updateFlowEdge(chart.id, alvo.slice(5), { label: rascunho.trim() })
+      await updateFlowEdge(chart.id, alvo.slice(5), { label: rascunho.trim() })
     } else {
-      void updateFlowNode(chart.id, alvo, { label: rascunho.trim() })
+      await updateFlowNode(chart.id, alvo, { label: rascunho.trim() })
     }
+  }
+
+  /*
+   * O NOME DIGITADO SEM "PRONTO" TAMBÉM VALE.
+   *
+   * O rascunho vivia só no estado do painel: digitar o nome da caixa ou o
+   * título e tocar em "Voltar à folha" (ou trocar de folha) jogava fora o que
+   * foi digitado — e o "Salvar imagem" saía sem o título digitado. Achado da
+   * revisão da casa, reproduzido. Sair, salvar e desmontar agora gravam o
+   * rascunho antes.
+   */
+  const rascunhoRef = useRef({ editando, rascunho, subtituloRascunho, chartId: chart.id })
+  rascunhoRef.current = { editando, rascunho, subtituloRascunho, chartId: chart.id }
+  useEffect(
+    () => () => {
+      const r = rascunhoRef.current
+      if (!r.editando) return
+      const loja = useStore.getState()
+      if (r.editando === 'titulo') void loja.setFlowTitle(r.chartId, r.rascunho, r.subtituloRascunho)
+      else if (r.editando.startsWith('seta:')) {
+        void loja.updateFlowEdge(r.chartId, r.editando.slice(5), { label: r.rascunho.trim() })
+      } else void loja.updateFlowNode(r.chartId, r.editando, { label: r.rascunho.trim() })
+    },
+    [],
+  )
+
+  const sair = async () => {
+    await fecharEdicao()
+    onClose()
   }
 
   /**
@@ -594,6 +624,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
     }
     let andou = false
     let ultima: number | null = null
+    const antesDoArrasto = chart
 
     const mover = (evento: Event) => {
       const ev = evento as PointerEvent
@@ -608,7 +639,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
       if (Math.abs(vao) < 1) return
       const fracao = (d[dobra.eixo] - dobra.de) / vao
       ultima = Math.min(DOBRA_MAX, Math.max(DOBRA_MIN, fracao))
-      void updateFlowEdge(chart.id, edgeId, { dobra: ultima })
+      void updateFlowEdge(chart.id, edgeId, { dobra: ultima }, { semPasso: true })
     }
 
     const desligar = () => {
@@ -629,7 +660,10 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
         // Escolher a seta desmarca a caixa: uma coisa de cada vez.
         setEscolhida(null)
         setSetaEscolhida((atual) => (atual === edgeId ? null : edgeId))
+        return
       }
+      // O arrasto inteiro vira UM passo do ↶.
+      marcarPassoFlow(chart.id, antesDoArrasto)
     }
 
     gesto.current = { id: e.pointerId, tipo: e.pointerType, quando: Date.now(), abandonar: soltar }
@@ -679,6 +713,14 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
 
   const comecarPinca = (e: React.TouchEvent) => {
     if (e.touches.length !== 2) return
+    /*
+     * A caneta não cede à palma — a regra de `assumirGesto`, que a pinça
+     * pulava: duas palmas encostando no meio de um arrasto de caneta
+     * cancelavam o arrasto e a caixa voltava pro lugar. Só um gesto de caneta
+     * PARADO (a caneta que sumiu sem "soltei") cede.
+     */
+    const atual = gesto.current
+    if (atual && atual.tipo === 'pen' && Date.now() - atual.quando <= GESTO_PARADO) return
     // O que o primeiro dedo tinha começado (passear, ou arrastar uma caixa)
     // não vale mais: dois dedos querem outra coisa, e a caixa volta pro lugar.
     gesto.current?.abandonar()
@@ -727,7 +769,21 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
     setSalvo(null)
     setSalvando(true)
     try {
-      const png = await paraPng(svgRef.current, arranjo.width, arranjo.height, faixaTitulo)
+      // O título digitado e ainda não confirmado entra na imagem; o desenho
+      // precisa de um quadro pra mostrar o título novo antes da cópia.
+      if (editando) {
+        await fecharEdicao()
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+      }
+      /*
+       * A largura da imagem cabe o TÍTULO. Ela era a do desenho — 310 px num
+       * fluxo de uma coluna —, e "Processo de aprovação de compras do setor
+       * financeiro" saía "Processo de apro", com o painel dizendo que salvou
+       * com o título. Medido com a mesma fonte do desenho.
+       */
+      const atual = useStore.getState().flowcharts.find((f) => f.id === chart.id) ?? chart
+      const largura = Math.max(arranjo.width, larguraDoTitulo(atual.titulo, atual.subtitulo))
+      const png = await paraPng(svgRef.current, largura, arranjo.height, faixaDoTitulo(atual))
       const nome = (chart.titulo || 'Fluxograma').replace(/[\\/:*?"<>|]/g, '-').slice(0, 60)
       const { onde } = await salvarImagem(png, `${nome} ${carimbo(chart.updatedAt)}.png`)
       setSalvo(onde)
@@ -863,7 +919,7 @@ export function FlowPanel({ chart, onClose }: { chart: Flowchart; onClose: () =>
           <button className="flow-salvar" onClick={() => void salvar()} disabled={salvando}>
             {salvando ? 'Salvando…' : '⤓ Salvar imagem'}
           </button>
-          <button className="panel-close" onClick={onClose}>
+          <button className="panel-close" onClick={() => void sair()}>
             Voltar à folha
           </button>
         </div>
@@ -1976,7 +2032,23 @@ async function paraPng(
   const texto = new XMLSerializer().serializeToString(copia)
   const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(texto)}`
 
-  const escala = 2 // pra não sair borrado quando alguém der zoom
+  /*
+   * Dobro do tamanho pra não sair borrado no zoom — mas com teto. A WebView do
+   * Android recusa canvas muito grandes (na casa dos 16 milhões de píxeis, e
+   * 8192 de lado) e devolve uma imagem EM BRANCO, sem erro. Um fluxograma
+   * grande sai na escala que cabe.
+   */
+  const AREA_MAXIMA = 16_000_000
+  const LADO_MAXIMO = 8192
+  const escala = Math.max(
+    0.1,
+    Math.min(
+      2,
+      Math.sqrt(AREA_MAXIMA / Math.max(1, largura * altura)),
+      LADO_MAXIMO / Math.max(1, largura),
+      LADO_MAXIMO / Math.max(1, altura),
+    ),
+  )
   const canvas = document.createElement('canvas')
   canvas.width = Math.max(1, Math.round(largura * escala))
   canvas.height = Math.max(1, Math.round(altura * escala))
@@ -2001,4 +2073,26 @@ async function paraPng(
       'image/png',
     )
   })
+}
+
+/** A altura da faixa do título acima do desenho (0 sem título nem subtítulo). */
+function faixaDoTitulo(chart: { titulo?: string; subtitulo?: string }): number {
+  return (chart.titulo ? 56 : 0) + (chart.subtitulo ? 30 : 0) + (chart.titulo || chart.subtitulo ? 16 : 0)
+}
+
+/** Quanto o título e o subtítulo ocupam, com as margens do desenho. */
+function larguraDoTitulo(titulo?: string, subtitulo?: string): number {
+  if (!titulo && !subtitulo) return 0
+  const ctx = document.createElement('canvas').getContext('2d')
+  const medir = (texto: string | undefined, fonte: string, porLetra: number) => {
+    if (!texto) return 0
+    if (!ctx) return texto.length * porLetra
+    ctx.font = fonte
+    return ctx.measureText(texto).width
+  }
+  const maior = Math.max(
+    medir(titulo, '700 30px system-ui, sans-serif', 17),
+    medir(subtitulo, '500 18px system-ui, sans-serif', 10),
+  )
+  return Math.ceil(maior + 28 * 2)
 }

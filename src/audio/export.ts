@@ -121,7 +121,14 @@ export async function salvarTexto(texto: string, nome: string): Promise<SaveResu
  */
 export function nomeDeArquivo(rec: Recording): string {
   const quando = rec.label || new Date(rec.startedAt).toLocaleString('pt-BR')
-  return `Organizador ${limpar(quando)}.${extensaoDe(rec.mimeType)}`
+  /*
+   * Os segundos do começo vão no nome: o rótulo tem só dia e minuto, e duas
+   * gravações no mesmo minuto saíam com o MESMO nome — no Android a segunda
+   * vira "(1)" e o aviso nomeava o arquivo errado; na pasta de reserva, a
+   * segunda passava por cima da primeira.
+   */
+  const segundos = String(new Date(rec.startedAt).getSeconds()).padStart(2, '0')
+  return `Organizador ${limpar(quando)}-${segundos}.${extensaoDe(rec.mimeType)}`
 }
 
 /**

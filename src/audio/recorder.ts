@@ -46,7 +46,23 @@ export function isRecordingSupported(): boolean {
   )
 }
 
-export async function startRecording(): Promise<RecorderHandle> {
+/**
+ * O que o gravador avisa enquanto grava.
+ *
+ * `aoPedaco` recebe cada pedaço assim que ele existe — é por ele que a
+ * gravação vai pro banco durante a reunião, e não só no "Parar".
+ *
+ * `aoInterromper` avisa quando a gravação parou SOZINHA: o microfone foi
+ * tomado por outro app, a permissão caiu, o gravador deu erro. Antes disso
+ * acontecia em silêncio — a barra continuava contando "Parar · 0:09" enquanto
+ * nada mais era gravado.
+ */
+export interface OpcoesDeGravacao {
+  aoPedaco?: (pedaco: Blob, ordem: number) => void
+  aoInterromper?: (motivo: string) => void
+}
+
+export async function startRecording(opcoes: OpcoesDeGravacao = {}): Promise<RecorderHandle> {
   if (!isRecordingSupported()) {
     throw new Error('Este navegador não permite gravar áudio.')
   }
@@ -59,46 +75,101 @@ export async function startRecording(): Promise<RecorderHandle> {
   const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
   const chunks: Blob[] = []
   const startedAt = Date.now()
+  const tipo = () => recorder.mimeType || mimeType || 'audio/webm'
+  let ordem = 0
+
+  /*
+   * Quem pediu pra parar. Sem pedido, o "stop" veio de fora — e aí é
+   * interrupção, que tem que ser dita ao usuário.
+   */
+  let pedido: { resolve: (r: RecordingResult) => void; reject: (e: Error) => void } | null = null
+  let terminouEm: number | null = null
+  let falhou = false
 
   recorder.ondataavailable = (event) => {
-    if (event.data.size > 0) chunks.push(event.data)
+    if (event.data.size === 0) return
+    chunks.push(event.data)
+    try {
+      opcoes.aoPedaco?.(event.data, ordem++)
+    } catch {
+      // Guardar o pedaço é com quem chamou; o gravador continua gravando.
+    }
+  }
+
+  const resultado = (): RecordingResult => ({
+    blob: new Blob(chunks, { type: tipo() }),
+    durationMs: (terminouEm ?? Date.now()) - startedAt,
+    mimeType: tipo(),
+  })
+
+  recorder.onstop = () => {
+    release()
+    terminouEm ??= Date.now()
+    if (pedido) {
+      const r = resultado()
+      if (r.blob.size === 0) pedido.reject(new Error('A gravação saiu vazia.'))
+      else pedido.resolve(r)
+      pedido = null
+      return
+    }
+    if (!falhou) opcoes.aoInterromper?.('O microfone parou de gravar.')
+  }
+  recorder.onerror = () => {
+    falhou = true
+    terminouEm ??= Date.now()
+    if (pedido) {
+      release()
+      pedido.reject(new Error('A gravação falhou.'))
+      pedido = null
+      return
+    }
+    opcoes.aoInterromper?.('A gravação falhou.')
+  }
+  // O microfone pode ser tomado no meio da reunião (outro app, ligação,
+  // permissão revogada). A trilha acaba, e o gravador tem que parar junto pra
+  // que o que foi gravado até ali feche direito.
+  for (const track of stream.getAudioTracks()) {
+    track.addEventListener('ended', () => {
+      if (recorder.state !== 'inactive') recorder.stop()
+    })
   }
   recorder.start(1000)
 
   const meter = createLevelMeter(stream)
 
+  let solto = false
   const release = () => {
+    if (solto) return
+    solto = true
     meter.dispose()
     for (const track of stream.getTracks()) track.stop()
   }
 
   return {
     startedAt,
-    mimeType: recorder.mimeType || mimeType || 'audio/webm',
+    mimeType: tipo(),
     level: meter.level,
 
     stop: () =>
       new Promise<RecordingResult>((resolve, reject) => {
-        recorder.onstop = () => {
+        // Já parou sozinho: devolve o que foi gravado até a interrupção.
+        if (recorder.state === 'inactive') {
           release()
-          const type = recorder.mimeType || mimeType || 'audio/webm'
-          const blob = new Blob(chunks, { type })
-          if (blob.size === 0) {
-            reject(new Error('A gravação saiu vazia.'))
-            return
-          }
-          resolve({ blob, durationMs: Date.now() - startedAt, mimeType: type })
+          const r = resultado()
+          if (r.blob.size === 0) reject(new Error('A gravação saiu vazia.'))
+          else resolve(r)
+          return
         }
-        recorder.onerror = () => {
-          release()
-          reject(new Error('A gravação falhou.'))
-        }
-        if (recorder.state !== 'inactive') recorder.stop()
-        else recorder.onstop?.(new Event('stop'))
+        pedido = { resolve, reject }
+        recorder.stop()
       }),
 
     cancel: () => {
-      if (recorder.state !== 'inactive') recorder.stop()
+      pedido = null
+      if (recorder.state !== 'inactive') {
+        recorder.onstop = null
+        recorder.stop()
+      }
       release()
     },
   }

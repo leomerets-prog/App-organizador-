@@ -263,6 +263,16 @@ export interface Recording {
    * continua valendo sozinha como sempre valeu.
    */
   transcricao?: Transcricao
+  /**
+   * Gravação que ainda não passou pelo "Parar".
+   *
+   * Os pedaços dela vão pro banco um por segundo enquanto grava; este campo é
+   * o que diz que o arquivo ainda não foi montado. Se o app morrer no meio, a
+   * próxima abertura remonta o arquivo com os pedaços e tira este campo.
+   */
+  emAndamento?: boolean
+  /** Remontada dos pedaços porque o app fechou antes do "Parar". */
+  recuperada?: boolean
 }
 
 /**
@@ -353,6 +363,12 @@ export interface FlowChartNode {
   label: string
   /** O usuário mexeu no nome ou na forma? Então a remontagem não desfaz. */
   editado?: boolean
+  /**
+   * O usuário escreveu (ou apagou) o NOME. Separado de `editado` porque
+   * arrastar ou mudar a cor também marca `editado` — e a caixa arrastada
+   * antes de o nome lido chegar ficava sem nome pra sempre.
+   */
+  nomeEditado?: boolean
   /** Onde a caixa foi desenhada à mão — é o que dá a ordem esquerda/direita. */
   bounds: Bounds
   /**

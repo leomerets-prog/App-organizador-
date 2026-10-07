@@ -88,6 +88,19 @@ export function getDb(): Promise<IDBPDatabase<OrganizadorDB>> {
           flowcharts.createIndex('byZone', 'zoneId')
         }
       },
+      /*
+       * A conexão caiu (o navegador fecha o banco sob pressão de memória ou
+       * de disco). Sem isto a conexão morta ficava guardada e TODA gravação
+       * seguinte falhava até reiniciar o app — com a tinta aparecendo na tela.
+       */
+      terminated() {
+        dbPromise = null
+      },
+    }).catch((err) => {
+      // Abrir falhou: a próxima chamada tenta de novo, em vez de herdar a
+      // promessa rejeitada pra sempre.
+      dbPromise = null
+      throw err
     })
   }
   return dbPromise

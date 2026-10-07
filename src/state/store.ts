@@ -27,6 +27,7 @@ import { buildZones, ZONE_ITEM_KIND } from '../domain/templates'
 import { detectFields, planFieldSync } from '../items/detect'
 import type { DetectedField } from '../items/detect'
 import * as repo from '../db/repo'
+import { aoFalharGravacao, explicarFalha } from '../db/falhas'
 import { newId } from '../lib/id'
 import { boundsOf, unionBounds } from '../lib/geometry'
 import {
@@ -57,7 +58,8 @@ import {
   remover as removerMarca,
   renomear as renomearMarca,
 } from '../audio/marcas'
-import { aceitaDoReconhecedor, comCorrecao, comTrechosCorrigidos, doReconhecedor } from '../audio/transcricao'
+import { aceitaDoReconhecedor, comCorrecao, comTrechosEditados, doReconhecedor } from '../audio/transcricao'
+import { dadosParaHerdar, itensDoPasso, leituraSobreOAtual, temDadosDoUsuario } from '../items/preservar'
 import {
   SEM_HISTORIA,
   mudou as mudouChart,
@@ -145,6 +147,8 @@ export interface AppState {
   createNotebook: (name: string, color: string) => Promise<void>
   createSection: (name: string, color: string) => Promise<void>
   createPage: (title: string, templateId: string) => Promise<void>
+  /** Abre uma folha de qualquer caderno — troca caderno e seção junto. */
+  irParaPagina: (pageId: Id) => Promise<void>
   renamePage: (id: Id, title: string) => Promise<void>
   /** Quem estava na reunião, pro cabeçalho da ata. */
   setParticipantes: (pageId: Id, texto: string) => Promise<void>
@@ -225,6 +229,26 @@ export interface AppState {
   scheduleFieldSync: () => void
 
   addRecording: (rec: Recording, blob: Blob) => Promise<void>
+  /** Abre o registro da gravação no começo, preso à folha onde ela começou. */
+  iniciarGravacao: (rec: Recording) => Promise<void>
+  /** Guarda um pedaço da gravação em andamento, assim que ele chega. */
+  guardarPedaco: (recId: Id, ordem: number, blob: Blob) => Promise<void>
+  /** Marca um momento da gravação EM ANDAMENTO (ms desde o começo). */
+  marcarGravando: (recId: Id, ms: number) => Promise<Marca[]>
+  /** Fecha a gravação: arquivo inteiro, sem pedaços, numa transação só. */
+  concluirGravacao: (rec: Recording, blob: Blob) => Promise<void>
+  /** Gravações remontadas na abertura porque o app fechou antes do "Parar". */
+  gravacoesRecuperadas: Recording[]
+  dispensarRecuperadas: () => void
+  /** Sobe a cada item gravado — é o sinal pra Central reler os itens de todas as folhas. */
+  itensMexidos: number
+  /**
+   * O banco recusou uma gravação: o que está na tela pode não estar guardado.
+   * Fica na tela até ele tocar em "Guardar de novo" e dar certo.
+   */
+  falhaDeGravacao: string | null
+  /** Grava de novo tudo o que a folha aberta tem na memória. */
+  regravarFolha: () => Promise<boolean>
   removeRecording: (id: Id) => Promise<void>
   setActiveRecording: (id: Id | null) => void
   /** Lê o desenho da folha inteira e monta (ou remonta) o fluxograma. */
@@ -254,7 +278,10 @@ export interface AppState {
       dobra?: number
       ponta?: 'seta' | 'nenhuma'
     },
+    opcoes?: { semPasso?: boolean },
   ) => Promise<void>
+  /** Registra no ↶ o estado de antes de um arrasto inteiro (ver updateFlowEdge). */
+  marcarPassoFlow: (chartId: Id, antes: Flowchart) => void
   /**
    * Cria uma caixa no painel, na forma escolhida na lateral.
    *
@@ -302,10 +329,13 @@ export interface AppState {
     id: Id,
     texto: string,
     extras?: { segundos?: number; dicas?: number; trechos?: TrechoFalado[] },
-  ) => Promise<void>
-  corrigirTranscricao: (id: Id, texto: string) => Promise<void>
-  /** Corrige a fala tópico a tópico, um texto por trecho, na ordem deles. */
-  corrigirTrechos: (id: Id, textos: string[]) => Promise<void>
+  ) => Promise<ResultadoGravacao>
+  corrigirTranscricao: (id: Id, texto: string) => Promise<ResultadoGravacao>
+  /**
+   * Corrige a fala tópico a tópico. `base` é a fala de quando o editor abriu;
+   * `textos`, um por trecho, na ordem deles.
+   */
+  corrigirTrechos: (id: Id, base: TrechoFalado[], textos: string[]) => Promise<ResultadoGravacao>
   tirarTranscricao: (id: Id) => Promise<void>
 
   addImage: (file: File | Blob, visible: { x: number; y: number; w: number; h: number }) => Promise<void>
@@ -334,10 +364,29 @@ export interface AppState {
  * hora — e com a borracha de ponta ele precisa desfazer duas coisas: devolver
  * os traços inteiros e tirar os pedaços que sobraram do corte.
  */
+/**
+ * Itens com ficha que saíram há pouco — pra voltar com a ficha se a tinta
+ * voltar (↶ e depois ↷). Só na memória e com teto: é a rede do engano
+ * percebido na hora, não um arquivo.
+ */
+const cemiterio = new Map<Id, Item>()
+const CEMITERIO_MAX = 200
+
+function guardarNoCemiterio(item: Item): void {
+  cemiterio.delete(item.id)
+  cemiterio.set(item.id, item)
+  while (cemiterio.size > CEMITERIO_MAX) {
+    const maisVelho = cemiterio.keys().next().value
+    if (maisVelho === undefined) break
+    cemiterio.delete(maisVelho)
+  }
+}
+
 let lastErase: {
   restore: Stroke[]
   removeIds: Id[]
   items: Item[]
+  depois: Item[]
 } | null = null
 
 /**
@@ -445,18 +494,60 @@ let transcribing = false
  * borracha, que religa itens por linhagem). Pro traço desenhado basta mandar
  * identificar de novo: tirando o traço, o campo dele some sozinho.
  */
+/**
+ * EDITAR UM ITEM DE QUALQUER FOLHA.
+ *
+ * As ações de item procuravam o item só na lista da folha aberta e, sem
+ * achar, voltavam caladas. A Central lista itens de TODAS as folhas — então
+ * marcar concluído, pôr responsável ou prazo num item de ontem não salvava
+ * nada, e a ficha mostrava o que foi digitado até ser fechada. Achado da
+ * revisão da casa, reproduzido pela tela.
+ *
+ * Agora: na memória se estiver lá (folha aberta), senão no banco. E o
+ * contador `itensMexidos` avisa a Central pra reler a lista.
+ */
+async function editarItem(
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+  id: Id,
+  mudar: (item: Item) => Item | null,
+): Promise<Item | null> {
+  const item = get().items.find((i) => i.id === id) ?? (await repo.getItem(id))
+  if (!item) return null
+  const updated = mudar(item)
+  if (!updated) return null
+  await repo.putItem(updated)
+  // Relido depois da espera: a folha pode ter mudado enquanto gravava.
+  if (get().items.some((i) => i.id === id)) {
+    set({ items: get().items.map((i) => (i.id === id ? updated : i)) })
+  }
+  set({ itensMexidos: get().itensMexidos + 1 })
+  return updated
+}
+
 async function aplicarPasso(
   get: () => AppState,
   set: (partial: Partial<AppState>) => void,
   patch: StrokePatch,
+  outroLado: StrokePatch,
 ): Promise<void> {
   const strokes = applyPatch(get().strokes, patch)
-  set(patch.items ? { strokes, items: patch.items } : { strokes })
+  /*
+   * Os itens NÃO são repostos inteiros. Repor a lista como estava no momento
+   * da borracha desfazia tudo o que o usuário fez depois — concluído, ficha,
+   * texto corrigido. Só os itens que a borracha mexeu ganham a tinta do lado
+   * aplicado; o resto da ficha vem do item como está agora (`itensDoPasso`).
+   */
+  const mudanca = patch.items ? itensDoPasso(get().items, patch.items, outroLado.items ?? []) : null
+  set(mudanca ? { strokes, items: mudanca.itens } : { strokes })
 
-  await repo.deleteStrokes(patch.remove)
+  // Primeiro o que entra, depois o que sai: se o app morrer no meio, sobra
+  // traço repetido — nunca falta traço.
   for (const stroke of patch.restore) await repo.putStroke(stroke)
-  if (patch.items) {
-    for (const item of patch.items) await repo.putItem(item)
+  await repo.deleteStrokes(patch.remove)
+  if (mudanca) {
+    for (const item of mudanca.gravar) await repo.putItem(item)
+    for (const id of mudanca.apagar) await repo.deleteItem(id)
   }
   get().scheduleFieldSync()
 }
@@ -510,15 +601,35 @@ async function gravarChart(
 }
 
 /** Grava as marcas: memória primeiro, banco depois — a regra da casa. */
-async function gravarMarcas(
+/** O que aconteceu com uma mudança numa gravação — a tela precisa saber. */
+export type ResultadoGravacao = 'gravou' | 'recusou' | 'sumiu'
+
+/**
+ * MUDAR UMA GRAVAÇÃO DE QUALQUER FOLHA.
+ *
+ * As ações de gravação procuravam só na lista da folha aberta e voltavam
+ * caladas. A transcrição de uma reunião longa leva minutos — tempo de ele ir
+ * escrever em outra folha — e o resultado era jogado fora sem aviso, com a
+ * tela dizendo "Transcreveu". Achado por dois revisores, reproduzido.
+ *
+ * Agora: memória se estiver lá, senão o banco. `mudar` devolve `null` quando
+ * recusa (ex.: não passar por cima de correção feita à mão).
+ */
+async function editarGravacao(
   get: () => AppState,
   set: (partial: Partial<AppState>) => void,
-  rec: Recording,
-  marcas: Marca[],
-): Promise<void> {
-  const atualizado = { ...rec, marcas }
-  set({ recordings: get().recordings.map((r) => (r.id === rec.id ? atualizado : r)) })
+  id: Id,
+  mudar: (rec: Recording) => Recording | null,
+): Promise<ResultadoGravacao> {
+  const rec = get().recordings.find((r) => r.id === id) ?? (await repo.getRecording(id))
+  if (!rec || rec.emAndamento) return 'sumiu'
+  const atualizado = mudar(rec)
+  if (!atualizado) return 'recusou'
+  if (get().recordings.some((r) => r.id === id)) {
+    set({ recordings: get().recordings.map((r) => (r.id === id ? atualizado : r)) })
+  }
   await repo.updateRecording(atualizado)
+  return 'gravou'
 }
 
 /** Prazo de UMA caixa. Uma chamada presa não pode segurar as outras treze. */
@@ -598,7 +709,9 @@ async function lerNomesDasCaixas(
       const atualizado: Flowchart = {
         ...atual,
         nodes: atual.nodes.map((n) =>
-          n.id === node.id && !n.editado && !n.label ? { ...n, label: leitura.text } : n,
+          // Só o NOME escrito pelo usuário barra a leitura; caixa só
+          // arrastada ou recolorida ainda recebe o nome lido.
+          n.id === node.id && !n.nomeEditado && !n.label ? { ...n, label: leitura.text } : n,
         ),
         updatedAt: Date.now(),
       }
@@ -732,7 +845,10 @@ function persist(get: () => AppState): void {
   })
 }
 
-export const useStore = create<AppState>((set, get) => ({
+export const useStore = create<AppState>((set, get) => {
+  // Qualquer falha do banco que escapar das ações vira o aviso fixo na tela.
+  aoFalharGravacao((mensagem) => set({ falhaDeGravacao: mensagem }))
+  return {
   notebooks: [],
   sections: [],
   pages: [],
@@ -744,6 +860,34 @@ export const useStore = create<AppState>((set, get) => ({
   zones: [],
   items: [],
   recordings: [],
+  gravacoesRecuperadas: [],
+  itensMexidos: 0,
+  falhaDeGravacao: null,
+
+  /*
+   * A memória da folha aberta é a verdade (é o que está na tela). Se o banco
+   * recusou alguma gravação, regravar tudo da folha é a forma de pôr os dois
+   * de acordo de novo — sem precisar saber qual gravação falhou. Tudo aqui é
+   * `put`: regravar o que já estava lá não muda nada.
+   */
+  async regravarFolha() {
+    const { activePageId, strokes, items, zones, flowcharts, recordings } = get()
+    if (!activePageId) return false
+    try {
+      for (const stroke of strokes) await repo.putStroke(stroke)
+      await repo.putZones(zones)
+      for (const item of items) await repo.putItem(item)
+      for (const chart of flowcharts) await repo.putFlowchart(chart)
+      for (const rec of recordings) await repo.updateRecording(rec)
+      const page = get().pages.find((p) => p.id === activePageId)
+      if (page) await repo.putPage(page)
+      set({ falhaDeGravacao: null })
+      return true
+    } catch (err) {
+      set({ falhaDeGravacao: explicarFalha(err) })
+      return false
+    }
+  },
   flowcharts: [],
   flowStatus: { state: 'parado', message: '' },
   flowHistory: SEM_HISTORIA,
@@ -780,6 +924,19 @@ export const useStore = create<AppState>((set, get) => ({
    */
   init() {
     initOnce ??= (async () => {
+      /*
+       * Antes de qualquer folha: remonta a gravação que ficou em andamento —
+       * o app fechou (ou o Android fechou o app) antes do "Parar". Falhar aqui
+       * não pode impedir o caderno de abrir: os pedaços continuam no banco e
+       * a próxima abertura tenta de novo.
+       */
+      try {
+        const recuperadas = await repo.recuperarGravacoes()
+        if (recuperadas.length > 0) set({ gravacoesRecuperadas: recuperadas })
+      } catch (err) {
+        console.warn('organizador: não remontei a gravação interrompida', err)
+      }
+
       let notebooks = await repo.listNotebooks()
       if (notebooks.length === 0) {
         await seedFirstRun()
@@ -921,6 +1078,29 @@ export const useStore = create<AppState>((set, get) => ({
     await repo.putZones(zones)
     set({ pages: [...get().pages, page] })
     await get().selectPage(page.id)
+  },
+
+  /*
+   * "Ir pra folha" na Central chamava só `selectPage`. Pra uma folha de outra
+   * seção ou de outro caderno, a folha não estava na lista carregada e a tela
+   * dizia "Nenhuma página aberta" — o susto de achar que a anotação sumiu. E o
+   * "voltar onde eu estava" ficava gravado com o caderno de um e a folha do
+   * outro. Aqui caderno e seção são carregados antes da folha.
+   */
+  async irParaPagina(pageId) {
+    const page = await repo.getPage(pageId)
+    if (!page) return
+    const secao = (await repo.listAllSections()).find((x) => x.id === page.sectionId)
+    if (!secao) return
+    if (get().activeNotebookId !== secao.notebookId) {
+      const sections = await repo.listSections(secao.notebookId)
+      set({ activeNotebookId: secao.notebookId, sections })
+    }
+    if (get().activeSectionId !== secao.id) {
+      const pages = await repo.listPages(secao.id)
+      set({ activeSectionId: secao.id, pages })
+    }
+    await get().selectPage(pageId)
   },
 
   async renamePage(id, title) {
@@ -1157,12 +1337,12 @@ export const useStore = create<AppState>((set, get) => ({
     lastErase = {
       restore: inteiros,
       removeIds: addedStrokes.map((s) => s.id),
-      // Os itens são guardados inteiros: desfazer volta a lista como estava,
-      // em vez de tentar refazer a religação ao contrário.
       items: itensAntes,
+      depois: [],
     }
 
     await reconcileItems(get, set, session.lineage, new Set(removedIds))
+    lastErase.depois = get().items
     set({
       history: pushStep(
         get().history,
@@ -1184,14 +1364,14 @@ export const useStore = create<AppState>((set, get) => ({
     const passo = undoHistory(get().history)
     if (!passo) return
     set({ history: passo.history })
-    await aplicarPasso(get, set, passo.step.antes)
+    await aplicarPasso(get, set, passo.step.antes, passo.step.depois)
   },
 
   async redoStep() {
     const passo = redoHistory(get().history)
     if (!passo) return
     set({ history: passo.history })
-    await aplicarPasso(get, set, passo.step.depois)
+    await aplicarPasso(get, set, passo.step.depois, passo.step.antes)
   },
 
   /**
@@ -1218,13 +1398,12 @@ export const useStore = create<AppState>((set, get) => ({
       ),
     })
 
-    // Itens voltam exatamente como estavam antes da borrachada.
-    for (const item of op.items) await repo.putItem(item)
-    const alive = new Set(op.items.map((i) => i.id))
-    for (const item of get().items) {
-      if (!alive.has(item.id)) await repo.deleteItem(item.id)
-    }
-    set({ items: op.items })
+    // Os itens que a borracha mexeu voltam à tinta de antes; o resto da ficha
+    // fica como está agora (mesma regra do voltar da pilha).
+    const mudanca = itensDoPasso(get().items, op.items, op.depois)
+    for (const item of mudanca.gravar) await repo.putItem(item)
+    for (const id of mudanca.apagar) await repo.deleteItem(id)
+    set({ items: mudanca.itens })
 
     get().scheduleFieldSync()
     return restore.length
@@ -1248,6 +1427,16 @@ export const useStore = create<AppState>((set, get) => ({
     const bounds = unionBounds(chosen.map((s) => s.bounds))
     const center = { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2 }
 
+    /*
+     * O item automático que já era dono desta tinta sai (a identificação
+     * ignora tinta carimbada) — e levava junto o prazo, o responsável, o
+     * concluído e o texto corrigido. O carimbo herda o que ele tinha.
+     */
+    const donos = get().items.filter(
+      (i) => i.source === 'auto' && i.strokeIds.some((id) => selection.has(id)),
+    )
+    const herdado = dadosParaHerdar(donos)
+
     const item: Item = {
       id: newId(),
       pageId: activePageId,
@@ -1261,6 +1450,7 @@ export const useStore = create<AppState>((set, get) => ({
       ocr: { status: 'pendente' },
       createdAt: now,
       updatedAt: now,
+      ...herdado,
     }
     await repo.putItem(item)
     set({ items: [...get().items, item], selection: new Set(), tool: 'pen' })
@@ -1270,17 +1460,15 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   async toggleItemStatus(id) {
-    const item = get().items.find((i) => i.id === id)
-    if (!item) return
-    await get().setItemStatus(id, item.status === 'concluido' ? 'aberto' : 'concluido')
+    await editarItem(get, set, id, (item) => ({
+      ...item,
+      status: item.status === 'concluido' ? 'aberto' : 'concluido',
+      updatedAt: Date.now(),
+    }))
   },
 
   async setItemStatus(id, status) {
-    const item = get().items.find((i) => i.id === id)
-    if (!item) return
-    const updated: Item = { ...item, status, updatedAt: Date.now() }
-    await repo.putItem(updated)
-    set({ items: get().items.map((i) => (i.id === id ? updated : i)) })
+    await editarItem(get, set, id, (item) => ({ ...item, status, updatedAt: Date.now() }))
   },
 
   /**
@@ -1290,24 +1478,18 @@ export const useStore = create<AppState>((set, get) => ({
    * usuário diz que aquela linha é tarefa e não pendência, a palavra dele fica.
    */
   async setItemKind(id, kind) {
-    const item = get().items.find((i) => i.id === id)
-    if (!item || item.kind === kind) return
-    const updated: Item = { ...item, kind, kindByUser: true, updatedAt: Date.now() }
-    await repo.putItem(updated)
-    set({ items: get().items.map((i) => (i.id === id ? updated : i)) })
+    await editarItem(get, set, id, (item) =>
+      item.kind === kind ? null : { ...item, kind, kindByUser: true, updatedAt: Date.now() },
+    )
   },
 
   async setItemTitle(id, title) {
-    const item = get().items.find((i) => i.id === id)
-    if (!item) return
-    const updated = { ...item, title, updatedAt: Date.now() }
-    await repo.putItem(updated)
-    set({ items: get().items.map((i) => (i.id === id ? updated : i)) })
+    await editarItem(get, set, id, (item) => ({ ...item, title, updatedAt: Date.now() }))
   },
 
   async removeItem(id) {
     await repo.deleteItem(id)
-    set({ items: get().items.filter((i) => i.id !== id) })
+    set({ items: get().items.filter((i) => i.id !== id), itensMexidos: get().itensMexidos + 1 })
   },
 
   // ─── Identificação dos campos ──────────────────────────────────────────────
@@ -1352,18 +1534,47 @@ export const useStore = create<AppState>((set, get) => ({
         ignoreStrokeIds: stamped,
         pageHeight: get().sheetHeight,
       })
+      /*
+       * Os itens que saíram há pouco também concorrem pelos campos: voltar
+       * (↶) um traço tira o item dele, e avançar (↷) devolve o traço. Sem
+       * isto o item voltava NOVO, em branco — sem o concluído e a ficha. Pela
+       * tinta em comum, o campo reencontra o item que tinha saído.
+       */
+      const naLista = new Set(items.map((i) => i.id))
+      const voltando = [...cemiterio.values()].filter((i) => i.pageId === pageId && !naLista.has(i.id))
       const plan = planFieldSync(
         fields,
-        items.filter((i) => i.source === 'auto'),
+        [...items.filter((i) => i.source === 'auto'), ...voltando],
+        // Tinta carimbada não conta como "tinta do item automático": ela
+        // passou pro carimbo, que herdou a ficha (`stampSelection`).
+        new Set(strokes.filter((st) => !stamped.has(st.id)).map((st) => st.id)),
       )
-      if (plan.create.length === 0 && plan.update.length === 0 && plan.remove.length === 0) return
+      plan.remove = plan.remove.filter((id) => naLista.has(id))
+      const voltaIgual = plan.iguais.filter((i) => !naLista.has(i.id))
+      if (
+        plan.create.length === 0 &&
+        plan.update.length === 0 &&
+        plan.remove.length === 0 &&
+        voltaIgual.length === 0
+      ) {
+        return
+      }
 
       const now = Date.now()
       const created = plan.create.map((field) => itemFromField(pageId, field, now))
-      const updated = plan.update.map(({ item, field }) => applyField(item, field, now))
+      const updated = [
+        ...plan.update.map(({ item, field }) => applyField(item, field, now)),
+        ...voltaIgual,
+      ]
+      const revividos = updated.filter((i) => !naLista.has(i.id))
+      for (const item of revividos) cemiterio.delete(item.id)
 
       for (const item of [...created, ...updated]) await repo.putItem(item)
-      for (const id of plan.remove) await repo.deleteItem(id)
+      for (const id of plan.remove) {
+        const saindo = items.find((i) => i.id === id)
+        if (saindo && temDadosDoUsuario(saindo)) guardarNoCemiterio(saindo)
+        await repo.deleteItem(id)
+      }
 
       // Trocou de página enquanto gravava: o que foi pro banco continua valendo,
       // mas a lista da tela agora é de outra folha e não pode receber isto.
@@ -1378,7 +1589,13 @@ export const useStore = create<AppState>((set, get) => ({
         .map((i) => changed.get(i.id) ?? i)
       const known = new Set(kept.map((i) => i.id))
 
-      set({ items: [...kept, ...created.filter((i) => !known.has(i.id))] })
+      set({
+        items: [
+          ...kept,
+          ...created.filter((i) => !known.has(i.id)),
+          ...revividos.filter((i) => !known.has(i.id)),
+        ],
+      })
       get().scheduleTranscription()
     } finally {
       fieldSyncRunning = false
@@ -1491,17 +1708,13 @@ export const useStore = create<AppState>((set, get) => ({
    * que escrever na mesma linha.
    */
   async setItemText(id, text) {
-    const item = get().items.find((i) => i.id === id)
-    if (!item) return
     const limpo = text.trim()
-    const updated: Item = {
+    await editarItem(get, set, id, (item) => ({
       ...item,
       title: limpo,
       ocr: limpo ? { status: 'manual', text: limpo, at: Date.now() } : { status: 'pendente' },
       updatedAt: Date.now(),
-    }
-    await repo.putItem(updated)
-    set({ items: get().items.map((i) => (i.id === id ? updated : i)) })
+    }))
   },
 
   /**
@@ -1512,19 +1725,18 @@ export const useStore = create<AppState>((set, get) => ({
    * voltar à folha.
    */
   async updateItemFields(id, patch) {
-    const item = get().items.find((i) => i.id === id)
-    if (!item) return
-    const updated: Item = { ...item, ...patch, updatedAt: Date.now() }
-    await repo.putItem(updated)
-    set({ items: get().items.map((i) => (i.id === id ? updated : i)) })
+    await editarItem(get, set, id, (item) => ({ ...item, ...patch, updatedAt: Date.now() }))
   },
 
   async retranscribeItem(id) {
-    const item = get().items.find((i) => i.id === id)
-    if (!item) return
-    const updated: Item = { ...item, ocr: { status: 'pendente' }, updatedAt: Date.now() }
-    await repo.putItem(updated)
-    set({ items: get().items.map((i) => (i.id === id ? updated : i)) })
+    const feito = await editarItem(get, set, id, (item) => ({
+      ...item,
+      ocr: { status: 'pendente' },
+      updatedAt: Date.now(),
+    }))
+    if (!feito) return
+    // A leitura precisa da tinta, que só está na memória da folha aberta;
+    // item de outra folha fica pendente e é lido quando a folha abrir.
     resetRecognizer()
     get().scheduleTranscription()
   },
@@ -1635,34 +1847,33 @@ export const useStore = create<AppState>((set, get) => ({
         if (strokes.length === 0) continue
 
         const area = writingArea(get(), item)
-        let next: Item
+        let resultado: { title?: string; ocr: Item['ocr'] }
         try {
           const { text, diagnostico } = await recognizeStrokes(strokes, area)
           if (text) lidos++
           else ultimoDiagnostico = diagnostico
-          next = {
-            ...item,
+          resultado = {
             title: text,
             ocr: text
               ? { status: 'pronto', text, at: Date.now() }
               : { status: 'falhou', reason: `Não reconheci nada nesta linha (${diagnostico}).` },
-            updatedAt: Date.now(),
           }
         } catch (err) {
           // O erro do reconhecedor também vai pro aviso da tela: é a única via
           // que o usuário tem pra contar o que aconteceu no aparelho dele.
           const motivo = err instanceof Error ? err.message : 'Não consegui transcrever.'
           ultimoDiagnostico = motivo
-          next = {
-            ...item,
-            ocr: { status: 'falhou', reason: motivo },
-            updatedAt: Date.now(),
-          }
+          resultado = { ocr: { status: 'falhou', reason: motivo } }
         }
 
-        // O item pode ter mudado (ou sumido) enquanto o reconhecedor trabalhava.
-        const atual = get().items.find((i) => i.id === item.id)
-        if (!atual || atual.ocr.status === 'manual') continue
+        /*
+         * O texto lido vai em cima do item COMO ESTÁ AGORA. Montar `next` com a
+         * cópia de antes da espera jogava fora o que ele fez com o item nesse
+         * meio tempo — concluído, tipo, ficha. Item que sumiu, foi corrigido à
+         * mão ou mudou de tinta não recebe nada (`leituraSobreOAtual`).
+         */
+        const next = leituraSobreOAtual(item, get().items.find((i) => i.id === item.id), resultado)
+        if (!next) continue
         await repo.putItem(next)
         set({ items: get().items.map((i) => (i.id === item.id ? next : i)) })
       }
@@ -1683,10 +1894,49 @@ export const useStore = create<AppState>((set, get) => ({
       })
     } finally {
       transcribing = false
+      // Trocou de folha no meio da leitura: o pedido da folha nova foi
+      // recusado porque esta ainda estava lendo. Agora que acabou, lê a nova.
+      if (get().activePageId !== pageId) get().scheduleTranscription()
     }
   },
 
   // ─── Áudio ─────────────────────────────────────────────────────────────────
+
+  async iniciarGravacao(rec) {
+    await repo.putRecordingDraft(rec)
+  },
+
+  async guardarPedaco(recId, ordem, blob) {
+    await repo.putRecordingChunk(recId, ordem, blob)
+  },
+
+  /*
+   * A marca da gravação EM ANDAMENTO vai pro registro dela no banco na hora —
+   * se o app morrer, a recuperação traz a gravação já com os tópicos. Antes,
+   * o ⚑ só existia nas gravações terminadas: durante a reunião ele marcava a
+   * gravação ANTERIOR, na posição em que ela tinha parado.
+   */
+  async marcarGravando(recId, ms) {
+    const rec = await repo.getRecording(recId)
+    if (!rec) return []
+    const marcas = adicionar(rec.marcas ?? [], { id: newId(), ms: Math.max(0, Math.round(ms)), texto: '' })
+    await repo.putRecordingDraft({ ...rec, marcas })
+    return marcas
+  },
+
+  async concluirGravacao(rec, blob) {
+    // As marcas feitas durante a gravação estão no registro do banco; o que
+    // a tela tem pode estar um toque atrás.
+    const noBanco = await repo.getRecording(rec.id)
+    const pronto: Recording = { ...rec, marcas: noBanco?.marcas ?? rec.marcas }
+    delete pronto.emAndamento
+    await repo.finishRecording(pronto, blob)
+    if (pronto.pageId === get().activePageId) {
+      set({ recordings: [...get().recordings.filter((r) => r.id !== pronto.id), pronto] })
+    }
+  },
+
+  dispensarRecuperadas: () => set({ gravacoesRecuperadas: [] }),
 
   async addRecording(rec, blob) {
     await repo.putRecording(rec, blob)
@@ -1701,22 +1951,24 @@ export const useStore = create<AppState>((set, get) => ({
   setActiveRecording: (activeRecordingId) => set({ activeRecordingId }),
 
   async marcarMomento(id, ms) {
-    const rec = get().recordings.find((r) => r.id === id)
-    if (!rec) return
-    const marcas = adicionar(rec.marcas ?? [], { id: newId(), ms: Math.max(0, Math.round(ms)), texto: '' })
-    await gravarMarcas(get, set, rec, marcas)
+    await editarGravacao(get, set, id, (rec) => ({
+      ...rec,
+      marcas: adicionar(rec.marcas ?? [], { id: newId(), ms: Math.max(0, Math.round(ms)), texto: '' }),
+    }))
   },
 
   async renomearMarca(id, marcaId, texto) {
-    const rec = get().recordings.find((r) => r.id === id)
-    if (!rec) return
-    await gravarMarcas(get, set, rec, renomearMarca(rec.marcas ?? [], marcaId, texto))
+    await editarGravacao(get, set, id, (rec) => ({
+      ...rec,
+      marcas: renomearMarca(rec.marcas ?? [], marcaId, texto),
+    }))
   },
 
   async tirarMarca(id, marcaId) {
-    const rec = get().recordings.find((r) => r.id === id)
-    if (!rec) return
-    await gravarMarcas(get, set, rec, removerMarca(rec.marcas ?? [], marcaId))
+    await editarGravacao(get, set, id, (rec) => ({
+      ...rec,
+      marcas: removerMarca(rec.marcas ?? [], marcaId),
+    }))
   },
 
   /**
@@ -1726,57 +1978,48 @@ export const useStore = create<AppState>((set, get) => ({
    * revisou meia hora de reunião e manda transcrever de novo por engano, o
    * trabalho não pode evaporar em silêncio. Pra refazer de propósito existe
    * `tirarTranscricao` primeiro — duas ações, que é o preço justo de uma
-   * ação destrutiva.
+   * ação destrutiva. A recusa agora VOLTA pra tela, que diz o porquê.
    */
   async guardarTranscricao(id, texto, extras) {
-    const rec = get().recordings.find((r) => r.id === id)
-    if (!rec) return
-    if (!aceitaDoReconhecedor(rec.transcricao)) return
-    const atualizado: Recording = {
-      ...rec,
-      transcricao: doReconhecedor(texto, extras),
-    }
-    set({ recordings: get().recordings.map((r) => (r.id === id ? atualizado : r)) })
-    await repo.updateRecording(atualizado)
+    return editarGravacao(get, set, id, (rec) =>
+      aceitaDoReconhecedor(rec.transcricao)
+        ? { ...rec, transcricao: doReconhecedor(texto, extras) }
+        : null,
+    )
   },
 
   /** O texto mexido à mão. Daqui em diante ele é a verdade. */
   async corrigirTranscricao(id, texto) {
-    const rec = get().recordings.find((r) => r.id === id)
-    if (!rec) return
-    const atualizado: Recording = {
+    return editarGravacao(get, set, id, (rec) => ({
       ...rec,
       transcricao: comCorrecao(rec.transcricao, texto),
-    }
-    set({ recordings: get().recordings.map((r) => (r.id === id ? atualizado : r)) })
-    await repo.updateRecording(atualizado)
+    }))
   },
 
-  async corrigirTrechos(id, textos) {
-    const rec = get().recordings.find((r) => r.id === id)
-    if (!rec) return
-    const transcricao = comTrechosCorrigidos(rec.transcricao, textos)
-    if (!transcricao || transcricao === rec.transcricao) return
-    const atualizado: Recording = { ...rec, transcricao }
-    set({ recordings: get().recordings.map((r) => (r.id === id ? atualizado : r)) })
-    await repo.updateRecording(atualizado)
+  /**
+   * A fala corrigida tópico a tópico, por um editor que abriu na versão
+   * `base`. Só o que esse editor mudou é gravado; se a fala mudou por baixo
+   * (outra correção, outra transcrição), volta `'recusou'` e nada é gravado.
+   */
+  async corrigirTrechos(id, base, textos) {
+    return editarGravacao(get, set, id, (rec) => {
+      const proxima = comTrechosEditados(rec.transcricao, base, textos)
+      if (proxima === 'mudou') return null
+      if (proxima === rec.transcricao) return rec
+      return { ...rec, transcricao: proxima }
+    })
   },
 
   async tirarTranscricao(id) {
-    const rec = get().recordings.find((r) => r.id === id)
-    if (!rec) return
-    const atualizado: Recording = { ...rec }
-    delete atualizado.transcricao
-    set({ recordings: get().recordings.map((r) => (r.id === id ? atualizado : r)) })
-    await repo.updateRecording(atualizado)
+    await editarGravacao(get, set, id, (rec) => {
+      const atualizado: Recording = { ...rec }
+      delete atualizado.transcricao
+      return atualizado
+    })
   },
 
   async setRecordingPosition(id, positionMs) {
-    const rec = get().recordings.find((r) => r.id === id)
-    if (!rec) return
-    const atualizado = { ...rec, positionMs }
-    set({ recordings: get().recordings.map((r) => (r.id === id ? atualizado : r)) })
-    await repo.updateRecording(atualizado)
+    await editarGravacao(get, set, id, (rec) => ({ ...rec, positionMs }))
   },
 
   // ─── Fluxograma ────────────────────────────────────────────────────────────
@@ -1885,7 +2128,11 @@ export const useStore = create<AppState>((set, get) => ({
     if (!chart) return
     await salvarChart(get, set, {
       ...chart,
-      nodes: chart.nodes.map((n) => (n.id === nodeId ? { ...n, ...patch, editado: true } : n)),
+      nodes: chart.nodes.map((n) =>
+        n.id === nodeId
+          ? { ...n, ...patch, editado: true, ...('label' in patch ? { nomeEditado: true } : {}) }
+          : n,
+      ),
     })
   },
 
@@ -1968,13 +2215,30 @@ export const useStore = create<AppState>((set, get) => ({
     })
   },
 
-  async updateFlowEdge(chartId, edgeId, patch) {
+  async updateFlowEdge(chartId, edgeId, patch, opcoes) {
     const chart = get().flowcharts.find((f) => f.id === chartId)
     if (!chart) return
-    await salvarChart(get, set, {
+    const proximo = {
       ...chart,
       edges: chart.edges.map((e) => (e.id === edgeId ? { ...e, ...patch } : e)),
-    })
+    }
+    // Arrasto em curso: cada movimento grava, mas o passo do ↶ é um só, no fim.
+    if (opcoes?.semPasso) await gravarChart(get, set, proximo)
+    else await salvarChart(get, set, proximo)
+  },
+
+  /*
+   * O passo do ↶ de um ARRASTO inteiro. Arrastar a curva de uma seta gravava
+   * um passo por movimento: um arrasto só enchia a pilha de 40 passos e
+   * empurrava pra fora tudo o que tinha vindo antes. Achado da revisão da
+   * casa, reproduzido. Agora o arrasto grava sem passo e registra aqui, no
+   * fim, o estado de antes dele.
+   */
+  marcarPassoFlow(chartId, antes) {
+    const agora = get().flowcharts.find((f) => f.id === chartId)
+    if (agora && mudouChart(antes, agora)) {
+      set({ flowHistory: pushChart(get().flowHistory, antes) })
+    }
   },
 
   async setFlowTitle(chartId, titulo, subtitulo) {
@@ -2106,7 +2370,8 @@ export const useStore = create<AppState>((set, get) => ({
     await repo.putPage(updated)
     set({ pages: pages.map((p) => (p.id === page.id ? updated : p)) })
   },
-}))
+  }
+})
 
 // ─── Primeira execução ───────────────────────────────────────────────────────
 
