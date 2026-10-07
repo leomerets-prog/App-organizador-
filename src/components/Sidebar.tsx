@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import { NOTEBOOK_COLORS } from '../domain/constants'
 import { INSTALLED_VERSION } from '../update/updates'
@@ -25,14 +25,27 @@ export function Sidebar({
   const [name, setName] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
 
+  /*
+   * O campo cria o bloco no Enter E ao perder o foco — e o Enter do teclado
+   * pode fazer as duas coisas de uma vez, criando o bloco duas vezes (com
+   * seção e página cada um). Criar não é como renomear: a segunda vez não é
+   * inofensiva.
+   */
+  const criando = useRef(false)
   const submit = async () => {
-    const trimmed = name.trim()
-    if (trimmed) {
-      const color = NOTEBOOK_COLORS[notebooks.length % NOTEBOOK_COLORS.length]
-      await createNotebook(trimmed, color)
+    if (criando.current) return
+    criando.current = true
+    try {
+      const trimmed = name.trim()
+      if (trimmed) {
+        const color = NOTEBOOK_COLORS[notebooks.length % NOTEBOOK_COLORS.length]
+        await createNotebook(trimmed, color)
+      }
+      setName('')
+      setCreating(false)
+    } finally {
+      criando.current = false
     }
-    setName('')
-    setCreating(false)
   }
 
   return (

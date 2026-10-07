@@ -1011,6 +1011,18 @@ descartável algo que o usuário fez**.
   arrasto da dobra da seta virava dezenas de passos de ↶; a releitura apagava o
   nome digitado de caixa que tinha nome vazio de propósito.
 
+- **A ficha gravava o registro A por cima do B.** Na Central deitada, com a
+  ficha de A aberta, tocar na linha de B trocava o cabeçalho mas não os campos
+  (estado local iniciado uma vez, sem `key`); sair do campo gravava texto, com
+  quem e observação de A EM B. E tocar no campo e sair sem digitar gravava o
+  texto da tela por cima de uma leitura da letra chegada no meio tempo. Agora
+  cada registro tem a sua ficha, só se grava o que foi digitado, e o que foi
+  digitado vai pro banco sozinho (600 ms depois da última tecla, ao fechar, ao
+  ir pro fundo) — `useCampoDaFicha` em `ItemPanel.tsx`.
+- **A tela de tropeço não tinha saída** quando é a última folha aberta que
+  derruba o desenho: o app reabre nela e cai de novo. "Abrir na primeira
+  folha" esquece o último lugar e recarrega, sem tocar em dado nenhum.
+
 **A regra:** todo caminho automático (leitura, sincronização, voltar, remontar)
 mexe SÓ no que é dele. O resto do registro vem do estado de AGORA, nunca de uma
 cópia tirada antes da espera. `tools/buracos-test.ts` tem um caso por regra, e
@@ -1216,6 +1228,9 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Ação que espera grava pelo ID, não pela folha aberta | Transcrição leva minutos; ele troca de folha no meio. Gravar "na folha aberta" gravava na errada ou em lugar nenhum |
 | Editor guarda só o que ELE mudou | Dois editores da mesma transcrição: guardar a foto inteira faz o segundo apagar o primeiro sem aviso |
 | Falha do banco aparece na tela, com o que fazer | Tinta na tela e nada no banco é o pior defeito possível: parece salvo. A faixa vermelha diz e oferece "Guardar de novo" |
+| Campo de formulário grava sozinho, e só o que foi digitado | Gravar só ao sair do campo perde o que estava sendo digitado se o app fechar; gravar o valor da tela ao sair sem digitar escreve texto velho por cima do novo |
+| Componente com estado local recebe `key` de quem ele mostra | Sem isso, trocar o registro troca o cabeçalho e mantém os campos — e o próximo blur grava um registro no outro |
+| Tela de erro sempre tem uma saída que não depende do que quebrou | "Tentar de novo" reabre a mesma folha; se é ela que quebra, é um laço |
 | Agentes em ondas de até três | Oito ao mesmo tempo estouraram o limite de uso da sessão no meio da revisão, duas vezes |
 
 ---

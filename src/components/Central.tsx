@@ -358,6 +358,9 @@ export function Central({ onClose }: { onClose: () => void }) {
             sendo a mesma, e fechar volta exatamente pro lugar onde se estava. */}
         {ficha && (
           <ItemPanel
+            // Uma ficha por registro: sem isto, a de B nascia com o que estava
+            // digitado na de A — e sair do campo gravava A por cima de B.
+            key={ficha.id}
             item={ficha}
             origin={origins.get(ficha.pageId)}
             onClose={() => setFichaId(null)}

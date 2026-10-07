@@ -2483,7 +2483,19 @@ button.rec-texto-topo:active {
 
 .crash-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
+}
+
+.crash-inicio {
+  height: 44px;
+  padding: 0 16px;
+  border: 1px solid #c9c9d4;
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  font-size: 15px;
+  font-family: inherit;
 }
 
 .crash-reload {

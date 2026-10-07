@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import { NOTEBOOK_COLORS } from '../domain/constants'
 import { TEMPLATES } from '../domain/templates'
@@ -32,6 +32,26 @@ export function SectionBar() {
   const [editing, setEditing] = useState<{ kind: 'section' | 'page'; id: string } | null>(null)
 
   const notebook = notebooks.find((n) => n.id === activeNotebookId)
+
+  /*
+   * A folha aberta fica à vista na fileira. Com muitas páginas, a fileira
+   * abria rolada pro começo: a folha ativa e o "+ Página" ficavam fora da
+   * tela, e quem não sabe que dá pra arrastar a fileira acha que sumiram.
+   */
+  const linhaDasPaginas = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const linha = linhaDasPaginas.current
+    const ativa = linha?.querySelector<HTMLElement>('.chip.page.active')
+    if (!linha || !ativa) return
+    // Sendo a última, o "+ Página" logo depois dela vem junto.
+    const depois = ativa.nextElementSibling
+    const fim = depois?.classList.contains('ghost') ? (depois as HTMLElement) : ativa
+    const caixa = linha.getBoundingClientRect()
+    const esquerda = ativa.getBoundingClientRect().left
+    const direita = fim.getBoundingClientRect().right
+    if (direita > caixa.right) linha.scrollLeft += direita - caixa.right + 8
+    else if (esquerda < caixa.left) linha.scrollLeft -= caixa.left - esquerda + 8
+  }, [activePageId, pages.length])
 
   const addSection = () => {
     const color = NOTEBOOK_COLORS[sections.length % NOTEBOOK_COLORS.length]
@@ -83,7 +103,7 @@ export function SectionBar() {
         </div>
       </div>
 
-      <div className="sectionbar-row pages">
+      <div className="sectionbar-row pages" ref={linhaDasPaginas}>
         <div className="chips">
           {pages.map((page) =>
             editing?.kind === 'page' && editing.id === page.id ? (

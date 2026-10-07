@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Item, ItemKind, Priority } from '../domain/types'
 import { ITEM_COLOR, ITEM_GLYPH } from '../ink/renderer'
 import { InkThumbnail } from './InkThumbnail'
@@ -56,9 +56,15 @@ export function ItemPanel({
   onFields: (patch: Partial<Pick<Item, 'dueAt' | 'priority' | 'assignee' | 'note'>>) => void
   onGo: () => void
 }) {
-  const [texto, setTexto] = useState(item.title)
-  const [quem, setQuem] = useState(item.assignee ?? '')
-  const [obs, setObs] = useState(item.note ?? '')
+  const texto = useCampoDaFicha(item.title, (digitado) => {
+    if (digitado.trim() !== item.title) onText(digitado)
+  })
+  const quem = useCampoDaFicha(item.assignee ?? '', (digitado) => {
+    if (digitado !== (item.assignee ?? '')) onFields({ assignee: digitado.trim() })
+  })
+  const obs = useCampoDaFicha(item.note ?? '', (digitado) => {
+    if (digitado !== (item.note ?? '')) onFields({ note: digitado })
+  })
 
   const prazo = item.dueAt ?? null
 
@@ -91,12 +97,8 @@ export function ItemPanel({
           <textarea
             className="ficha-texto"
             rows={2}
-            value={texto}
+            {...texto}
             placeholder="O que está escrito aqui"
-            onChange={(e) => setTexto(e.target.value)}
-            onBlur={() => {
-              if (texto.trim() !== item.title) onText(texto)
-            }}
           />
         </label>
 
@@ -149,12 +151,8 @@ export function ItemPanel({
         <label className="ficha-campo">
           <span>Com quem</span>
           <input
-            value={quem}
+            {...quem}
             placeholder="Nome de quem resolve"
-            onChange={(e) => setQuem(e.target.value)}
-            onBlur={() => {
-              if (quem !== (item.assignee ?? '')) onFields({ assignee: quem.trim() })
-            }}
           />
         </label>
 
@@ -162,12 +160,8 @@ export function ItemPanel({
           <span>Observação</span>
           <textarea
             rows={3}
-            value={obs}
+            {...obs}
             placeholder="O que a letra não disse"
-            onChange={(e) => setObs(e.target.value)}
-            onBlur={() => {
-              if (obs !== (item.note ?? '')) onFields({ note: obs })
-            }}
           />
         </label>
 
@@ -226,4 +220,89 @@ function inicioDoDia(instante: number): number {
   const d = new Date(instante)
   d.setHours(0, 0, 0, 0)
   return d.getTime()
+}
+
+/**
+ * Um campo de texto da ficha que não perde nem troca o que foi digitado.
+ *
+ * Antes, o texto vivia num `useState` iniciado uma vez e só era gravado ao
+ * sair do campo. A revisão achou três jeitos de isso custar dado:
+ * - com a ficha de A aberta, tocar na linha de B mostrava os textos de A sob o
+ *   cabeçalho de B — e sair do campo gravava os textos de A POR CIMA dos de B;
+ * - tocar no campo e sair sem mexer gravava o texto da tela, que podia ser
+ *   mais velho que uma leitura da letra chegada no meio tempo;
+ * - quem digitava e via o app fechar (bateria, outro app por cima) perdia o
+ *   que tinha digitado.
+ *
+ * Agora só se grava o que ELE digitou, e isso vai pro banco sozinho: 600 ms
+ * depois da última tecla, ao sair do campo, ao fechar a ficha e quando o app
+ * vai pro fundo. E cada registro tem a sua ficha (`key` na Central): o texto
+ * de um nunca aparece debaixo do nome do outro.
+ */
+function useCampoDaFicha(doItem: string, guardar: (digitado: string) => void) {
+  const [valor, setValor] = useState(doItem)
+  /** O que foi digitado e ainda não foi pro banco. */
+  const pendente = useRef<string | null>(null)
+  const focado = useRef(false)
+  /** Ele digitou alguma coisa desde que tocou no campo? */
+  const digitou = useRef(false)
+  const doItemRef = useRef(doItem)
+  const espera = useRef<number | undefined>(undefined)
+  // A gravação compara com o registro COMO ESTÁ AGORA, não como estava quando
+  // a tecla foi apertada.
+  const guardarRef = useRef(guardar)
+  useEffect(() => {
+    guardarRef.current = guardar
+  })
+
+  // Mudou por fora (a leitura da letra terminou com a ficha aberta) e ele não
+  // está mexendo no campo: mostra o que chegou.
+  useEffect(() => {
+    doItemRef.current = doItem
+    if (!focado.current && pendente.current === null) setValor(doItem)
+  }, [doItem])
+
+  const descarregar = useCallback(() => {
+    window.clearTimeout(espera.current)
+    const digitado = pendente.current
+    if (digitado === null) return
+    pendente.current = null
+    guardarRef.current(digitado)
+  }, [])
+
+  useEffect(() => {
+    const aoEsconder = () => {
+      if (document.visibilityState === 'hidden') descarregar()
+    }
+    window.addEventListener('pagehide', descarregar)
+    document.addEventListener('visibilitychange', aoEsconder)
+    return () => {
+      window.removeEventListener('pagehide', descarregar)
+      document.removeEventListener('visibilitychange', aoEsconder)
+      // A ficha fechou (ou trocou de registro) com algo ainda na espera.
+      descarregar()
+    }
+  }, [descarregar])
+
+  return {
+    value: valor,
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      setValor(e.target.value)
+      pendente.current = e.target.value
+      digitou.current = true
+      window.clearTimeout(espera.current)
+      espera.current = window.setTimeout(descarregar, 600)
+    },
+    onFocus: () => {
+      focado.current = true
+      digitou.current = false
+    },
+    onBlur: () => {
+      focado.current = false
+      // Tocou e saiu sem digitar: o que vale é o registro, que pode ter
+      // mudado enquanto o campo estava aberto.
+      if (!digitou.current) setValor(doItemRef.current)
+      descarregar()
+    },
+  }
 }

@@ -1,4 +1,5 @@
 import { avisarFalhaDeGravacao, ehFalhaDoBanco } from './db/falhas'
+import { loadPrefs, savePrefs } from './state/prefs'
 import { Component } from 'react'
 import type { ErrorInfo, ReactNode } from 'react'
 
@@ -50,6 +51,7 @@ export function showCrash(error: unknown, origem: string): void {
       <pre class="crash-msg"></pre>
       <div class="crash-actions">
         <button type="button" class="crash-reload">Tentar de novo</button>
+        <button type="button" class="crash-inicio">Abrir na primeira folha</button>
       </div>
       <p class="crash-foot">Se acontecer de novo, mande este texto pra quem cuida do app.</p>
     </div>
@@ -57,6 +59,15 @@ export function showCrash(error: unknown, origem: string): void {
   const pre = tela.querySelector('.crash-msg')
   if (pre) pre.textContent = `${origem}: ${mensagem}`
   tela.querySelector('.crash-reload')?.addEventListener('click', () => window.location.reload())
+  /*
+   * A saída do laço. O app reabre na última folha; se é ELA que derruba o
+   * desenho, "Tentar de novo" cai no mesmo tropeço pra sempre. Esquecer o
+   * último lugar abre o app pelo começo — nenhum dado é tocado.
+   */
+  tela.querySelector('.crash-inicio')?.addEventListener('click', () => {
+    savePrefs({ ...loadPrefs(), ultimoLugar: undefined })
+    window.location.reload()
+  })
   document.body.appendChild(tela)
 }
 
