@@ -190,6 +190,26 @@ const casos: Caso[] = [
       return null
     },
   },
+  {
+    nome: 'avançar gasta o passo: avançar de novo traz o próximo, e no fim não traz nada',
+    rodar() {
+      const a = traco('a')
+      const b = traco('b')
+      let h = push(push(EMPTY_HISTORY, drawStep(a)), drawStep(b))
+      h = undo(h)!.history
+      h = undo(h)!.history
+      // Dois passos desfeitos, na ordem: primeiro 'a', depois 'b'.
+      const um = redo(h)
+      if (!um) return 'não havia o que avançar'
+      if (um.step.antes.remove[0] !== 'a') return `avançou ${um.step.antes.remove[0]} primeiro, esperava a`
+      if (um.history.desfeitos.length !== 1) return `sobraram ${um.history.desfeitos.length} passo(s) pra avançar, esperava 1`
+      const dois = redo(um.history)
+      if (!dois) return 'o segundo avançar não achou o passo de b'
+      if (dois.step.antes.remove[0] !== 'b') return `avançou ${dois.step.antes.remove[0]}, esperava b`
+      if (redo(dois.history) !== null) return 'avançou além do que tinha sido desfeito'
+      return dois.history.feitos.length === 2 ? null : `o voltar ficou com ${dois.history.feitos.length} passo(s)`
+    },
+  },
 ]
 
 console.log('\n  Voltar e avançar — a folha nunca num estado que não existiu\n')

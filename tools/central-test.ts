@@ -14,6 +14,7 @@ import type { Item, ItemKind } from '../src/domain/types'
 import {
   DEFAULT_FILTER,
   dueBucket,
+  fimDoDia,
   groupByDue,
   inicioDoDia,
   normalize,
@@ -246,6 +247,25 @@ casos.push(
       for (const [prazo, esperado] of casos) {
         const veio = dueBucket(item({ dueAt: prazo }), HOJE)
         if (veio !== esperado) return `prazo ${prazo} caiu em ${veio}, esperava ${esperado}`
+      }
+      return null
+    },
+  },
+  {
+    nome: 'o último instante de hoje ainda é hoje, e o de amanhã ainda é amanhã',
+    rodar() {
+      const fimHoje = fimDoDia(HOJE)
+      const casos: [number, string][] = [
+        [fimHoje, 'hoje'],
+        [fimHoje + 1, 'amanha'],
+        [fimHoje + DIA, 'amanha'],
+        [fimHoje + DIA + 1, 'semana'],
+        [fimHoje + 7 * DIA, 'semana'],
+        [fimHoje + 7 * DIA + 1, 'depois'],
+      ]
+      for (const [prazo, esperado] of casos) {
+        const veio = dueBucket(item({ dueAt: prazo }), HOJE)
+        if (veio !== esperado) return `fim de hoje ${prazo - fimHoje >= 0 ? '+' : ''}${prazo - fimHoje} ms caiu em ${veio}, esperava ${esperado}`
       }
       return null
     },

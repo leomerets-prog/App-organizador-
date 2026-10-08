@@ -822,6 +822,33 @@ let initOnce: Promise<void> | null = null
 const initialPrefs = loadPrefs()
 applyTheme(initialPrefs.theme)
 
+/**
+ * Nenhuma folha aberta — e nada da folha que estava aberta fica pra trás.
+ *
+ * Apagar a última seção ou o último bloco zerava só uma parte: a tinta, as
+ * zonas, os itens e o passo de ↶ da folha apagada continuavam na memória. A
+ * tela mostrava o que não existia mais, e um ↶ podia regravar no banco a
+ * tinta de uma folha que já tinha saído dele.
+ */
+function semFolhaAberta(get: () => AppState): Partial<AppState> {
+  lastErase = null
+  eraseSession = null
+  return {
+    activePageId: null,
+    strokes: [],
+    zones: [],
+    items: [],
+    recordings: [],
+    images: [],
+    flowcharts: [],
+    selection: new Set(),
+    selectedImageId: null,
+    selectedZoneId: null,
+    history: forPage(get().history, null),
+    flowHistory: SEM_HISTORIA,
+  }
+}
+
 function persist(get: () => AppState): void {
   const s = get()
   savePrefs({
@@ -978,14 +1005,14 @@ export const useStore = create<AppState>((set, get) => {
     const sections = await repo.listSections(id)
     set({ activeNotebookId: id, sections, activeSectionId: null, pages: [] })
     if (sections[0]) await get().selectSection(sections[0].id)
-    else set({ activePageId: null, strokes: [], zones: [], items: [], recordings: [], images: [], flowcharts: [] })
+    else set(semFolhaAberta(get))
   },
 
   async selectSection(id) {
     const pages = await repo.listPages(id)
     set({ activeSectionId: id, pages })
     if (pages[0]) await get().selectPage(pages[0].id)
-    else set({ activePageId: null, strokes: [], zones: [], items: [], recordings: [], images: [], flowcharts: [] })
+    else set(semFolhaAberta(get))
   },
 
   async selectPage(id) {
@@ -1141,7 +1168,7 @@ export const useStore = create<AppState>((set, get) => {
     set({ pages })
     if (get().activePageId === id) {
       if (pages[0]) await get().selectPage(pages[0].id)
-      else set({ activePageId: null, strokes: [], zones: [], items: [], recordings: [], images: [], flowcharts: [] })
+      else set(semFolhaAberta(get))
     }
   },
 
@@ -1151,7 +1178,7 @@ export const useStore = create<AppState>((set, get) => {
     set({ sections })
     if (get().activeSectionId === id) {
       if (sections[0]) await get().selectSection(sections[0].id)
-      else set({ activeSectionId: null, pages: [], activePageId: null, strokes: [] })
+      else set({ activeSectionId: null, pages: [], ...semFolhaAberta(get) })
     }
   },
 
@@ -1161,7 +1188,7 @@ export const useStore = create<AppState>((set, get) => {
     set({ notebooks })
     if (get().activeNotebookId === id) {
       if (notebooks[0]) await get().selectNotebook(notebooks[0].id)
-      else set({ activeNotebookId: null, sections: [], pages: [], activePageId: null })
+      else set({ activeNotebookId: null, sections: [], activeSectionId: null, pages: [], ...semFolhaAberta(get) })
     }
   },
 

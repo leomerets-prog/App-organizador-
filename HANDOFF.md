@@ -1023,10 +1023,25 @@ descartável algo que o usuário fez**.
   derruba o desenho: o app reabre nela e cai de novo. "Abrir na primeira
   folha" esquece o último lugar e recarrega, sem tocar em dado nenhum.
 
+- **Apagar a última seção ou o último bloco** deixava a tinta, os itens e o
+  passo de ↶ da folha apagada na memória — e um ↶ podia regravá-los no banco.
+  `semFolhaAberta()` no store zera tudo o que é da folha, nos cinco lugares em
+  que o app fica sem folha aberta.
+
 **A regra:** todo caminho automático (leitura, sincronização, voltar, remontar)
 mexe SÓ no que é dele. O resto do registro vem do estado de AGORA, nunca de uma
 cópia tirada antes da espera. `tools/buracos-test.ts` tem um caso por regra, e
 cada um foi conferido dos dois lados: com o conserto apagado, ele falha.
+
+**Os testes foram testados.** Um agente plantou 166 defeitos realistas, um de
+cada vez (trocar `<` por `<=`, esquecer um campo, perder um byte por pedaço do
+áudio salvo), e rodou os testes contra cada um. 73 passavam despercebidos;
+agora 164 são pegos e os 2 restantes não mudam nada observável. Vieram daí
+quatro suítes novas — `prefs`, `viewport` (onde a tinta cai em relação à
+caneta), `geometry` e `export` (o arquivo salvo é conferido byte a byte, com um
+Android de mentira em `tools/capacitor-fake.ts`). O roteiro de mutação fica fora
+do repositório; o jeito de refazer: uma lista `[arquivo, trecho, troca]`,
+aplicar numa cópia, rodar as suítes, desfazer.
 
 **Sobre os agentes**: rodar oito de uma vez estoura o limite de uso da sessão
 no meio do trabalho — duas vezes. Em ondas de até três, termina. O modelo vai
@@ -1078,6 +1093,7 @@ src/
   components/  folha, navegação, barras, painel
   lib/         geometria
 tools/         testes de rabisco, borracha, campos, zonas, Central, áudio,
+               preferências, janela (zoom/rolagem), geometria, salvar arquivo,
                fluxograma, voltar/avançar; a compilação do plugin nativo contra
                sombras (check-java) e a medição do caminho do áudio com tom
                puro (resample-test + ReamostraTest); e o roteiro que abre o app
@@ -1321,10 +1337,6 @@ folha ajustada como modelo — é a próxima etapa 2.
 de uma gravação, a tela de tropeço cobre o botão Parar. O áudio não se perde —
 os pedaços já estão no banco e "Tentar de novo" recupera a gravação — mas a
 gravação para ali.
-
-**Apagar o último bloco ou seção deixa a folha na memória** até trocar de tela.
-Nada se perde (o que sobra na tela é o que acabou de ser apagado), mas a tela
-mostra uma folha que não existe mais. Achado da revisão, ainda não consertado.
 
 **A gravação em pedaços não foi vista no tablet.** Gravar pedaço por pedaço,
 recuperar depois de recarregar e o microfone que cai foram medidos no Chromium.

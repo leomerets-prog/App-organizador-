@@ -13,6 +13,7 @@
 import type { Item, Stroke, Zone } from '../src/domain/types'
 import { boundsOf } from '../src/lib/geometry'
 import { detectFields, planFieldSync } from '../src/items/detect'
+import type { DetectedField } from '../src/items/detect'
 
 // ─── Cenário ─────────────────────────────────────────────────────────────────
 
@@ -79,6 +80,14 @@ function itemDe(id: string, strokeIds: string[], extra: Partial<Item> = {}): Ite
     updatedAt: 1,
     ...extra,
   }
+}
+
+/** Um campo montado à mão, quando a posição da tinta não é o que se testa. */
+function campoFeito(
+  strokeIds: string[],
+  bounds: DetectedField['bounds'] = { minX: 40, minY: 200, maxX: 160, maxY: 230 },
+): DetectedField {
+  return { zoneId: TAREFAS.id, kind: 'tarefa', strokeIds, bounds }
 }
 
 // ─── Casos ───────────────────────────────────────────────────────────────────
@@ -274,6 +283,132 @@ const casos: { nome: string; rodar: () => string | null }[] = [
         return 'a segunda passada mexeu no banco sem nada ter mudado'
       }
       return null
+    },
+  },
+  // ─── O que a mutação mostrou que faltava ───────────────────────────────────
+
+  {
+    nome: 'letra inclinada com acento alto continua uma linha só, sem campo fantasma',
+    rodar() {
+      // A linha desce da esquerda pra direita (a segunda palavra fica mais
+      // baixa que a primeira) e o acento sobe acima da primeira. Separado, o
+      // acento viraria uma tarefa só com ele.
+      const campos = detectFields(
+        [palavra('acento', 60, 224, 20, 9), palavra('b', 40, 239, 120, 26), palavra('c', 180, 255, 120, 19)],
+        ZONAS,
+      )
+      if (campos.length !== 1) return `esperava 1 campo, veio ${campos.length}: ${campos.map((c) => c.strokeIds.join('+')).join(' | ')}`
+      return campos[0].strokeIds.length === 3 ? null : 'o campo perdeu traços'
+    },
+  },
+  {
+    nome: 'os campos saem de cima pra baixo na folha, qualquer que seja a ordem da tinta',
+    rodar() {
+      // Tinta da anotação (embaixo) listada antes da tinta das tarefas (em cima).
+      const campos = detectFields(
+        [palavra('embaixo', 40, 1300, 120, 30, NOTA.id), palavra('em-cima', 40, 200)],
+        ZONAS,
+      )
+      const ordem = campos.map((c) => c.strokeIds[0]).join()
+      return ordem === 'em-cima,embaixo' ? null : `ordem: ${ordem}`
+    },
+  },
+  {
+    nome: 'o que se desenha na zona de fluxograma não vira tarefa nem nota',
+    rodar() {
+      // Ali a leitura é o desenho inteiro (flow/), não uma linha por traço:
+      // uma caixa e a seta ao lado, na mesma altura, virariam dois itens sem sentido.
+      const FLUXO: Zone = {
+        id: 'z-fluxo',
+        pageId: 'pg',
+        kind: 'fluxograma',
+        label: 'Fluxograma',
+        rect: { x: 0, y: 0.6, w: 1, h: 0.4 },
+      }
+      const campos = detectFields(
+        [palavra('caixa', 40, 1200, 160, 90, FLUXO.id), palavra('seta', 260, 1230, 120, 20, FLUXO.id)],
+        [TAREFAS, FLUXO],
+      )
+      return campos.length === 0 ? null : `saíram ${campos.length} campo(s) do fluxograma`
+    },
+  },
+
+  // ─── Qual item é de qual campo (a ficha do usuário vai junto) ──────────────
+
+  {
+    nome: 'campo com dois candidatos fica com o que tem MAIS tinta em comum',
+    rodar() {
+      const campo = campoFeito(['a', 'b', 'c'])
+      const pouco = itemDe('pouco', ['a'], { createdAt: 1 })
+      const muito = itemDe('muito', ['a', 'b', 'c'], { createdAt: 9, bounds: campo.bounds })
+      const plano = planFieldSync([campo], [pouco, muito])
+      if (plano.iguais.map((i) => i.id).join() !== 'muito') return `ficou com ${[...plano.iguais, ...plano.update.map((u) => u.item)].map((i) => i.id).join()}`
+      return plano.remove.join() === 'pouco' ? null : `removeu: ${plano.remove.join() || 'ninguém'}`
+    },
+  },
+  {
+    nome: 'empate de tinta cai no item MAIS ANTIGO: é o que o usuário já trabalhou',
+    rodar() {
+      const campo = campoFeito(['a'])
+      const antigo = itemDe('antigo', ['a'], { createdAt: 1, bounds: campo.bounds })
+      const novo = itemDe('novo', ['a'], { createdAt: 2, bounds: campo.bounds })
+      // Nas duas ordens de entrada: o resultado não pode depender da lista.
+      for (const lista of [[antigo, novo], [novo, antigo]]) {
+        const plano = planFieldSync([campo], lista)
+        if (plano.iguais.map((i) => i.id).join() !== 'antigo') {
+          return `ficou com ${plano.iguais.map((i) => i.id).join() || 'ninguém'}, esperava antigo`
+        }
+        if (plano.remove.join() !== 'novo') return `removeu ${plano.remove.join() || 'ninguém'}, esperava novo`
+      }
+      return null
+    },
+  },
+  {
+    nome: 'um item não fica com dois campos: o segundo vira item novo',
+    rodar() {
+      // A linha foi partida em duas colunas: o item antigo cobria as duas.
+      const f1 = campoFeito(['a'], { minX: 0, minY: 0, maxX: 10, maxY: 10 })
+      const f2 = campoFeito(['b'], { minX: 500, minY: 0, maxX: 510, maxY: 10 })
+      const velho = itemDe('velho', ['a', 'b'])
+      const plano = planFieldSync([f1, f2], [velho])
+      const usos = plano.update.length + plano.iguais.length
+      if (usos !== 1) return `o item foi usado ${usos} vez(es)`
+      return plano.create.length === 1 ? null : `criou ${plano.create.length} item(ns) novo(s), esperava 1`
+    },
+  },
+  {
+    nome: 'campo que mudou de zona atualiza o item, que não pode ficar na zona velha',
+    rodar() {
+      const campo = campoFeito(['a'])
+      const noutraZona = itemDe('i1', ['a'], { zoneId: 'z-pendencias', bounds: campo.bounds })
+      const plano = planFieldSync([campo], [noutraZona])
+      if (plano.iguais.length !== 0) return 'deu o item por igual, mesmo estando em outra zona'
+      return plano.update.length === 1 ? null : 'não atualizou o item'
+    },
+  },
+  {
+    nome: 'cada lado da caixa que muda faz o item ser atualizado',
+    rodar() {
+      const campo = campoFeito(['a'], { minX: 10, minY: 20, maxX: 110, maxY: 60 })
+      for (const lado of ['minX', 'minY', 'maxX', 'maxY'] as const) {
+        const item = itemDe('i1', ['a'], { bounds: { ...campo.bounds, [lado]: campo.bounds[lado] + 7 } })
+        const plano = planFieldSync([campo], [item])
+        if (plano.update.length !== 1 || plano.iguais.length !== 0) {
+          return `o item cresceu/encolheu no ${lado} e a caixa dele não foi atualizada`
+        }
+      }
+      const igual = planFieldSync([campo], [itemDe('i1', ['a'], { bounds: campo.bounds })])
+      return igual.iguais.length === 1 && igual.update.length === 0 ? null : 'mexeu num item que já estava certo'
+    },
+  },
+  {
+    nome: 'item que perdeu um traço (o resto continua) é atualizado',
+    rodar() {
+      const campo = campoFeito(['a', 'b'])
+      const item = itemDe('i1', ['a', 'b', 'c'], { bounds: campo.bounds })
+      const plano = planFieldSync([campo], [item])
+      if (plano.iguais.length !== 0) return 'deu por igual um item com traço a mais'
+      return plano.update.length === 1 ? null : 'não atualizou o item'
     },
   },
 ]

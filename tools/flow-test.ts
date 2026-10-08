@@ -1214,6 +1214,231 @@ casos.push(
   },
 )
 
+// ── O que a remontagem não pode esquecer (achado pela mutação) ─────────────
+
+/** Uma seta com TUDO que o usuário pode ter escolhido nela. */
+function setaCompleta(): Flowchart {
+  return {
+    id: 'ch',
+    pageId: 'pg',
+    soltos: 0,
+    updatedAt: 1,
+    nodes: [],
+    edges: [
+      {
+        id: 'e1',
+        from: 'a',
+        to: 'b',
+        label: 'sim',
+        direcao: 'ponta',
+        saida: 'direita',
+        entrada: 'cima',
+        ponta: 'nenhuma',
+        saidaDesvio: 0.25,
+        entradaDesvio: -0.3,
+        dobra: 0.7,
+      },
+    ],
+  }
+}
+
+/** A leitura de duas caixas, a e b, e da seta e1 ligando as duas. */
+function leituraComSeta(): ReturnType<typeof buildGraph> {
+  const g = leituraDe(['a', 'b'])
+  g.edges = [{ id: 'e1', from: 'a', to: 'b', strokeId: 'e1', labelStrokeIds: [], direcao: 'ponta' }]
+  return g
+}
+
+casos.push(
+  {
+    nome: 'ler de novo guarda tudo que ele escolheu na seta: nome, portas, ponta, encostos e dobra',
+    rodar() {
+      const e = mergeFlowchart(setaCompleta(), leituraComSeta()).edges.find((x) => x.id === 'e1')
+      if (!e) return 'a seta sumiu'
+      if (e.label !== 'sim') return `o texto da seta virou "${e.label}"`
+      if (e.saida !== 'direita') return `o lado de saída virou ${e.saida}`
+      if (e.entrada !== 'cima') return `o lado de entrada virou ${e.entrada}`
+      if (e.ponta !== 'nenhuma') return `a ponta virou ${e.ponta}`
+      if (e.saidaDesvio !== 0.25) return `o encosto na saída virou ${e.saidaDesvio}`
+      if (e.entradaDesvio !== -0.3) return `o encosto na entrada virou ${e.entradaDesvio}`
+      return e.dobra === 0.7 ? null : `a dobra virou ${e.dobra}`
+    },
+  },
+  {
+    nome: 'seta ligada a uma caixa que sumiu do desenho sai, em vez de ficar pendurada',
+    rodar() {
+      const g = leituraDe(['a'])
+      g.edges = [{ id: 'e1', from: 'a', to: 'sumiu', strokeId: 'e1', labelStrokeIds: [], direcao: 'ponta' }]
+      const r = mergeFlowchart(undefined, g)
+      return r.edges.length === 0 ? null : `ficou a seta ${r.edges[0].from} → ${r.edges[0].to}`
+    },
+  },
+  {
+    nome: 'caixa redesenhada noutro lugar da folha acompanha a tinta nova',
+    rodar() {
+      const antes = editado()
+      const g = leituraDe(['a'])
+      g.nodes[0].bounds = { minX: 300, minY: 400, maxX: 380, maxY: 450 }
+      const a = mergeFlowchart(antes, g).nodes.find((n) => n.id === 'a')
+      if (a?.bounds.minX !== 300 || a.bounds.minY !== 400) return `a caixa ficou apontando pra ${JSON.stringify(a?.bounds)}`
+      // E o que ele fez à mão continua: só a referência de onde ela está no papel muda.
+      return a.label === 'Nome que eu corrigi' && a.pos?.x === 500 ? null : 'a releitura levou o nome ou a posição junto'
+    },
+  },
+  {
+    nome: 'a seta invertida à mão continua invertida em TODA releitura, não só na primeira',
+    rodar() {
+      const antes: Flowchart = {
+        ...setaCompleta(),
+        edges: [{ id: 'e1', from: 'b', to: 'a', label: '', direcao: 'mao' }],
+      }
+      const primeira = mergeFlowchart(antes, leituraComSeta())
+      const e1 = primeira.edges.find((x) => x.id === 'e1')
+      if (e1?.direcao !== 'mao') return `depois de 1 releitura a direção virou ${e1?.direcao}`
+      // O que o app grava na primeira é o que a segunda recebe como "anterior".
+      const segunda = mergeFlowchart({ ...antes, edges: primeira.edges }, leituraComSeta())
+      const e2 = segunda.edges.find((x) => x.id === 'e1')
+      if (e2?.from !== 'b' || e2?.to !== 'a') return `depois de 2 releituras a seta apontava ${e2?.from} → ${e2?.to}`
+      return e2.direcao === 'mao' ? null : `a marca de direção manual virou ${e2.direcao}`
+    },
+  },
+
+  // ── Voltar e avançar: o que conta como passo, e de quem é a pilha ─────────
+  {
+    nome: 'a pilha de outro fluxograma é descartada ao registrar um passo neste',
+    rodar() {
+      const outro: Flowchart = { ...editado(), id: 'outro' }
+      const daqui = editado()
+      const pilha = pushUndo(pushUndo(SEM_HISTORIA, outro), daqui)
+      if (pilha.chartId !== 'ch') return `a pilha ficou de "${pilha.chartId}"`
+      if (pilha.feitos.length !== 1) return `a pilha tem ${pilha.feitos.length} passo(s), esperava só o deste desenho`
+      return pilha.feitos[0].id === 'ch' ? null : 'o passo guardado é de outro desenho'
+    },
+  },
+  {
+    nome: 'voltar duas vezes e avançar duas vezes percorre os mesmos desenhos, na ordem',
+    rodar() {
+      const base = editado()
+      const s0 = base
+      const s1 = movido(base, 600)
+      const s2 = movido(base, 700)
+      let pilha = pushUndo(pushUndo(SEM_HISTORIA, s0), s1)
+      const x = (c: Flowchart) => c.nodes.find((n) => n.id === 'a')?.pos?.x
+      const v1 = undoFlow(pilha, s2)!
+      const v2 = undoFlow(v1.history, v1.chart)!
+      if (x(v1.chart) !== 600 || x(v2.chart) !== 500) return `voltou pra ${x(v1.chart)} e ${x(v2.chart)}, esperava 600 e 500`
+      pilha = v2.history
+      const r1 = redoFlow(pilha, v2.chart)!
+      if (x(r1.chart) !== 600) return `avançou pra ${x(r1.chart)}, esperava 600`
+      if (r1.history.desfeitos.length !== 1) return `sobraram ${r1.history.desfeitos.length} passo(s) pra avançar, esperava 1`
+      const r2 = redoFlow(r1.history, r1.chart)!
+      if (x(r2.chart) !== 700) return `o segundo avançar foi pra ${x(r2.chart)}, esperava 700 (repetiu o anterior?)`
+      return redoFlow(r2.history, r2.chart) === null ? null : 'avançou além do que tinha sido desfeito'
+    },
+  },
+  {
+    nome: 'cada coisa que ele escolhe numa caixa ou seta conta como passo',
+    rodar() {
+      const a = editado()
+      const comNo = (mudar: (n: Flowchart['nodes'][number]) => Flowchart['nodes'][number]): Flowchart => ({
+        ...a,
+        nodes: a.nodes.map((n) => (n.id === 'a' ? mudar(n) : n)),
+      })
+      const nodes: [string, Flowchart][] = [
+        ['cor', comNo((n) => ({ ...n, cor: 'roxo' }))],
+        ['porte da letra', comNo((n) => ({ ...n, porte: 'titulo' }))],
+        ['tamanho', comNo((n) => ({ ...n, tamanho: { w: 200, h: 90 } }))],
+        ['forma', comNo((n) => ({ ...n, kind: 'terminal' }))],
+        ['nome', comNo((n) => ({ ...n, label: 'outro nome' }))],
+      ]
+      for (const [o_que, depois] of nodes) {
+        if (!mudouFlow(a, depois)) return `trocar ${o_que} não contou como mudança`
+      }
+      const s = setaCompleta()
+      const comSeta = (extra: Partial<Flowchart['edges'][number]>): Flowchart => ({
+        ...s,
+        edges: s.edges.map((e) => ({ ...e, ...extra })),
+      })
+      const setas: [string, Flowchart][] = [
+        ['o lado de saída', comSeta({ saida: 'baixo' })],
+        ['o lado de entrada', comSeta({ entrada: 'esquerda' })],
+        ['a ponta', comSeta({ ponta: 'seta' })],
+        ['o texto', comSeta({ label: 'não' })],
+        ['o encosto', comSeta({ saidaDesvio: 0.5 })],
+      ]
+      for (const [o_que, depois] of setas) {
+        if (!mudouFlow(s, depois)) return `trocar ${o_que} da seta não contou como mudança`
+      }
+      return null
+    },
+  },
+  {
+    nome: 'ajuste fino da dobra da seta, de 30% pra 40%, vira passo',
+    rodar() {
+      const s = setaCompleta()
+      const ajustada: Flowchart = { ...s, edges: s.edges.map((e) => ({ ...e, dobra: 0.3 })) }
+      const maisUm: Flowchart = { ...s, edges: s.edges.map((e) => ({ ...e, dobra: 0.4 })) }
+      if (!mudouFlow(ajustada, maisUm)) return 'mexer de 0,3 pra 0,4 não contou como mudança'
+      const quase: Flowchart = { ...s, edges: s.edges.map((e) => ({ ...e, dobra: 0.3004 })) }
+      return mudouFlow(ajustada, quase) ? 'uma diferença de 0,0004 contou como mudança' : null
+    },
+  },
+  {
+    nome: 'editar o título ou o subtítulo do fluxograma vira passo',
+    rodar() {
+      const a = editado()
+      if (!mudouFlow(a, { ...a, titulo: 'Aprovação de compra' })) return 'o título novo não contou'
+      if (!mudouFlow(a, { ...a, subtitulo: 'versão 2' })) return 'o subtítulo novo não contou'
+      const comTitulo = { ...a, titulo: 'Aprovação de compra' }
+      return mudouFlow(comTitulo, { ...comTitulo, titulo: 'Aprovação de compras' }) ? null : 'trocar o título não contou'
+    },
+  },
+  {
+    nome: 'a remontagem devolver as caixas e setas em outra ordem não é edição',
+    rodar() {
+      const a = editado()
+      const s = setaCompleta()
+      const duas: Flowchart = {
+        ...a,
+        edges: [...s.edges, { id: 'e0', from: 'a', to: 'minha', label: '', direcao: 'ordem' }],
+      }
+      const emOutraOrdem: Flowchart = {
+        ...duas,
+        nodes: [...duas.nodes].reverse(),
+        edges: [...duas.edges].reverse(),
+      }
+      return mudouFlow(duas, emOutraOrdem) ? 'só a ordem mudou e contou como edição' : null
+    },
+  },
+  {
+    nome: 'cada passo se nomeia pelo que mudou: seta invertida, lado, ponta, dobra, encosto, nome',
+    rodar() {
+      const s = setaCompleta()
+      const seta = (extra: Partial<Flowchart['edges'][number]>): Flowchart => ({
+        ...s,
+        edges: s.edges.map((e) => ({ ...e, ...extra })),
+      })
+      const casos: [string, Flowchart, string][] = [
+        ['invertida', seta({ from: 'b', to: 'a' }), 'seta invertida'],
+        ['lado', seta({ saida: 'baixo' }), 'lado da seta'],
+        ['ponta', seta({ ponta: 'seta' }), 'ponta da seta'],
+        ['dobra', seta({ dobra: 0.2 }), 'dobra da seta'],
+        ['encosto', seta({ entradaDesvio: 0.1 }), 'onde a seta encosta'],
+        ['nome', seta({ label: 'não' }), 'nome da seta'],
+      ]
+      for (const [o_que, depois, esperado] of casos) {
+        const veio = rotuloFlow(s, depois)
+        if (veio !== esperado) return `${o_que}: o passo se chamou "${veio}", esperava "${esperado}"`
+      }
+      const a = editado()
+      const comPorte: Flowchart = { ...a, nodes: a.nodes.map((n) => (n.id === 'a' ? { ...n, porte: 'titulo' as const } : n)) }
+      const comTitulo = { ...a, titulo: 'Novo' }
+      if (rotuloFlow(a, comPorte) !== 'porte da letra') return `porte: "${rotuloFlow(a, comPorte)}"`
+      return rotuloFlow(a, comTitulo) === 'título' ? null : `título: "${rotuloFlow(a, comTitulo)}"`
+    },
+  },
+)
+
 console.log('\n  Fluxograma — do rabisco ao desenho estruturado\n')
 let falhas = 0
 for (const caso of casos) {

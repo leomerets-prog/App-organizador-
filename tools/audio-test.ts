@@ -1,7 +1,7 @@
 import { limpar } from '../src/audio/export'
 import { adicionar, marcaDe, relogio, remover, renomear } from '../src/audio/marcas'
 import { MAX_DICAS, palavrasDeDica } from '../src/audio/dicas'
-import { aceitaDoReconhecedor, comCorrecao, doReconhecedor } from '../src/audio/transcricao'
+import { aceitaDoReconhecedor, comCorrecao, doReconhecedor, juntarTrechos } from '../src/audio/transcricao'
 import type { Marca } from '../src/domain/types'
 import {
   formatLength,
@@ -391,6 +391,77 @@ const casos: Caso[] = [
       const t = comCorrecao(undefined, 'escrito do zero', 5000)
       if (t.texto !== 'escrito do zero') return `o texto veio ${t.texto}`
       return t.corrigida === true && t.em === 5000 ? null : 'não ficou marcado como corrigido'
+    },
+  },
+  // ── O que escapou dos casos acima (achado pela mutação) ───────────────────
+  {
+    nome: 'posição guardada ilegível volta ao começo, mesmo sem duração conhecida',
+    rodar() {
+      // Sem duração o clamp não age: o que sobra é recusar o que não é número.
+      for (const lixo of [NaN, Infinity, -Infinity]) {
+        const de = resumeAt(lixo, 0)
+        if (de !== 0) return `${lixo} sem duração virou ${de}, esperava 0`
+      }
+      return resumeAt(42_000, 0) === 42_000 ? null : 'posição boa sem duração foi perdida'
+    },
+  },
+  {
+    nome: 'arrastar a barra além das pontas não empurra o áudio pra fora',
+    rodar() {
+      const alem = seekTarget(1.7, 60_000)
+      if (alem !== 60_000) return `além do fim foi pra ${alem}, esperava 60000`
+      const antes = seekTarget(-0.4, 60_000)
+      if (antes !== 0) return `antes do começo foi pra ${antes}, esperava 0`
+      return seekTarget(1, 60_000) === 60_000 ? null : 'a ponta direita não chegou ao fim'
+    },
+  },
+  {
+    nome: 'marcas a exatos 1,5 s de distância são duas marcas; a menos que isso, uma',
+    rodar() {
+      let marcas = adicionar([], { id: 'a', ms: 10_000, texto: '' })
+      marcas = adicionar(marcas, { id: 'b', ms: 11_500, texto: '' })
+      if (marcas.length !== 2) return `1500 ms de distância deram ${marcas.length} marca(s), esperava 2`
+      const colada = adicionar(marcas, { id: 'c', ms: 12_999, texto: '' })
+      if (colada.length !== 2) return 'marca a 1499 ms de outra entrou mesmo assim'
+      return null
+    },
+  },
+  {
+    nome: 'a marca que vale no instante exato dela já é ela mesma',
+    rodar() {
+      const marcas = [
+        { id: 'a', ms: 10_000, texto: '' },
+        { id: 'b', ms: 40_000, texto: '' },
+      ]
+      const no = marcaDe(marcas, 40_000)
+      if (no?.id !== 'b') return `em 40000 valia ${no?.id}, esperava b`
+      const antes = marcaDe(marcas, 39_999)
+      return antes?.id === 'a' ? null : `em 39999 valia ${antes?.id}, esperava a`
+    },
+  },
+  {
+    nome: 'lista de marcas fora de ordem ainda acha a marca certa',
+    rodar() {
+      // A lista guardada não é garantia de ordem (veio de um backup, de outra versão).
+      const marcas = [
+        { id: 'tarde', ms: 50_000, texto: '' },
+        { id: 'cedo', ms: 10_000, texto: '' },
+        { id: 'meio', ms: 30_000, texto: '' },
+      ]
+      const a = marcaDe(marcas, 35_000)
+      if (a?.id !== 'meio') return `aos 35 s valia ${a?.id}, esperava meio`
+      const b = marcaDe(marcas, 60_000)
+      if (b?.id !== 'tarde') return `aos 60 s valia ${b?.id}, esperava tarde`
+      const c = marcaDe(marcas, 12_000)
+      return c?.id === 'cedo' ? null : `aos 12 s valia ${c?.id}, esperava cedo`
+    },
+  },
+  {
+    nome: 'trecho vazio no meio não deixa espaço duplo no texto corrido',
+    rodar() {
+      const t = (texto: string) => ({ inicioMs: 0, fimMs: 1, texto })
+      const corrido = juntarTrechos([t('primeiro'), t(''), t('   '), t('último')])
+      return corrido === 'primeiro último' ? null : `ficou "${corrido}"`
     },
   },
 ]

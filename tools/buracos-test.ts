@@ -246,6 +246,23 @@ const casos: Caso[] = [
         : 'pôs a correção debaixo de outra marca'
     },
   },
+  {
+    nome: 'o texto corrido e o carimbo de corrigida acompanham a correção do editor',
+    rodar() {
+      // O .txt salvo lê o texto corrido, e re-transcrever só respeita o que
+      // está marcado como corrigido: se algum dos dois não acompanha, a
+      // correção parece salva e some na próxima transcrição ou no arquivo.
+      const base: TrechoFalado[] = [
+        { inicioMs: 0, fimMs: 1, texto: 'abertura', marcaId: 'm1' },
+        { inicioMs: 1, fimMs: 2, texto: 'orsamento', marcaId: 'm2' },
+      ]
+      const atual = doReconhecedor('abertura orsamento', { trechos: base })
+      const r = comTrechosEditados(atual, base, ['abertura', 'orçamento'])
+      if (r === 'mudou') return 'recusou sem conflito'
+      if (r.texto !== 'abertura orçamento') return `o texto corrido ficou "${r.texto}"`
+      return r.corrigida === true ? null : 'a correção não ficou marcada como feita à mão'
+    },
+  },
 
   // ── Falha do banco é reconhecida ─────────────────────────────────────────
   {

@@ -116,6 +116,68 @@ const casos: { nome: string; rodar: () => string | null }[] = [
       return null
     },
   },
+  // ── O alcance, na medida (achado pela mutação) ────────────────────────────
+  {
+    nome: 'a borracha só alcança o raio dela, não o dobro',
+    rodar() {
+      // Diagonal comprida: a caixa do traço cobre o alcance da borracha, mas
+      // nenhum ponto dele chega a menos de 21px do dedo (raio 15).
+      const diagonal: Stroke = linha(0, 200, 0)
+      const pontos = []
+      for (let i = 0; i <= 200; i += 2) pontos.push({ x: i, y: i, p: 0.5, t: i * 4 })
+      const traco = { ...diagonal, points: pontos, bounds: boundsOf(pontos) }
+      const r = eraseAlongSegment([traco], { x: 100, y: 130 }, { x: 100, y: 130 }, 15, makeId)
+      return r.length === 0 ? null : 'apagou tinta que estava além do raio'
+    },
+  },
+  {
+    nome: 'traço que a borracha não tocou não é trocado por uma cópia',
+    rodar() {
+      // Mesmo caso, visto pelo que importa: se o traço volta como "alterado",
+      // ele ganha id novo, entra no voltar/avançar e perde a ligação com o áudio.
+      const pontos = []
+      for (let i = 0; i <= 200; i += 2) pontos.push({ x: i, y: i, p: 0.5, t: i * 4 })
+      const traco = { ...linha(0, 200, 0), points: pontos, bounds: boundsOf(pontos) }
+      const r = eraseAlongSegment([traco], { x: 100, y: 130 }, { x: 140, y: 170 }, 12, makeId)
+      return r.length === 0 ? null : `devolveu ${r.length} traço(s) como alterados sem terem sido tocados`
+    },
+  },
+  {
+    nome: 'o que a borracha alcança a menos do raio conta, mesmo fora da caixa do movimento',
+    rodar() {
+      // Traço reto e baixo (a caixa dele tem altura zero) e uma borracha
+      // parada 10px acima, com raio 15: a caixa do movimento sozinha não o
+      // alcançaria, o raio sim.
+      const r = eraseAlongSegment([linha(0, 200, 50)], { x: 100, y: 60 }, { x: 100, y: 60 }, 15, makeId)
+      if (r.length !== 1) return `esperava 1 traço afetado, veio ${r.length}`
+      return r[0].fragments.length === 2 ? null : `esperava 2 pedaços, veio ${r[0].fragments.length}`
+    },
+  },
+  {
+    nome: 'sobra de UM ponto só é pingo e some: não vira pedaço',
+    rodar() {
+      // Pontos a cada 2px: borracha em x=7 (raio 6) deixa só o ponto x=0.
+      const r = eraseAlongSegment([linha(0, 200, 50)], { x: 7, y: 50 }, { x: 200, y: 50 }, 6, makeId)
+      if (r.length !== 1) return `esperava 1 traço afetado, veio ${r.length}`
+      return r[0].fragments.length === 0 ? null : `ficou ${r[0].fragments.length} pedaço(s) de ${r[0].fragments[0].points.length} ponto(s)`
+    },
+  },
+  {
+    nome: 'a borracha não apaga o que está só no prolongamento do movimento',
+    rodar() {
+      // Passada curta de cima pra baixo; o resto do traço continua na mesma reta,
+      // bem mais embaixo. Tratar o movimento como reta infinita apagaria tudo.
+      const pontos = []
+      for (let y = 0; y <= 200; y += 2) pontos.push({ x: 100, y, p: 0.5, t: y * 4 })
+      for (let x = 100; x <= 300; x += 2) pontos.push({ x, y: 200, p: 0.5, t: 800 + x })
+      const traco = { ...linha(0, 200, 0), points: pontos, bounds: boundsOf(pontos) }
+      const r = eraseAlongSegment([traco], { x: 100, y: 0 }, { x: 100, y: 10 }, 5, makeId)
+      if (r.length !== 1) return `esperava 1 traço afetado, veio ${r.length}`
+      const pedaco = r[0].fragments[0]
+      if (!pedaco) return 'sumiu tudo'
+      return pedaco.points.length > 100 ? null : `sobraram só ${pedaco.points.length} pontos: apagou longe do dedo`
+    },
+  },
 ]
 
 console.log('\n  Borracha de ponta — corta só onde passou\n')

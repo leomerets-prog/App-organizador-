@@ -1,5 +1,5 @@
 import { casarTrechos, cortesDasMarcas, FIM_DO_AUDIO, INICIO_DO_AUDIO } from '../src/ata/trechos'
-import { ataEmTexto, montarAta, separarParticipantes } from '../src/ata/ata'
+import { ataEmTexto, duracaoFalada, montarAta, separarParticipantes } from '../src/ata/ata'
 import type { EntradaDaAta } from '../src/ata/ata'
 import {
   aceitaDoReconhecedor,
@@ -545,6 +545,101 @@ const casos: Caso[] = [
         }),
       )
       return ata.fluxogramas.join() === 'Fluxo de cadastro' ? null : ata.fluxogramas.join()
+    },
+  },
+  /*
+   * ── As fronteiras e os arredondamentos (achados pela mutação) ─────────────
+   */
+  {
+    nome: 'marca a exatos 2 s já é um corte; um pouco antes ainda abre a reunião',
+    rodar() {
+      const no = cortesDasMarcas([marca('a', INICIO_DO_AUDIO)], 60_000)
+      if (no.cortes.join() !== String(INICIO_DO_AUDIO)) return `aos 2000 ms os cortes foram: ${no.cortes}`
+      if (no.marcaDoTrecho[0] !== undefined) return `o trecho 0 ficou de ${no.marcaDoTrecho[0]}`
+      const antes = cortesDasMarcas([marca('a', INICIO_DO_AUDIO - 1)], 60_000)
+      return antes.cortes.length === 0 && antes.marcaDoTrecho[0] === 'a'
+        ? null
+        : `aos 1999 ms: cortes ${antes.cortes}, abertura ${antes.marcaDoTrecho[0]}`
+    },
+  },
+  {
+    nome: 'marca a exatos 1,5 s do fim ainda corta; um pouco depois, não',
+    rodar() {
+      const limite = 60_000 - FIM_DO_AUDIO
+      const no = cortesDasMarcas([marca('a', limite)], 60_000)
+      if (no.cortes.join() !== String(limite)) return `no limite os cortes foram: ${no.cortes}`
+      const depois = cortesDasMarcas([marca('a', limite + 1)], 60_000)
+      return depois.cortes.length === 0 ? null : `um ms depois do limite ainda cortou: ${depois.cortes}`
+    },
+  },
+  {
+    nome: 'corte em ms quebrado chega ao plugin como número inteiro',
+    rodar() {
+      const d = cortesDasMarcas([marca('a', 12_345.6), marca('b', 30_000.4)], 60_000)
+      if (!d.cortes.every(Number.isInteger)) return `cortes quebrados: ${d.cortes}`
+      return d.cortes.join() === '12346,30000' ? null : `cortes: ${d.cortes}`
+    },
+  },
+  {
+    nome: 'observação igual ao texto da linha não se repete na ata; diferente, sim',
+    rodar() {
+      const igual = montarAta(entrada({ itens: [item('nota', 'Ligar pro Zé', 10, { note: 'Ligar pro Zé' })] }))
+      if (igual.anotacoes[0]?.observacao !== undefined) return `repetiu: ${igual.anotacoes[0]?.observacao}`
+      if (ataEmTexto(igual).includes('Ligar pro Zé — Ligar pro Zé')) return 'o texto da ata repete a linha'
+      const outra = montarAta(entrada({ itens: [item('nota', 'Ligar pro Zé', 10, { note: 'depois das 14h' })] }))
+      return outra.anotacoes[0]?.observacao === 'depois das 14h' ? null : 'a observação de verdade sumiu'
+    },
+  },
+  {
+    nome: 'fala de gravação de OUTRA folha não entra nesta ata',
+    rodar() {
+      const daqui = gravacao({ id: 'g1', marcas: [marca('x', 30_000, 'Daqui')] })
+      const dali = gravacao({
+        id: 'g2',
+        pageId: 'outra',
+        marcas: [marca('y', 40_000, 'Dali')],
+        transcricao: doReconhecedor('conversa de outra reunião'),
+      })
+      const ata = montarAta(entrada({ gravacoes: [daqui, dali] }))
+      const titulos = ata.topicos.map((t) => t.titulo).join()
+      if (titulos !== 'Daqui') return `tópicos: ${titulos}`
+      if (ata.registroCorrido !== undefined) return `o registro trouxe: ${ata.registroCorrido}`
+      return ata.falaRascunho ? 'a fala da outra folha acusou rascunho aqui' : null
+    },
+  },
+  {
+    nome: 'marca marcada depois da transcrição aparece sem fala, e o aviso conta quantas',
+    rodar() {
+      const g = gravacao({
+        marcas: [marca('a', 30_000, 'Com fala'), marca('b', 90_000, 'Sem fala')],
+        transcricao: doReconhecedor('tudo', {
+          trechos: [trecho(0, 30_000, ''), trecho(30_000, 90_000, 'isto foi dito', 'a')],
+        }),
+      })
+      const ata = montarAta(entrada({ gravacoes: [g] }))
+      const sem = ata.topicos.find((t) => t.marcaId === 'b')
+      if (!sem) return 'o tópico sem fala sumiu da ata'
+      if (sem.fala !== undefined) return `o tópico sem trecho ganhou fala: ${sem.fala}`
+      return ata.avisos.some((a) => a.includes('1 tópico(s) marcado(s) depois da transcrição'))
+        ? null
+        : `avisos: ${ata.avisos.join(' / ')}`
+    },
+  },
+  {
+    nome: 'a duração da conversa é arredondada, não cortada: 1 min 40 s são 2 min',
+    rodar() {
+      const pares: [number, string][] = [
+        [40_000, '40 s'],
+        [100_000, '2 min'],
+        [3_900_000, '1 h 05 min'],
+        [5_430_000, '1 h 31 min'],
+      ]
+      for (const [ms, esperado] of pares) {
+        const veio = duracaoFalada(ms)
+        if (veio !== esperado) return `${ms} ms saiu "${veio}", esperava "${esperado}"`
+      }
+      const ata = montarAta(entrada({ gravacoes: [gravacao({ durationMs: 100_000 })] }))
+      return ata.duracao === '2 min' ? null : `o cabeçalho diz "${ata.duracao}"`
     },
   },
 ]

@@ -11,7 +11,7 @@
     "typecheck": "tsc -b --noEmit",
     "test:scribble": "esbuild tools/scribble-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/scribble-test.mjs --log-level=error && node node_modules/.cache/scribble-test.mjs",
     "test:erase": "esbuild tools/erase-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/erase-test.mjs --log-level=error && node node_modules/.cache/erase-test.mjs",
-    "test": "npm run check:java && npm run test:reamostra && npm run test:scribble && npm run test:erase && npm run test:fields && npm run test:zones && npm run test:central && npm run test:audio && npm run test:ata && npm run test:flow && npm run test:history && npm run test:buracos",
+    "test": "npm run check:java && npm run test:reamostra && npm run test:scribble && npm run test:erase && npm run test:fields && npm run test:zones && npm run test:central && npm run test:audio && npm run test:ata && npm run test:flow && npm run test:history && npm run test:buracos && npm run test:prefs && npm run test:viewport && npm run test:geometry && npm run test:export",
     "test:fields": "esbuild tools/fields-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/fields-test.mjs --log-level=error && node node_modules/.cache/fields-test.mjs",
     "test:zones": "esbuild tools/zones-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/zones-test.mjs --log-level=error && node node_modules/.cache/zones-test.mjs",
     "test:history": "esbuild tools/history-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/history-test.mjs --log-level=error && node node_modules/.cache/history-test.mjs",
@@ -21,7 +21,11 @@
     "check:java": "bash tools/check-java.sh",
     "test:reamostra": "bash tools/resample-test.sh",
     "test:ata": "esbuild tools/ata-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/ata-test.mjs --log-level=error && node node_modules/.cache/ata-test.mjs",
-    "test:buracos": "esbuild tools/buracos-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/buracos-test.mjs --log-level=error && node node_modules/.cache/buracos-test.mjs"
+    "test:buracos": "esbuild tools/buracos-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/buracos-test.mjs --log-level=error && node node_modules/.cache/buracos-test.mjs",
+    "test:prefs": "esbuild tools/prefs-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/prefs-test.mjs --log-level=error && node node_modules/.cache/prefs-test.mjs",
+    "test:viewport": "esbuild tools/viewport-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/viewport-test.mjs --log-level=error && node node_modules/.cache/viewport-test.mjs",
+    "test:geometry": "esbuild tools/geometry-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/geometry-test.mjs --log-level=error && node node_modules/.cache/geometry-test.mjs",
+    "test:export": "esbuild tools/export-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/export-test.mjs --log-level=error && node node_modules/.cache/export-test.mjs"
   },
   "dependencies": {
     "@capacitor/core": "^6.2.1",
