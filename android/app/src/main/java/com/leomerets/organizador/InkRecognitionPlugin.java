@@ -275,11 +275,14 @@ public class InkRecognitionPlugin extends Plugin {
                     String texto = candidates.isEmpty() ? "" : candidates.get(0).getText();
                     // O que entrou e o que saiu, no log: quando o reconhecedor
                     // devolve vazio sem erro, é só por aqui que se enxerga o
-                    // que ele recebeu.
+                    // que ele recebeu. O TEXTO lido não vai: o log do Android
+                    // é legível por qualquer um com o cabo e a depuração
+                    // ligada, e a anotação é dele. O tamanho basta pra saber
+                    // se leu alguma coisa.
                     Log.i(TAG, "organizador: leitura — " + strokes.length()
                             + " traço(s), área " + width + "x" + height
                             + ", " + candidates.size() + " candidato(s)"
-                            + (texto.isEmpty() ? "" : ", texto \"" + texto + "\""));
+                            + ", " + texto.length() + " caractere(s)");
                     JSObject result = new JSObject();
                     result.put("text", texto);
                     call.resolve(result);

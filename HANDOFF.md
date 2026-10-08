@@ -1033,6 +1033,30 @@ mexe SÓ no que é dele. O resto do registro vem do estado de AGORA, nunca de um
 cópia tirada antes da espera. `tools/buracos-test.ts` tem um caso por regra, e
 cada um foi conferido dos dois lados: com o conserto apagado, ele falha.
 
+**O lado Android e a esteira** (revisor de segurança):
+
+- **A esteira publicava de QUALQUER ramo.** O tablet baixa da Release
+  "ultimo" o que estiver lá; um ramo velho (banco versão 2) ou a repetição de
+  uma execução antiga punha por cima um app que não abre o banco do aparelho
+  — e o caminho óbvio dali, desinstalar, apaga tudo. Agora a publicação é um
+  trabalho à parte (`publicar`) que só publica se o commit publicado estiver
+  no histórico deste e o banco não tiver versão menor. O corpo da Release
+  carrega `commit <sha> (banco N)` e é isso que a próxima execução confere —
+  não mude o formato sem mudar a conferência. Depois de um squash ou de
+  reescrever o histórico de propósito: rodar a esteira à mão com `forcar`.
+- **Tela apagada grava silêncio.** App que sai da frente tem o microfone
+  silenciado pelo Android, sem erro nenhum. A tela fica acesa enquanto grava
+  (Wake Lock), e se o app saiu da frente mesmo assim (botão de desligar), a
+  barra avisa que aquele trecho pode estar mudo. Não foi visto no tablet.
+- **Ações de terceiros presas a commit**, não a etiqueta: elas rodam com a
+  chave de assinatura no disco. Só o trabalho de publicar pode escrever no
+  repositório.
+- **Salvar que não liberou o arquivo agora FALHA**, em vez de dizer "salvo":
+  arquivo pendente é invisível e o Android o apaga em uma semana. E a tela diz
+  o nome que o arquivo ganhou de verdade ("nome (1).txt" quando já havia um).
+- O texto lido da letra saiu do log do Android; o reconhecedor de fala e o
+  decodificador são soltos também quando falham no meio.
+
 **Os testes foram testados.** Um agente plantou 166 defeitos realistas, um de
 cada vez (trocar `<` por `<=`, esquecer um campo, perder um byte por pedaço do
 áudio salvo), e rodou os testes contra cada um. 73 passavam despercebidos;
@@ -1247,6 +1271,8 @@ vivem em refs, fora do ciclo do React, e o canvas é redesenhado por
 | Campo de formulário grava sozinho, e só o que foi digitado | Gravar só ao sair do campo perde o que estava sendo digitado se o app fechar; gravar o valor da tela ao sair sem digitar escreve texto velho por cima do novo |
 | Componente com estado local recebe `key` de quem ele mostra | Sem isso, trocar o registro troca o cabeçalho e mantém os campos — e o próximo blur grava um registro no outro |
 | Tela de erro sempre tem uma saída que não depende do que quebrou | "Tentar de novo" reabre a mesma folha; se é ela que quebra, é um laço |
+| Só publica o que SUCEDE a versão publicada | O tablet instala o que estiver na Release. Versão mais velha por cima = banco que o app não lê, e daí a desinstalar é um passo |
+| Gravando, a tela não apaga | O Android silencia o microfone de app fora da frente, sem erro: a reunião voltaria com trechos mudos |
 | Agentes em ondas de até três | Oito ao mesmo tempo estouraram o limite de uso da sessão no meio da revisão, duas vezes |
 
 ---
@@ -1337,6 +1363,12 @@ folha ajustada como modelo — é a próxima etapa 2.
 de uma gravação, a tela de tropeço cobre o botão Parar. O áudio não se perde —
 os pedaços já estão no banco e "Tentar de novo" recupera a gravação — mas a
 gravação para ali.
+
+**O APK publicado é de depuração** (`assembleDebug`). Com o cabo e a depuração
+USB ligada, dá pra copiar os dados do app sem root. Trocar pra
+`assembleRelease` usa a mesma chave e atualiza por cima sem perder nada — mas
+muda o tipo de compilação de tudo de uma vez, então fica pra uma rodada própria,
+com a verificação no aparelho virtual conferindo a atualização antes.
 
 **A gravação em pedaços não foi vista no tablet.** Gravar pedaço por pedaço,
 recuperar depois de recarregar e o microfone que cai foram medidos no Chromium.

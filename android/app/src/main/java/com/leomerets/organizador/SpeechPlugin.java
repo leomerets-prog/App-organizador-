@@ -479,7 +479,19 @@ public class SpeechPlugin extends Plugin {
             reconhecedor = SpeechRecognizer.createSpeechRecognizer(getContext());
         }
 
-        final ParcelFileDescriptor fd = ParcelFileDescriptor.open(pcm, ParcelFileDescriptor.MODE_READ_ONLY);
+        final ParcelFileDescriptor fd;
+        try {
+            fd = ParcelFileDescriptor.open(pcm, ParcelFileDescriptor.MODE_READ_ONLY);
+        } catch (Exception erro) {
+            // O reconhecedor já foi criado: sem isto, cada tentativa que falha
+            // aqui deixa um serviço de fala preso até o app fechar.
+            try {
+                reconhecedor.destroy();
+            } catch (Throwable ignored) {
+                // O erro que importa é o de abrir o arquivo.
+            }
+            throw erro;
+        }
 
         Intent pedido = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         pedido.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
@@ -629,7 +641,13 @@ public class SpeechPlugin extends Plugin {
             @Override public void onEvent(int type, Bundle params) { }
         });
 
-        reconhecedor.startListening(pedido);
+        try {
+            reconhecedor.startListening(pedido);
+        } catch (RuntimeException erro) {
+            // Nenhum aviso vai chegar, então ninguém mais vai soltar.
+            soltar.run();
+            throw erro;
+        }
 
         // Rede de segurança: reconhecedor que não volta não pode deixar a tela
         // esperando pra sempre.
@@ -1043,11 +1061,17 @@ public class SpeechPlugin extends Plugin {
             }
         } finally {
             if (decodificador != null) {
+                // Separados: `stop` falha num decodificador que nem chegou a
+                // ser configurado, e aí o `release` não rodava nunca.
                 try {
                     decodificador.stop();
-                    decodificador.release();
                 } catch (Throwable ignored) {
                     // Soltar é cortesia.
+                }
+                try {
+                    decodificador.release();
+                } catch (Throwable ignored) {
+                    // Idem.
                 }
             }
             try {

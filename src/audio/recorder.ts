@@ -60,6 +60,8 @@ export function isRecordingSupported(): boolean {
 export interface OpcoesDeGravacao {
   aoPedaco?: (pedaco: Blob, ordem: number) => void
   aoInterromper?: (motivo: string) => void
+  /** O app voltou pra frente depois de `msFora` com a tela apagada ou escondido. */
+  aoVoltar?: (msFora: number) => void
 }
 
 export async function startRecording(opcoes: OpcoesDeGravacao = {}): Promise<RecorderHandle> {
@@ -136,11 +138,13 @@ export async function startRecording(opcoes: OpcoesDeGravacao = {}): Promise<Rec
   recorder.start(1000)
 
   const meter = createLevelMeter(stream)
+  const soltarTela = manterTelaAcesa(opcoes.aoVoltar)
 
   let solto = false
   const release = () => {
     if (solto) return
     solto = true
+    soltarTela()
     meter.dispose()
     for (const track of stream.getTracks()) track.stop()
   }
@@ -172,6 +176,65 @@ export async function startRecording(opcoes: OpcoesDeGravacao = {}): Promise<Rec
       }
       release()
     },
+  }
+}
+
+/**
+ * A tela não apaga enquanto grava.
+ *
+ * App que sai da frente — tela apagada pelo tempo de espera, botão de
+ * desligar, outro app aberto por cima — tem o microfone SILENCIADO pelo
+ * Android (desde a versão 9). A trilha não acaba e o gravador não reclama:
+ * ele continua gravando silêncio, e a reunião de uma hora volta com
+ * quarenta minutos mudos. Com a caneta parada por alguns minutos, a tela
+ * apagaria sozinha no meio da reunião.
+ *
+ * Aqui a tela fica acesa enquanto grava (a trava cai sozinha quando o app
+ * vai pro fundo, e é pedida de novo quando ele volta). E se mesmo assim o
+ * app saiu da frente — ele apertou o botão de desligar — `aoVoltar` diz por
+ * quanto tempo, pra tela avisar que aquele trecho pode estar mudo.
+ */
+function manterTelaAcesa(aoVoltar?: (msFora: number) => void): () => void {
+  type Trava = { release: () => Promise<void> }
+  const pedidos = (navigator as Navigator & { wakeLock?: { request: (tipo: 'screen') => Promise<Trava> } })
+    .wakeLock
+  let trava: Trava | null = null
+  let ativa = true
+  let saiuEm: number | null = null
+
+  const pedir = () => {
+    if (!pedidos || !ativa || document.visibilityState !== 'visible') return
+    pedidos
+      .request('screen')
+      .then((t) => {
+        if (ativa) trava = t
+        else void t.release().catch(() => {})
+      })
+      // Sem permissão ou sem suporte: grava do mesmo jeito.
+      .catch(() => {})
+  }
+
+  const aoMudar = () => {
+    if (document.visibilityState === 'hidden') {
+      saiuEm ??= Date.now()
+      return
+    }
+    if (saiuEm !== null) {
+      const fora = Date.now() - saiuEm
+      saiuEm = null
+      if (fora > 2000) aoVoltar?.(fora)
+    }
+    pedir()
+  }
+
+  document.addEventListener('visibilitychange', aoMudar)
+  pedir()
+
+  return () => {
+    ativa = false
+    document.removeEventListener('visibilitychange', aoMudar)
+    void trava?.release().catch(() => {})
+    trava = null
   }
 }
 

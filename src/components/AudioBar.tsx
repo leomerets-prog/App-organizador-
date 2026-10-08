@@ -350,6 +350,13 @@ export function AudioBar() {
           setError(`${motivo} O que foi gravado até aqui foi guardado.`)
           void finishRef.current()
         },
+        aoVoltar: (msFora) => {
+          const minutos = Math.max(1, Math.round(msFora / 60000))
+          setError(
+            `O app ficou fora da tela por ${msFora < 60000 ? 'alguns segundos' : `${minutos} min`} durante a gravação. ` +
+              'O Android costuma silenciar o microfone nesse tempo — esse trecho pode ter ficado mudo.',
+          )
+        },
       })
     } catch (err) {
       setError(

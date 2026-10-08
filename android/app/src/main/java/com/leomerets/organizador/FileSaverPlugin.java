@@ -2,6 +2,7 @@ package com.leomerets.organizador;
 
 import android.content.ContentResolver;
 import android.content.ContentValues;
+import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -134,6 +135,7 @@ public class FileSaverPlugin extends Plugin {
             saida.fluxo.flush();
             saida.fluxo.close();
             publicar(saida);
+            if (saida.uri != null) saida.onde = "Downloads/" + nomeGravado(saida.uri, saida.onde);
             JSObject resposta = new JSObject();
             resposta.put("onde", saida.onde);
             call.resolve(resposta);
@@ -234,16 +236,41 @@ public class FileSaverPlugin extends Plugin {
         return saida;
     }
 
-    /** Tira o "pendente": é só agora que o arquivo aparece pros outros apps. */
+    /**
+     * Tira o "pendente": é só agora que o arquivo aparece pros outros apps.
+     *
+     * Se isso falhar, o salvar FALHA. Antes a falha ia só pro log e a tela
+     * dizia "salvo em Downloads" — mas arquivo pendente fica invisível, e o
+     * Android apaga os pendentes esquecidos depois de uma semana. Ele acharia
+     * que tem a cópia de segurança e não teria.
+     */
     private void publicar(Saida saida) {
         if (saida.uri == null) return;
-        try {
-            ContentValues valores = new ContentValues();
-            valores.put(MediaStore.MediaColumns.IS_PENDING, 0);
-            getContext().getContentResolver().update(saida.uri, valores, null, null);
+        ContentValues valores = new ContentValues();
+        valores.put(MediaStore.MediaColumns.IS_PENDING, 0);
+        int mudou = getContext().getContentResolver().update(saida.uri, valores, null, null);
+        if (mudou < 1) throw new IllegalStateException("O arquivo foi escrito, mas o Android não o liberou.");
+    }
+
+    /**
+     * O nome que o arquivo ganhou de verdade.
+     *
+     * Com outro de mesmo nome na pasta, o Android grava "nome (1).txt" — e a
+     * tela dizia o nome pedido, apontando pro arquivo ANTIGO. Salvar a
+     * transcrição de novo depois de corrigir é exatamente esse caso.
+     */
+    private String nomeGravado(Uri uri, String ondePedido) {
+        String pedido = ondePedido.startsWith("Downloads/") ? ondePedido.substring("Downloads/".length()) : ondePedido;
+        try (Cursor linha = getContext().getContentResolver()
+                .query(uri, new String[] { MediaStore.MediaColumns.DISPLAY_NAME }, null, null, null)) {
+            if (linha != null && linha.moveToFirst()) {
+                String nome = linha.getString(0);
+                if (nome != null && !nome.isEmpty()) return nome;
+            }
         } catch (Throwable erro) {
-            Log.w(TAG, "organizador: o arquivo foi escrito mas continuou pendente", erro);
+            Log.w(TAG, "organizador: não consegui ler o nome final do arquivo", erro);
         }
+        return pedido;
     }
 
     private void descartar(Saida saida) {
